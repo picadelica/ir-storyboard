@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    volumes:
+      - storyboard-data:/app/data    # SQLite persists across restarts
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    # Bound to localhost only — for public exposure use docker-compose.prod.yml
+    # (which adds Caddy with HTTPS in front).
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8000}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  storyboard-data:

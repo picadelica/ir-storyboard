@@ -1,0 +1,5 @@
+# Core prototype runs on stdlib only.
+# Add real LLM/web-search providers below when wiring production:
+#   anthropic>=0.40
+#   openai>=1.50
+#   tavily-python>=0.5

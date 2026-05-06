@@ -1,0 +1,48 @@
+# --- macOS / editors ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- secrets / local env ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# --- SQLite + runtime data ---
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# --- generated artifacts ---
+outputs/
+
+# --- Node / Vite ---
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/npm-debug.log*
+frontend/.env.local
+frontend/.env.*.local
+
+# --- Backups ---
+backups/
+
+# --- Logs ---
+*.log

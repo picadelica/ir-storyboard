@@ -1,0 +1,24 @@
+# Caddy auto-issues a Let's Encrypt cert for {$DOMAIN}.
+# It reverse-proxies everything to the frontend container, which in turn
+# serves static React assets and proxies /api/* to the backend container
+# via its internal nginx.
+
+{
+    email {$ADMIN_EMAIL}
+}
+
+{$DOMAIN} {
+    encode gzip zstd
+
+    # Forward original client IP for backend logs / audit
+    reverse_proxy frontend:80 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
