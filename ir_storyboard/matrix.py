@@ -37,14 +37,30 @@ def seed_layers(conn: sqlite3.Connection) -> None:
 # ---------- clients ----------
 
 def upsert_client(conn: sqlite3.Connection, client_id: str, name: str,
-                  sector: str = "", one_liner: str = "") -> None:
+                  sector: str = "", one_liner: str = "",
+                  founder_name: str = "", founder_handle: str = "",
+                  aliases: Optional[List[str]] = None, notes: str = "") -> None:
     conn.execute(
-        """INSERT INTO clients (id, name, sector, one_liner) VALUES (?, ?, ?, ?)
+        """INSERT INTO clients (id, name, sector, one_liner, founder_name, founder_handle, aliases, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name, sector=excluded.sector, one_liner=excluded.one_liner""",
-        (client_id, name, sector, one_liner),
+                name=excluded.name, sector=excluded.sector, one_liner=excluded.one_liner,
+                founder_name=excluded.founder_name, founder_handle=excluded.founder_handle,
+                aliases=excluded.aliases, notes=excluded.notes""",
+        (client_id, name, sector, one_liner,
+         founder_name, founder_handle, json.dumps(aliases or []), notes),
     )
     conn.commit()
+
+
+def count_client_facts(conn: sqlite3.Connection, client_id: str) -> int:
+    row = conn.execute(
+        """SELECT COUNT(*) FROM facts f
+            JOIN cells c ON c.id = f.cell_id
+            WHERE c.client_id = ?""",
+        (client_id,),
+    ).fetchone()
+    return row[0] if row else 0
 
 
 def list_clients(conn: sqlite3.Connection) -> List[sqlite3.Row]:

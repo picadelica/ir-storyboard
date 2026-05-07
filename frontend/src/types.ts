@@ -23,6 +23,17 @@ export interface Client {
   name: string;
   sector?: string;
   one_liner?: string;
+  founder_name?: string;
+  founder_handle?: string;
+  aliases?: string[];
+  notes?: string;
+}
+
+export interface SeedImportResult {
+  client_id: string;
+  fact_count: number;
+  source_count: number;
+  track_count: number;
 }
 
 export interface CellSummary {

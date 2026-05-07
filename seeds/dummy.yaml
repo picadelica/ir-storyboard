@@ -1,0 +1,38 @@
+client:
+  id: dummy-test
+  name: Dummy Test Co
+  sector: saas
+  one_liner: Testing client for CI
+founder_name: Test Founder
+founder_handle: testfounder
+aliases: []
+initial_quarter: 2026Q3
+seed_tracks:
+  - name: "Product story"
+    angle: "Best product in the market"
+    target_layer_ids: [6]
+    target_subsection_ids: ["6.1"]
+    priority: 1
+seed_facts:
+  - subsection_id: "2.1"
+    text: "Founder built three companies before Dummy, exiting two successfully."
+    flag: green
+    channel: archival
+    source_url: https://example.com/founder-bio
+    source_title: Founder Bio
+    evidence_snippet: "Founded three companies over 12 years, two successful exits."
+  - subsection_id: "6.1"
+    text: "Product serves 5,000 paying customers with 99.9% uptime SLA."
+    flag: green
+    channel: online_research
+    source_url: https://example.com/product
+    source_title: Product Page
+    evidence_snippet: "5,000 paying customers, 99.9% uptime guaranteed by SLA."
+  - subsection_id: "1.1"
+    text: "Founder origin story not yet documented."
+    flag: grey
+    channel: offline_interview
+    source_title: "Interview placeholder 2026-05-07"
+    source_url: ""
+    evidence_snippet: ""
+notes: "Dummy client for automated tests."

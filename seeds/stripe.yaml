@@ -1,0 +1,46 @@
+client:
+  id: stripe
+  name: Stripe
+  sector: fintech
+  one_liner: Internet payments infrastructure
+founder_name: Patrick Collison
+founder_handle: patrickc
+aliases:
+  - Stripe Inc.
+  - Stripe Inc
+initial_quarter: 2026Q3
+seed_tracks:
+  - name: "AI infra positioning"
+    angle: "Stripe — единственный rails для AI-нативных компаний"
+    target_layer_ids: [6, 8]
+    target_subsection_ids: ["6.1", "6.3", "8.2"]
+    priority: 1
+seed_facts:
+  - subsection_id: "2.1"
+    text: "Patrick Collison founded Auctomatic at 17, sold for $5M to Live Current."
+    flag: green
+    channel: archival
+    source_url: https://en.wikipedia.org/wiki/Patrick_Collison
+    source_title: Patrick Collison — Wikipedia
+    evidence_snippet: >
+      In 2007, while still in school, Collison founded Auctomatic with his brother John;
+      it was acquired by Live Current Media in 2008 for US$5 million.
+  - subsection_id: "6.1"
+    text: "Stripe processes hundreds of billions in payments annually via a simple API."
+    flag: green
+    channel: online_research
+    source_url: https://stripe.com/about
+    source_title: Stripe — About
+    evidence_snippet: >
+      Stripe is a financial infrastructure platform for businesses. Millions of companies
+      use Stripe to accept payments, grow revenue, and accelerate new business opportunities.
+  - subsection_id: "8.2"
+    text: "Global digital payments market projected to exceed $20T by 2026."
+    flag: green
+    channel: online_research
+    source_url: https://www.statista.com/statistics/1179648/digital-payments-worldwide/
+    source_title: Statista — Digital Payments Worldwide
+    evidence_snippet: >
+      The total transaction value in the Digital Payments market is projected to reach
+      US$20.37tn in 2026.
+notes: "Целевой клиент пилота за рубежом."

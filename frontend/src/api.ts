@@ -1,6 +1,6 @@
 import type {
   Artifact, ArtifactSummary, CellSummary, Client, CycleKind,
-  Fact, Layer, PunchList, Scorecard, Track,
+  Fact, Layer, PunchList, Scorecard, SeedImportResult, Track,
 } from "./types";
 
 const API_BASE = "/api";
@@ -31,6 +31,11 @@ export const api = {
     call<{ ok: boolean; client_id: string }>("/clients/accumulator/seed-accumulator", {
       method: "POST", body: "{}",
     }),
+  importSeedYaml: (clientId: string, yamlContent: string, force = false) =>
+    call<SeedImportResult>(
+      `/clients/${clientId}/import-seed-yaml${force ? "?force=true" : ""}`,
+      { method: "POST", body: JSON.stringify({ yaml_content: yamlContent }) },
+    ),
 
   matrixView: (clientId: string) => call<CellSummary[]>(`/clients/${clientId}/matrix`),
 

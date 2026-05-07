@@ -12,11 +12,12 @@ import json
 import sqlite3
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Response
+import yaml
+from fastapi import FastAPI, HTTPException, Depends, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Make sure the ir_storyboard package is importable when running from repo root
 ROOT = Path(__file__).resolve().parent.parent
@@ -57,6 +58,50 @@ class ClientOut(BaseModel):
     name: str
     sector: Optional[str] = None
     one_liner: Optional[str] = None
+    founder_name: Optional[str] = None
+    founder_handle: Optional[str] = None
+    aliases: Optional[List[str]] = None
+    notes: Optional[str] = None
+
+
+class SeedFactIn(BaseModel):
+    subsection_id: str
+    text: str
+    flag: Literal["green", "red", "grey"]
+    channel: Literal["online_research", "online_interview", "archival", "offline_interview"]
+    source_title: str = ""
+    source_url: str = ""
+    evidence_snippet: str = ""
+
+
+class SeedTrackIn(BaseModel):
+    name: str
+    angle: str = ""
+    target_layer_ids: List[int] = []
+    target_subsection_ids: List[str] = []
+    priority: int = 1
+
+
+class ClientSeedIn(BaseModel):
+    client: ClientOut
+    founder_name: str = ""
+    founder_handle: str = ""
+    aliases: List[str] = []
+    initial_quarter: Optional[str] = None
+    seed_facts: List[SeedFactIn] = []
+    seed_tracks: List[SeedTrackIn] = []
+    notes: str = ""
+
+
+class ClientSeedYamlIn(BaseModel):
+    yaml_content: str
+
+
+class SeedImportResult(BaseModel):
+    client_id: str
+    fact_count: int
+    source_count: int
+    track_count: int
 
 
 class SubsectionOut(BaseModel):
@@ -209,9 +254,83 @@ def get_client(client_id: str, conn=Depends(get_conn)):
 
 @app.post("/api/clients", response_model=ClientOut)
 def upsert_client(c: ClientOut, conn=Depends(get_conn)):
-    matrix.upsert_client(conn, c.id, c.name, sector=c.sector or "", one_liner=c.one_liner or "")
+    matrix.upsert_client(
+        conn, c.id, c.name,
+        sector=c.sector or "", one_liner=c.one_liner or "",
+        founder_name=c.founder_name or "", founder_handle=c.founder_handle or "",
+        aliases=c.aliases or [], notes=c.notes or "",
+    )
     matrix.ensure_full_grid(conn, c.id)
     return c
+
+
+def _do_import_seed(conn, client_id: str, seed: ClientSeedIn) -> SeedImportResult:
+    """Core import logic shared by JSON and YAML endpoints."""
+    c = seed.client
+    matrix.upsert_client(
+        conn, client_id, c.name,
+        sector=c.sector or "", one_liner=c.one_liner or "",
+        founder_name=seed.founder_name or c.founder_name or "",
+        founder_handle=seed.founder_handle or c.founder_handle or "",
+        aliases=seed.aliases or c.aliases or [],
+        notes=seed.notes or c.notes or "",
+    )
+    matrix.ensure_full_grid(conn, client_id)
+
+    fact_count = 0
+    source_count = 0
+    for sf in seed.seed_facts:
+        src_id = matrix.add_source(conn, channel=sf.channel,
+                                   title=sf.source_title, url=sf.source_url)
+        matrix.add_fact(conn, client_id=client_id, subsection_id=sf.subsection_id,
+                        text=sf.text, flag=sf.flag, source_id=src_id)
+        fact_count += 1
+        source_count += 1
+
+    track_count = 0
+    if seed.initial_quarter and seed.seed_tracks:
+        plan_id = matrix.upsert_plan(conn, client_id, seed.initial_quarter)
+        for st in seed.seed_tracks:
+            matrix.add_track(conn, plan_id=plan_id, name=st.name, angle=st.angle,
+                             target_layer_ids=st.target_layer_ids,
+                             target_subsection_ids=st.target_subsection_ids,
+                             priority=st.priority)
+            track_count += 1
+
+    return SeedImportResult(client_id=client_id, fact_count=fact_count,
+                            source_count=source_count, track_count=track_count)
+
+
+@app.post("/api/clients/{client_id}/import-seed", response_model=SeedImportResult)
+def import_seed(client_id: str, body: ClientSeedIn,
+                force: bool = Query(default=False),
+                conn=Depends(get_conn)):
+    if body.client.id != client_id:
+        raise HTTPException(400, "client.id in body must match URL client_id")
+    existing_facts = matrix.count_client_facts(conn, client_id)
+    if existing_facts > 0 and not force:
+        raise HTTPException(409, f"Client already seeded ({existing_facts} facts). Use ?force=true to add more.")
+    return _do_import_seed(conn, client_id, body)
+
+
+@app.post("/api/clients/{client_id}/import-seed-yaml", response_model=SeedImportResult)
+def import_seed_yaml(client_id: str, body: ClientSeedYamlIn,
+                     force: bool = Query(default=False),
+                     conn=Depends(get_conn)):
+    try:
+        data = yaml.safe_load(body.yaml_content)
+    except yaml.YAMLError as e:
+        raise HTTPException(400, f"Invalid YAML: {e}")
+    try:
+        seed = ClientSeedIn(**data)
+    except Exception as e:
+        raise HTTPException(422, f"YAML structure error: {e}")
+    if seed.client.id != client_id:
+        raise HTTPException(400, "client.id in YAML must match URL client_id")
+    existing_facts = matrix.count_client_facts(conn, client_id)
+    if existing_facts > 0 and not force:
+        raise HTTPException(409, f"Client already seeded ({existing_facts} facts). Use ?force=true to add more.")
+    return _do_import_seed(conn, client_id, seed)
 
 
 @app.post("/api/clients/{client_id}/seed-accumulator")

@@ -19,10 +19,22 @@ def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
     return conn
 
 
+def _add_column_if_missing(conn: sqlite3.Connection, table: str,
+                           column: str, definition: str) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, then apply additive migrations."""
     sql = SCHEMA_PATH.read_text(encoding="utf-8")
     conn.executescript(sql)
+    # additive migrations — safe to run on existing DBs
+    _add_column_if_missing(conn, "clients", "founder_name", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "clients", "founder_handle", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "clients", "aliases", "TEXT DEFAULT '[]'")
+    _add_column_if_missing(conn, "clients", "notes", "TEXT DEFAULT ''")
     conn.commit()
 
 
