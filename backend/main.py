@@ -239,9 +239,20 @@ def get_channels():
 
 # ---------- clients ----------
 
+def _row_to_client(row) -> ClientOut:
+    d = dict(row)
+    if isinstance(d.get("aliases"), str):
+        try:
+            import json as _json
+            d["aliases"] = _json.loads(d["aliases"])
+        except Exception:
+            d["aliases"] = []
+    return ClientOut(**d)
+
+
 @app.get("/api/clients", response_model=List[ClientOut])
 def list_clients(conn=Depends(get_conn)):
-    return [ClientOut(**dict(r)) for r in matrix.list_clients(conn)]
+    return [_row_to_client(r) for r in matrix.list_clients(conn)]
 
 
 @app.get("/api/clients/{client_id}", response_model=ClientOut)
@@ -249,7 +260,7 @@ def get_client(client_id: str, conn=Depends(get_conn)):
     row = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
     if not row:
         raise HTTPException(404, "client not found")
-    return ClientOut(**dict(row))
+    return _row_to_client(row)
 
 
 @app.post("/api/clients", response_model=ClientOut)
