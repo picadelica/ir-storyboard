@@ -147,6 +147,41 @@ def cmd_outputs(args) -> None:
         print(f"  {k:24s}  {p}")
 
 
+def cmd_backfill_snippets(args) -> None:
+    conn = db.connect()
+    db.init_schema(conn)
+    rows = conn.execute(
+        """SELECT f.id, f.text, s.url AS source_url, s.channel
+            FROM facts f
+            LEFT JOIN sources s ON s.id = f.source_id
+            WHERE (f.evidence_snippet IS NULL OR f.evidence_snippet = '')
+              AND s.channel IN ('online_research', 'online_interview', 'archival')
+              AND f.cell_id IN (
+                  SELECT id FROM cells WHERE client_id = ?
+              )
+            ORDER BY f.id""",
+        (args.client,),
+    ).fetchall()
+    if not rows:
+        print(f"No facts without evidence_snippet for client '{args.client}'.")
+        return
+    print(f"Found {len(rows)} fact(s) without evidence_snippet for '{args.client}'.\n")
+    for row in rows:
+        print(f"Fact #{row['id']} [{row['channel']}]:")
+        print(f"  text: {row['text'][:80]}...")
+        print(f"  url:  {row['source_url'] or '(empty)'}")
+        if args.interactive:
+            snippet = input("  Paste evidence snippet (or Enter to skip): ").strip()
+            if snippet:
+                conn.execute("UPDATE facts SET evidence_snippet=? WHERE id=?",
+                             (snippet, row["id"]))
+                conn.commit()
+                print("  ✓ saved.")
+        print()
+    if not args.interactive:
+        print("Run with --interactive to fill snippets one by one.")
+
+
 def cmd_demo(args) -> None:
     print("→ Init...")
     db.reset()
@@ -224,6 +259,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("client"); sp.add_argument("weekly", type=int)
     sp.add_argument("event", type=int); sp.add_argument("quarterly", type=int)
     sp.set_defaults(func=cmd_outputs)
+
+    sp = sub.add_parser("backfill-snippets")
+    sp.add_argument("client")
+    sp.add_argument("--interactive", action="store_true")
+    sp.set_defaults(func=cmd_backfill_snippets)
 
     sp = sub.add_parser("demo"); sp.set_defaults(func=cmd_demo)
 

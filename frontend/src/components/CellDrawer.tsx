@@ -31,6 +31,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
   const [newChannel, setNewChannel] = useState<Channel>("online_research");
   const [newSourceTitle, setNewSourceTitle] = useState("");
   const [newSourceUrl, setNewSourceUrl] = useState("");
+  const [newSnippet, setNewSnippet] = useState("");
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["facts", clientId, subsectionId] });
@@ -39,13 +40,20 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
     qc.invalidateQueries({ queryKey: ["punch", clientId] });
   };
 
+  const isOnlineChannel = (ch: Channel) =>
+    ch === "online_research" || ch === "online_interview" || ch === "archival";
+  const snippetRequired = isOnlineChannel(newChannel);
+  const snippetValid = !snippetRequired || newSnippet.trim().length >= 20;
+
   const addFact = useMutation({
     mutationFn: () => api.addFact(clientId, subsectionId, {
       text: newText, flag: newFlag, channel: newChannel,
-      source_title: newSourceTitle, source_url: newSourceUrl, confidence: 1.0,
+      source_title: newSourceTitle, source_url: newSourceUrl,
+      evidence_snippet: newSnippet, confidence: 1.0,
     }),
     onSuccess: () => {
-      setShowAdd(false); setNewText(""); setNewSourceTitle(""); setNewSourceUrl("");
+      setShowAdd(false); setNewText(""); setNewSourceTitle("");
+      setNewSourceUrl(""); setNewSnippet("");
       invalidate();
     },
   });
@@ -138,14 +146,26 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                   </div>
                 </div>
                 <div className="text-sm leading-snug whitespace-pre-wrap">{f.text}</div>
-                <div className="text-[10px] text-ink-mute mt-2 flex items-center gap-2 font-mono">
+                {f.evidence_snippet && (
+                  <blockquote className="mt-2 text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug">
+                    {f.evidence_snippet}
+                  </blockquote>
+                )}
+                <div className="text-[10px] text-ink-mute mt-2 flex items-center gap-2 font-mono flex-wrap">
                   {f.source_channel && (
                     <span className="px-1.5 py-0.5 bg-white border border-ink-line rounded">{f.source_channel}</span>
                   )}
                   {f.source_title && <span className="truncate">{f.source_title}</span>}
                   {f.source_url && (
                     <a href={f.source_url} target="_blank" rel="noreferrer"
-                       className="text-blue-600 underline truncate">link</a>
+                       className="text-blue-600 underline truncate">src</a>
+                  )}
+                  {f.source_archive_url && (
+                    <a href={f.source_archive_url} target="_blank" rel="noreferrer"
+                       className="text-emerald-600 underline truncate" title="Wayback snapshot">📦</a>
+                  )}
+                  {f.source_url && isOnlineChannel(f.source_channel as Channel) && !f.source_archive_url && (
+                    <span className="text-amber-500" title="Archiving in background…">⏳</span>
                   )}
                   <span className="ml-auto">{(f.captured_at ?? "").slice(0, 10)}</span>
                 </div>
@@ -189,19 +209,38 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
               className="w-full text-sm border border-ink-line rounded px-2 py-1.5"
             />
             <input
-              placeholder="Source URL (опц.)"
+              placeholder={snippetRequired ? "Source URL (обязательно для online/archival)" : "Source URL (опц.)"}
               value={newSourceUrl}
               onChange={e => setNewSourceUrl(e.target.value)}
               className="w-full text-sm border border-ink-line rounded px-2 py-1.5"
             />
+            <div>
+              <textarea
+                placeholder={snippetRequired
+                  ? "Цитата из источника ≥20 символов (обязательно)"
+                  : "Цитата из источника (опц.)"}
+                value={newSnippet}
+                onChange={e => setNewSnippet(e.target.value)}
+                rows={3}
+                className={`w-full text-sm border rounded px-2 py-1.5 resize-none
+                  ${snippetRequired && newSnippet.trim().length > 0 && !snippetValid
+                    ? "border-red-400" : "border-ink-line"}`}
+              />
+              {snippetRequired && (
+                <div className={`text-[10px] mt-0.5 ${snippetValid ? "text-ink-mute" : "text-red-500"}`}>
+                  {newSnippet.trim().length}/20 chars required
+                </div>
+              )}
+            </div>
             {channelHint && (
               <div className="text-[11px] text-ink-mute">{channelHint}</div>
             )}
             <div className="flex gap-2">
               <button
                 onClick={() => addFact.mutate()}
-                disabled={!newText.trim() || addFact.isPending}
+                disabled={!newText.trim() || !snippetValid || addFact.isPending}
                 className="text-sm px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300"
+                title={!snippetValid ? "Evidence snippet ≥20 chars required for online channels" : undefined}
               >Save</button>
               <button
                 onClick={() => setShowAdd(false)}

@@ -54,9 +54,11 @@ export interface Fact {
   flag: Flag;
   confidence: number;
   captured_at: string;
+  evidence_snippet?: string;
   source_channel?: Channel;
   source_title?: string;
   source_url?: string;
+  source_archive_url?: string;
 }
 
 export interface Track {

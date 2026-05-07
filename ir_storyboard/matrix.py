@@ -93,13 +93,43 @@ def ensure_full_grid(conn: sqlite3.Connection, client_id: str) -> None:
 
 # ---------- sources ----------
 
+ONLINE_CHANNELS = {"online_research", "online_interview", "archival"}
+
+
+def validate_provenance(channel: str, source_url: str, evidence_snippet: str,
+                        source_title: str = "", flag: str = "green") -> None:
+    """Raise ValueError if provenance rules are violated.
+
+    Rule 3: grey flag → evidence_snippet is optional (gap marker doesn't need a quote),
+    but source and URL rules still apply.
+    """
+    snippet_required = flag != "grey"
+    if channel in ONLINE_CHANNELS:
+        if not source_url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"{channel} fact requires source_url starting with http(s)://"
+            )
+        if snippet_required and len(evidence_snippet.strip()) < 20:
+            raise ValueError(
+                f"{channel} fact requires evidence_snippet ≥20 chars (literal quote from source)"
+            )
+    elif channel == "offline_interview":
+        if not source_title.strip():
+            raise ValueError(
+                "offline_interview fact requires source_title "
+                "(e.g. 'Interview with X 2026-05-12')"
+            )
+
+
 def add_source(conn: sqlite3.Connection, channel: str, title: str = "",
-               url: str = "", notes: str = "") -> int:
+               url: str = "", notes: str = "",
+               archive_url: str = "", publisher: str = "", author: str = "") -> int:
     if channel not in ALL_CHANNELS:
         raise ValueError(f"unknown channel {channel}")
     cur = conn.execute(
-        "INSERT INTO sources (channel, title, url, notes) VALUES (?, ?, ?, ?)",
-        (channel, title, url, notes),
+        """INSERT INTO sources (channel, title, url, notes, archive_url, publisher, author)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (channel, title, url, notes, archive_url or None, publisher, author),
     )
     conn.commit()
     return cur.lastrowid
@@ -109,7 +139,8 @@ def add_source(conn: sqlite3.Connection, channel: str, title: str = "",
 
 def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
              text: str, flag: str, source_id: Optional[int] = None,
-             confidence: float = 1.0, valid_until: Optional[str] = None) -> int:
+             confidence: float = 1.0, valid_until: Optional[str] = None,
+             evidence_snippet: str = "") -> int:
     if flag not in (FLAG_GREEN, FLAG_RED, FLAG_GREY):
         raise ValueError(f"bad flag {flag}")
     # methodological guard: warn if source channel can't really fill this layer
@@ -117,7 +148,6 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
     if source_id is not None:
         ch = conn.execute("SELECT channel FROM sources WHERE id=?", (source_id,)).fetchone()
         if ch and not channel_can_fill(ch["channel"], layer_id):
-            # we don't refuse — but record a methodological warning in notes
             conn.execute(
                 "UPDATE sources SET notes = COALESCE(notes,'') || ? WHERE id=?",
                 (f"\n[warn] channel {ch['channel']} not primary for layer {layer_id}", source_id),
@@ -125,9 +155,9 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
 
     cell_id = get_or_create_cell(conn, client_id, subsection_id)
     cur = conn.execute(
-        """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until)
-            VALUES (?, ?, ?, ?, ?, ?)""",
-        (cell_id, text, flag, source_id, confidence, valid_until),
+        """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until, evidence_snippet)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (cell_id, text, flag, source_id, confidence, valid_until, evidence_snippet),
     )
     conn.commit()
     return cur.lastrowid
@@ -136,7 +166,9 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
 def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                    subsection_id: str) -> List[sqlite3.Row]:
     return list(conn.execute(
-        """SELECT f.*, s.channel AS source_channel, s.title AS source_title, s.url AS source_url
+        """SELECT f.*, s.channel AS source_channel, s.title AS source_title,
+                  s.url AS source_url, s.archive_url AS source_archive_url,
+                  s.publisher AS source_publisher
             FROM facts f
             JOIN cells c ON c.id = f.cell_id
             LEFT JOIN sources s ON s.id = f.source_id
@@ -148,7 +180,9 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
 
 def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
     return conn.execute(
-        """SELECT f.*, s.channel AS source_channel, s.title AS source_title, s.url AS source_url,
+        """SELECT f.*, s.channel AS source_channel, s.title AS source_title,
+                  s.url AS source_url, s.archive_url AS source_archive_url,
+                  s.publisher AS source_publisher,
                   c.client_id, c.subsection_id
             FROM facts f
             JOIN cells c ON c.id = f.cell_id

@@ -43,7 +43,8 @@ export const api = {
     call<Fact[]>(`/clients/${clientId}/cells/${sid}/facts`),
   addFact: (clientId: string, sid: string, body: {
     text: string; flag: string; channel: string;
-    source_title?: string; source_url?: string; confidence?: number;
+    source_title?: string; source_url?: string;
+    evidence_snippet?: string; confidence?: number;
   }) => call<Fact>(`/clients/${clientId}/cells/${sid}/facts`, {
     method: "POST", body: JSON.stringify(body),
   }),

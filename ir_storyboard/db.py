@@ -35,6 +35,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "clients", "founder_handle", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "clients", "aliases", "TEXT DEFAULT '[]'")
     _add_column_if_missing(conn, "clients", "notes", "TEXT DEFAULT ''")
+    # task-2: provenance fields
+    _add_column_if_missing(conn, "facts", "evidence_snippet", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "sources", "accessed_at", "TIMESTAMP")
+    _add_column_if_missing(conn, "sources", "content_hash", "TEXT")
+    _add_column_if_missing(conn, "sources", "archive_url", "TEXT")
+    _add_column_if_missing(conn, "sources", "publisher", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "sources", "author", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "sources", "published_at", "DATE")
     conn.commit()
 
 

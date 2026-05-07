@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from ir_storyboard import db, matrix, outputs, seed
+from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
 from ir_storyboard.models import LAYERS, ALL_CHANNELS
 
@@ -136,18 +137,32 @@ class FactOut(BaseModel):
     flag: str
     confidence: float
     captured_at: str
+    evidence_snippet: Optional[str] = None
     source_channel: Optional[str] = None
     source_title: Optional[str] = None
     source_url: Optional[str] = None
+    source_archive_url: Optional[str] = None
 
 
 class FactCreate(BaseModel):
     text: str
-    flag: str = Field(pattern="^(green|red|grey)$")
-    channel: str = Field(pattern="^(online_research|online_interview|archival|offline_interview)$")
-    source_title: Optional[str] = ""
-    source_url: Optional[str] = ""
+    flag: Literal["green", "red", "grey"]
+    channel: Literal["online_research", "online_interview", "archival", "offline_interview"]
+    source_title: str = ""
+    source_url: str = ""
+    evidence_snippet: str = ""
     confidence: float = 1.0
+
+    @model_validator(mode="after")
+    def _check_provenance(self):
+        try:
+            matrix.validate_provenance(
+                self.channel, self.source_url,
+                self.evidence_snippet, self.source_title, self.flag,
+            )
+        except ValueError as e:
+            raise ValueError(str(e))
+        return self
 
 
 class FactUpdate(BaseModel):
@@ -238,6 +253,19 @@ def get_channels():
 
 
 # ---------- clients ----------
+
+def _row_to_fact(row) -> FactOut:
+    return FactOut(
+        id=row["id"], text=row["text"], flag=row["flag"],
+        confidence=row["confidence"] or 1.0,
+        captured_at=row["captured_at"],
+        evidence_snippet=row["evidence_snippet"] if "evidence_snippet" in row.keys() else None,
+        source_channel=row["source_channel"],
+        source_title=row["source_title"],
+        source_url=row["source_url"],
+        source_archive_url=row["source_archive_url"] if "source_archive_url" in row.keys() else None,
+    )
+
 
 def _row_to_client(row) -> ClientOut:
     d = dict(row)
@@ -367,37 +395,34 @@ def matrix_view(client_id: str, conn=Depends(get_conn)):
 @app.get("/api/clients/{client_id}/cells/{subsection_id}/facts",
          response_model=List[FactOut])
 def get_cell_facts(client_id: str, subsection_id: str, conn=Depends(get_conn)):
-    rows = matrix.facts_for_cell(conn, client_id, subsection_id)
-    return [FactOut(
-        id=r["id"], text=r["text"], flag=r["flag"],
-        confidence=r["confidence"] or 1.0,
-        captured_at=r["captured_at"],
-        source_channel=r["source_channel"],
-        source_title=r["source_title"],
-        source_url=r["source_url"],
-    ) for r in rows]
+    return [_row_to_fact(r) for r in matrix.facts_for_cell(conn, client_id, subsection_id)]
 
 
 @app.post("/api/clients/{client_id}/cells/{subsection_id}/facts",
           response_model=FactOut)
 def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
                   conn=Depends(get_conn)):
+    # sync Wayback lookup for online channels
+    archive_url = None
+    if f.source_url and f.channel in ("online_research", "online_interview", "archival"):
+        archive_url = lookup_snapshot(f.source_url)
+
     src_id = matrix.add_source(conn, channel=f.channel,
                                title=f.source_title or "",
-                               url=f.source_url or "")
+                               url=f.source_url or "",
+                               archive_url=archive_url or "")
     fid = matrix.add_fact(
         conn, client_id=client_id, subsection_id=subsection_id,
         text=f.text, flag=f.flag, source_id=src_id, confidence=f.confidence,
+        evidence_snippet=f.evidence_snippet,
     )
+
+    # async save if no snapshot found
+    if f.source_url and not archive_url and f.channel in ("online_research", "online_interview", "archival"):
+        enqueue_save(f.source_url, src_id, db.connect)
+
     row = matrix.get_fact(conn, fid)
-    return FactOut(
-        id=row["id"], text=row["text"], flag=row["flag"],
-        confidence=row["confidence"] or 1.0,
-        captured_at=row["captured_at"],
-        source_channel=row["source_channel"],
-        source_title=row["source_title"],
-        source_url=row["source_url"],
-    )
+    return _row_to_fact(row)
 
 
 @app.patch("/api/facts/{fact_id}", response_model=FactOut)
@@ -406,15 +431,7 @@ def update_fact(fact_id: int, u: FactUpdate, conn=Depends(get_conn)):
         raise HTTPException(404, "fact not found")
     matrix.update_fact(conn, fact_id, text=u.text, flag=u.flag,
                        confidence=u.confidence)
-    row = matrix.get_fact(conn, fact_id)
-    return FactOut(
-        id=row["id"], text=row["text"], flag=row["flag"],
-        confidence=row["confidence"] or 1.0,
-        captured_at=row["captured_at"],
-        source_channel=row["source_channel"],
-        source_title=row["source_title"],
-        source_url=row["source_url"],
-    )
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
 @app.delete("/api/facts/{fact_id}")
