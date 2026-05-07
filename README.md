@@ -157,22 +157,75 @@ ir-storyboard/
             └── ScorecardView.tsx
 ```
 
+## Добавление нового клиента
+
+1. Создать seed YAML по образцу `seeds/stripe.yaml`:
+   ```yaml
+   client:
+     id: acme-inc
+     name: Acme Inc.
+     sector: saas
+   founder_name: Jane Smith
+   initial_quarter: 2026Q3
+   seed_facts: [...]
+   seed_tracks: [...]
+   ```
+2. Загрузить через CLI: `python -m ir_storyboard add-client --from seeds/acme.yaml`
+   или через UI: кнопка «+ New» в сайдбаре → таб «Import YAML».
+3. Проверить в UI: открыть клиента → таб «Punch-list» → убедиться что пустые ячейки соответствуют ожидаемому покрытию.
+4. Work-items создаются автоматически при импорте. Открыть таб «Work» → запустить «Synthesize» если нужно обновить backlog.
+
+## Provenance rules
+
+Каждый факт из online-каналов (`online_research`, `online_interview`, `archival`) требует:
+
+- `source_url` начинающийся с `http(s)://`
+- `evidence_snippet` ≥ 20 символов — дословная цитата из источника
+
+Факт из `offline_interview` требует `source_title` (например `"Interview with X 2026-05-12"`). Snippet опционален.
+
+Для фактов с флагом `grey` (явная нехватка данных) snippet необязателен даже для online-каналов — URL по-прежнему требуется.
+
+Нарушение → API возвращает `422 Unprocessable Entity` с описанием правила.
+
+Для существующих фактов без snippet используйте CLI: `python -m ir_storyboard backfill-snippets --client <id> --interactive`
+
+## Daily workflow: work-items
+
+```
+1. Открыть таб «Work» → посмотреть Queued колонку
+2. Кликнуть карточку → «Claim» (берёт на себя, статус → in_progress)
+3. Собрать факт → добавить в соответствующую ячейку через Matrix → CellDrawer
+4. Система автоматически переводит fill_gap/interview в needs_review
+5. Открыть work-item снова → «Done» + указать id закрывающего факта
+6. Конец недели: запустить Weekly бриф → worklog обновится автоматически
+```
+
+CLI-альтернатива:
+```bash
+python -m ir_storyboard work-items list --client stripe --status queued,in_progress
+python -m ir_storyboard work-items claim 42 --as Dmitry
+python -m ir_storyboard work-items complete 42 --fact 178 --notes "интервью 2026-05-14"
+python -m ir_storyboard work-items synthesize --client stripe
+```
+
 ## Подключение настоящего LLM и веб-поиска
 
-В `ir_storyboard/llm.py` три точки расширения, реализованные сейчас как deterministic stubs:
+В `ir_storyboard/llm.py` реализован полный LLM-слой с автоматическим переключением между режимами:
 
-- `classify_fact(text) -> FactCandidate` — классификация факта в подсекцию + флаг
-- `web_search(query) -> List[SearchHit]` — поиск по интернету
-- `summarize(text) -> str` — саммари для выходов
+- Если `ANTHROPIC_API_KEY` установлен — используется Claude (Haiku) для батчевой классификации и генерации контента циклов
+- Если `TAVILY_API_KEY` установлен — используется Tavily для веб-поиска в `online_research` канале
+- Без ключей — deterministic keyword stub (работает offline, хуже качество)
 
-Заменяются на вызовы к Claude / GPT / Tavily / SerpAPI в одном файле. Когда подключаете LLM — батчевая классификация (передаём список фактов одним вызовом) даёт обещанные 10–20× ускорения и снижение стоимости по сравнению с текущим pay-per-fact подходом, о котором писал терминальный Claude.
+Батчевая классификация (10–20 фактов одним вызовом) в ~15× дешевле pay-per-fact. Ключи прописывать в `.env` на сервере.
 
-## Что осознанно НЕ сделано в v1
+## Что осознанно НЕ сделано
 
-- Авторизация и multi-user. Сервер v1 — общий доступ внутри агентства.
-- Версионирование фактов. Каждый факт — иммутабельная запись с `captured_at`. Если факт устарел — добавляется новый.
-- Real-time collaborative editing. Если двое аналитиков одновременно редактируют — побеждает последний.
-- Мобильный/планшетный layout. Десктоп-only.
-- Audit log. История изменений хранится в `captured_at`, но без diff-вью.
+- **Авторизация и multi-user.** Сервер — общий доступ внутри агентства. Для ограничения доступа — Basic Auth в Caddy или IP-allowlist.
+- **Версионирование фактов.** Каждый факт иммутабелен с `captured_at`. Устаревший факт → добавляется новый.
+- **Real-time collaborative editing.** Конкурентное редактирование одной ячейки → last-write-wins.
+- **Мобильный layout.** Десктоп-only.
+- **Audit log diff-вью.** История через `captured_at`, без визуального было/стало.
+- **`adjacent` и `cross_ref` work-items** не генерируются автоматически (требуют LLM-судьи) — создаются вручную через UI или API.
 
 Все эти пункты добавляются поверх архитектуры без её слома.

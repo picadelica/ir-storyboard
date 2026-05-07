@@ -276,11 +276,14 @@ curl -fsS https://ir.your-agency.com/api/clients
 
 ```bash
 cd ~/ir-storyboard
-./scripts/backup.sh                            # сначала бэкап
+./scripts/backup.sh                            # сначала бэкап!
+./scripts/check_migration.sh                   # проверить безопасность схемы
 git pull
 dcp up -d --build                              # пересоберёт изменившиеся образы
 dcp ps                                         # проверить что всё Up
 ```
+
+**Про миграции схемы:** все изменения БД реализованы через идемпотентные `ALTER TABLE IF NOT EXISTS` в `ir_storyboard/db.py::init_schema`. Они применяются автоматически при первом запросе к API — без downtime и без Alembic. `check_migration.sh` копирует текущую БД во временный файл, прогоняет `init_schema` и проверяет что все факты на месте.
 
 Если что-то сломалось — откат:
 ```bash

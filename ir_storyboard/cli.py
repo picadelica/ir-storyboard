@@ -147,6 +147,78 @@ def cmd_outputs(args) -> None:
         print(f"  {k:24s}  {p}")
 
 
+def cmd_work_items(args) -> None:
+    conn = db.connect()
+    db.init_schema(conn)
+    op = args.operation
+
+    if op == "list":
+        q = "SELECT * FROM work_items WHERE client_id=?"
+        params: list = [args.client]
+        if args.status:
+            statuses = [s.strip() for s in args.status.split(",")]
+            q += f" AND status IN ({','.join('?'*len(statuses))})"
+            params.extend(statuses)
+        if args.assignee:
+            q += " AND assignee=?"
+            params.append(args.assignee)
+        q += " ORDER BY priority ASC, created_at DESC"
+        rows = conn.execute(q, params).fetchall()
+        if not rows:
+            print("No work items found.")
+            return
+        for r in rows:
+            sid = f" [{r['subsection_id']}]" if r['subsection_id'] else ""
+            assignee = f" @{r['assignee']}" if r['assignee'] else ""
+            print(f"#{r['id']:4d}  {r['status']:14s}  {r['type']:12s}  P{r['priority']}{assignee}{sid}")
+            print(f"       {r['title']}")
+
+    elif op == "show":
+        row = conn.execute("SELECT * FROM work_items WHERE id=?", (args.id,)).fetchone()
+        if not row:
+            print(f"Work item #{args.id} not found.", file=sys.stderr); sys.exit(1)
+        for k in row.keys():
+            if row[k] is not None and row[k] != "":
+                print(f"{k:20s}: {row[k]}")
+
+    elif op == "claim":
+        assignee = args.assign_as or "me"
+        conn.execute(
+            "UPDATE work_items SET status='in_progress', assignee=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (assignee, args.id),
+        )
+        conn.commit()
+        print(f"#{args.id} → in_progress, assigned to {assignee}")
+
+    elif op == "complete":
+        body = "status='done', completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP"
+        params2: list = []
+        if args.fact:
+            body += ", related_fact_id=?"
+            params2.append(args.fact)
+        if args.notes:
+            body += ", notes=?"
+            params2.append(args.notes)
+        params2.append(args.id)
+        conn.execute(f"UPDATE work_items SET {body} WHERE id=?", params2)
+        conn.commit()
+        print(f"#{args.id} → done")
+
+    elif op == "block":
+        notes = args.reason or ""
+        conn.execute(
+            "UPDATE work_items SET status='blocked', notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (notes, args.id),
+        )
+        conn.commit()
+        print(f"#{args.id} → blocked")
+
+    elif op == "synthesize":
+        from .workitems import synthesize_work_items
+        created = synthesize_work_items(conn, args.client)
+        print(f"Created {len(created)} new work items for '{args.client}'.")
+
+
 def cmd_backfill_snippets(args) -> None:
     conn = db.connect()
     db.init_schema(conn)
@@ -259,6 +331,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("client"); sp.add_argument("weekly", type=int)
     sp.add_argument("event", type=int); sp.add_argument("quarterly", type=int)
     sp.set_defaults(func=cmd_outputs)
+
+    wi = sub.add_parser("work-items")
+    wi.add_argument("operation", choices=["list", "show", "claim", "complete", "block", "synthesize"])
+    wi.add_argument("id", nargs="?", type=int, help="work item id (for show/claim/complete/block)")
+    wi.add_argument("--client", default="")
+    wi.add_argument("--status", default="", help="comma-separated statuses to filter")
+    wi.add_argument("--assignee", default="")
+    wi.add_argument("--as", dest="assign_as", default="", help="assignee name (for claim)")
+    wi.add_argument("--fact", type=int, default=None, help="fact id that closed this item")
+    wi.add_argument("--notes", default="")
+    wi.add_argument("--reason", default="")
+    wi.set_defaults(func=cmd_work_items)
 
     sp = sub.add_parser("backfill-snippets")
     sp.add_argument("client")
