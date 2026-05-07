@@ -36,6 +36,35 @@ export interface SeedImportResult {
   track_count: number;
 }
 
+export type WorkItemStatus = "queued" | "in_progress" | "needs_review" | "done" | "blocked" | "cancelled";
+export type WorkItemType = "fill_gap" | "discover" | "verify" | "deepen" | "interview" | "adjacent" | "cross_ref";
+
+export interface WorkItem {
+  id: number;
+  client_id: string;
+  type: WorkItemType;
+  subsection_id?: string;
+  source_signal: string;
+  status: WorkItemStatus;
+  assignee: string;
+  priority: number;
+  title: string;
+  rationale: string;
+  suggested_channel?: string;
+  related_track_id?: number;
+  related_fact_id?: number;
+  due_date?: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  notes: string;
+}
+
+export interface SynthesizeResult {
+  created: number[];
+  skipped: number;
+}
+
 export interface CellSummary {
   subsection_id: string;
   subsection_name: string;

@@ -11,6 +11,7 @@ import ArtifactsView from "./components/ArtifactsView";
 import PunchListView from "./components/PunchListView";
 import InterviewView from "./components/InterviewView";
 import ScorecardView from "./components/ScorecardView";
+import WorkView from "./components/WorkView";
 
 export default function App() {
   return (
@@ -89,6 +90,9 @@ function ClientPage() {
           {activeTab === "artifacts" && (
             <ArtifactsView clientId={clientId!} pickedArtifactId={pickedArtifactId} />
           )}
+          {activeTab === "work" && (
+            <WorkView clientId={clientId!} onJumpToCell={onJumpToCell} />
+          )}
         </div>
       </main>
 
@@ -121,6 +125,7 @@ function ClientPage() {
 function Tabs({ clientId, activeTab }: { clientId: string; activeTab: string }) {
   const tabs = [
     { id: "matrix",     label: "Matrix" },
+    { id: "work",       label: "Work" },
     { id: "punch",      label: "Punch-list" },
     { id: "interview",  label: "Interview Qs" },
     { id: "scorecard",  label: "Scorecard" },

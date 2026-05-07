@@ -28,6 +28,7 @@ from ir_storyboard import db, matrix, outputs, seed
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
 from ir_storyboard.models import LAYERS, ALL_CHANNELS
+from ir_storyboard.workitems import synthesize_work_items
 
 
 app = FastAPI(title="IR Storyboard API", version="0.1.0")
@@ -103,6 +104,58 @@ class SeedImportResult(BaseModel):
     fact_count: int
     source_count: int
     track_count: int
+
+
+class WorkItemOut(BaseModel):
+    id: int
+    client_id: str
+    type: str
+    subsection_id: Optional[str] = None
+    source_signal: str
+    status: str
+    assignee: str = ""
+    priority: int = 3
+    title: str
+    rationale: str = ""
+    suggested_channel: Optional[str] = None
+    related_track_id: Optional[int] = None
+    related_fact_id: Optional[int] = None
+    due_date: Optional[str] = None
+    created_at: str
+    updated_at: str
+    completed_at: Optional[str] = None
+    notes: str = ""
+
+
+class WorkItemCreate(BaseModel):
+    type: Literal["fill_gap", "discover", "verify", "deepen",
+                  "interview", "adjacent", "cross_ref"]
+    subsection_id: Optional[str] = None
+    source_signal: Literal["empty_cells", "known_gaps", "thin_coverage",
+                           "low_confidence", "manual", "track_alignment", "contradiction"] = "manual"
+    title: str
+    rationale: str = ""
+    suggested_channel: Optional[str] = None
+    related_track_id: Optional[int] = None
+    priority: int = 3
+    assignee: str = ""
+    due_date: Optional[str] = None
+    notes: str = ""
+
+
+class WorkItemUpdate(BaseModel):
+    status: Optional[Literal["queued", "in_progress", "needs_review",
+                             "done", "blocked", "cancelled"]] = None
+    assignee: Optional[str] = None
+    priority: Optional[int] = None
+    due_date: Optional[str] = None
+    notes: Optional[str] = None
+    related_fact_id: Optional[int] = None
+
+
+class SynthesizeResult(BaseModel):
+    created: List[int]
+    skipped: int
 
 
 class SubsectionOut(BaseModel):
@@ -336,6 +389,7 @@ def _do_import_seed(conn, client_id: str, seed: ClientSeedIn) -> SeedImportResul
                              priority=st.priority)
             track_count += 1
 
+    synthesize_work_items(conn, client_id, quarter=seed.initial_quarter)
     return SeedImportResult(client_id=client_id, fact_count=fact_count,
                             source_count=source_count, track_count=track_count)
 
@@ -378,6 +432,7 @@ def seed_accumulator(client_id: str, conn=Depends(get_conn)):
     if client_id != seed.CLIENT_ID:
         raise HTTPException(400, f"this endpoint seeds {seed.CLIENT_ID} only")
     seed.load_accumulator(conn)
+    synthesize_work_items(conn, client_id)
     return {"ok": True, "client_id": seed.CLIENT_ID}
 
 
@@ -472,6 +527,7 @@ def add_track(client_id: str, quarter: str, t: TrackCreate,
 def cycle_weekly(client_id: str, body: WeeklyRunIn, conn=Depends(get_conn)):
     res = run_weekly(conn, client_id=client_id, quarter=body.quarter,
                      week_label=body.week_label, max_facts=body.max_facts)
+    synthesize_work_items(conn, client_id, quarter=body.quarter)
     return _artifact_payload(conn, res["artifact_id"])
 
 
@@ -518,6 +574,116 @@ def _artifact_payload(conn, artifact_id: int) -> ArtifactOut:
 
 
 # ---------- analyst outputs ----------
+
+def _row_to_work_item(row) -> WorkItemOut:
+    d = dict(row)
+    return WorkItemOut(
+        id=d["id"], client_id=d["client_id"], type=d["type"],
+        subsection_id=d.get("subsection_id"),
+        source_signal=d["source_signal"], status=d["status"],
+        assignee=d.get("assignee") or "",
+        priority=d.get("priority") or 3,
+        title=d["title"],
+        rationale=d.get("rationale") or "",
+        suggested_channel=d.get("suggested_channel"),
+        related_track_id=d.get("related_track_id"),
+        related_fact_id=d.get("related_fact_id"),
+        due_date=d.get("due_date"),
+        created_at=d["created_at"],
+        updated_at=d["updated_at"],
+        completed_at=d.get("completed_at"),
+        notes=d.get("notes") or "",
+    )
+
+
+# ---------- work items ----------
+
+@app.get("/api/clients/{client_id}/work-items", response_model=List[WorkItemOut])
+def list_work_items(client_id: str,
+                    status: Optional[List[str]] = Query(default=None),
+                    assignee: Optional[str] = None,
+                    type: Optional[List[str]] = Query(default=None),
+                    subsection_id: Optional[str] = None,
+                    conn=Depends(get_conn)):
+    q = "SELECT * FROM work_items WHERE client_id=?"
+    params: list = [client_id]
+    if status:
+        q += f" AND status IN ({','.join('?'*len(status))})"
+        params.extend(status)
+    if assignee:
+        q += " AND assignee=?"
+        params.append(assignee)
+    if type:
+        q += f" AND type IN ({','.join('?'*len(type))})"
+        params.extend(type)
+    if subsection_id:
+        q += " AND subsection_id=?"
+        params.append(subsection_id)
+    q += " ORDER BY priority ASC, created_at DESC"
+    return [_row_to_work_item(r) for r in conn.execute(q, params).fetchall()]
+
+
+@app.get("/api/work-items/{wid}", response_model=WorkItemOut)
+def get_work_item(wid: int, conn=Depends(get_conn)):
+    row = conn.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
+    if not row:
+        raise HTTPException(404, "work item not found")
+    return _row_to_work_item(row)
+
+
+@app.post("/api/clients/{client_id}/work-items", response_model=WorkItemOut)
+def create_work_item(client_id: str, body: WorkItemCreate, conn=Depends(get_conn)):
+    cur = conn.execute(
+        """INSERT INTO work_items
+            (client_id, type, subsection_id, source_signal, title, rationale,
+             suggested_channel, related_track_id, priority, assignee, due_date, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (client_id, body.type, body.subsection_id, body.source_signal,
+         body.title, body.rationale, body.suggested_channel, body.related_track_id,
+         body.priority, body.assignee, body.due_date, body.notes),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM work_items WHERE id=?", (cur.lastrowid,)).fetchone()
+    return _row_to_work_item(row)
+
+
+@app.patch("/api/work-items/{wid}", response_model=WorkItemOut)
+def update_work_item(wid: int, body: WorkItemUpdate, conn=Depends(get_conn)):
+    row = conn.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
+    if not row:
+        raise HTTPException(404, "work item not found")
+    sets, params = ["updated_at=CURRENT_TIMESTAMP"], []
+    if body.status is not None:
+        sets.append("status=?"); params.append(body.status)
+        if body.status == "done":
+            sets.append("completed_at=CURRENT_TIMESTAMP")
+    if body.assignee is not None:
+        sets.append("assignee=?"); params.append(body.assignee)
+    if body.priority is not None:
+        sets.append("priority=?"); params.append(body.priority)
+    if body.due_date is not None:
+        sets.append("due_date=?"); params.append(body.due_date)
+    if body.notes is not None:
+        sets.append("notes=?"); params.append(body.notes)
+    if body.related_fact_id is not None:
+        sets.append("related_fact_id=?"); params.append(body.related_fact_id)
+    params.append(wid)
+    conn.execute(f"UPDATE work_items SET {', '.join(sets)} WHERE id=?", params)
+    conn.commit()
+    return _row_to_work_item(conn.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone())
+
+
+@app.post("/api/clients/{client_id}/work-items/synthesize", response_model=SynthesizeResult)
+def synthesize(client_id: str, quarter: Optional[str] = None, conn=Depends(get_conn)):
+    before = conn.execute(
+        "SELECT COUNT(*) FROM work_items WHERE client_id=?", (client_id,)
+    ).fetchone()[0]
+    created = synthesize_work_items(conn, client_id, quarter=quarter)
+    after = conn.execute(
+        "SELECT COUNT(*) FROM work_items WHERE client_id=?", (client_id,)
+    ).fetchone()[0]
+    return SynthesizeResult(created=created, skipped=(after - before) - len(created))
+
 
 @app.get("/api/clients/{client_id}/punch-list")
 def get_punch_list(client_id: str, conn=Depends(get_conn)):

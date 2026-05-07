@@ -160,7 +160,13 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
         (cell_id, text, flag, source_id, confidence, valid_until, evidence_snippet),
     )
     conn.commit()
-    return cur.lastrowid
+    fact_id = cur.lastrowid
+
+    if flag == FLAG_GREEN:
+        from .workitems import auto_close_on_green_fact
+        auto_close_on_green_fact(conn, client_id, subsection_id, fact_id)
+
+    return fact_id
 
 
 def facts_for_cell(conn: sqlite3.Connection, client_id: str,

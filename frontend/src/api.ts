@@ -1,6 +1,6 @@
 import type {
   Artifact, ArtifactSummary, CellSummary, Client, CycleKind,
-  Fact, Layer, PunchList, Scorecard, SeedImportResult, Track,
+  Fact, Layer, PunchList, Scorecard, SeedImportResult, SynthesizeResult, Track, WorkItem,
 } from "./types";
 
 const API_BASE = "/api";
@@ -88,4 +88,23 @@ export const api = {
 
   notebooklmBundleUrl: (clientId: string, ids: number[]) =>
     `${API_BASE}/clients/${clientId}/notebooklm-bundle?artifact_ids=${ids.join(",")}`,
+
+  listWorkItems: (clientId: string, params?: { status?: string[]; type?: string[] }) => {
+    const q = new URLSearchParams();
+    params?.status?.forEach(s => q.append("status", s));
+    params?.type?.forEach(t => q.append("type", t));
+    const qs = q.toString() ? `?${q}` : "";
+    return call<WorkItem[]>(`/clients/${clientId}/work-items${qs}`);
+  },
+  getWorkItem: (wid: number) => call<WorkItem>(`/work-items/${wid}`),
+  createWorkItem: (clientId: string, body: Partial<WorkItem>) =>
+    call<WorkItem>(`/clients/${clientId}/work-items`, {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  patchWorkItem: (wid: number, body: Partial<WorkItem>) =>
+    call<WorkItem>(`/work-items/${wid}`, { method: "PATCH", body: JSON.stringify(body) }),
+  synthesizeWorkItems: (clientId: string, quarter?: string) => {
+    const q = quarter ? `?quarter=${quarter}` : "";
+    return call<SynthesizeResult>(`/clients/${clientId}/work-items/synthesize${q}`, { method: "POST" });
+  },
 };

@@ -124,3 +124,40 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_artifacts_client_cycle ON artifacts(client_id, cycle);
+
+-- ----------------------------------------------------------------
+-- Work items: process layer on top of the punch-list
+-- ----------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS work_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id       TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    type            TEXT NOT NULL CHECK(type IN (
+                       'fill_gap', 'discover', 'verify', 'deepen',
+                       'interview', 'adjacent', 'cross_ref'
+                   )),
+    subsection_id   TEXT REFERENCES subsections(id),
+    source_signal   TEXT NOT NULL CHECK(source_signal IN (
+                       'empty_cells', 'known_gaps', 'thin_coverage',
+                       'low_confidence', 'manual', 'track_alignment',
+                       'contradiction'
+                   )),
+    status          TEXT NOT NULL DEFAULT 'queued' CHECK(status IN (
+                       'queued', 'in_progress', 'needs_review',
+                       'done', 'blocked', 'cancelled'
+                   )),
+    assignee        TEXT DEFAULT '',
+    priority        INTEGER DEFAULT 3,
+    title           TEXT NOT NULL,
+    rationale       TEXT DEFAULT '',
+    suggested_channel TEXT,
+    related_track_id INTEGER REFERENCES narrative_tracks(id) ON DELETE SET NULL,
+    related_fact_id INTEGER REFERENCES facts(id) ON DELETE SET NULL,
+    due_date        DATE,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at    TIMESTAMP,
+    notes           TEXT DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_wi_client_status ON work_items(client_id, status);
+CREATE INDEX IF NOT EXISTS idx_wi_assignee ON work_items(assignee, status);

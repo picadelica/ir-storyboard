@@ -1,0 +1,313 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api";
+import type { WorkItem, WorkItemStatus, WorkItemType } from "../types";
+
+interface Props {
+  clientId: string;
+  onJumpToCell: (sid: string) => void;
+}
+
+const STATUS_COLS: { key: WorkItemStatus | "_done14"; label: string }[] = [
+  { key: "queued",       label: "Queued" },
+  { key: "in_progress",  label: "In progress" },
+  { key: "needs_review", label: "Needs review" },
+  { key: "_done14",      label: "Done (14d)" },
+];
+
+const TYPE_COLORS: Record<WorkItemType, string> = {
+  fill_gap:  "bg-blue-100 text-blue-800",
+  discover:  "bg-purple-100 text-purple-800",
+  verify:    "bg-yellow-100 text-yellow-800",
+  deepen:    "bg-indigo-100 text-indigo-800",
+  interview: "bg-pink-100 text-pink-800",
+  adjacent:  "bg-teal-100 text-teal-800",
+  cross_ref: "bg-orange-100 text-orange-800",
+};
+
+function ageLabel(dateStr: string) {
+  const d = new Date(dateStr);
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days === 0) return "today";
+  if (days === 1) return "1d";
+  if (days < 7) return `${days}d`;
+  return `${Math.floor(days / 7)}w`;
+}
+
+function PriorityDot({ p }: { p: number }) {
+  const color = p === 1 ? "bg-red-500" : p === 2 ? "bg-amber-400" : "bg-slate-300";
+  return <span className={`inline-block w-2 h-2 rounded-full ${color} shrink-0`} title={`P${p}`} />;
+}
+
+function TypeBadge({ type }: { type: WorkItemType }) {
+  return (
+    <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded ${TYPE_COLORS[type] ?? "bg-slate-100"}`}>
+      {type.replace("_", " ")}
+    </span>
+  );
+}
+
+function WorkItemCard({ item, onClick }: { item: WorkItem; onClick: () => void }) {
+  return (
+    <div
+      className="bg-white border border-ink-line rounded p-2.5 cursor-pointer hover:shadow-sm transition space-y-1.5"
+      onClick={onClick}
+    >
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <PriorityDot p={item.priority} />
+        <TypeBadge type={item.type} />
+        {item.subsection_id && (
+          <span className="text-[10px] font-mono text-ink-mute">{item.subsection_id}</span>
+        )}
+      </div>
+      <div className="text-xs leading-snug font-medium">{item.title}</div>
+      <div className="flex items-center justify-between text-[10px] text-ink-mute">
+        <span>{item.assignee || "Unassigned"}</span>
+        <span>{ageLabel(item.created_at)}</span>
+      </div>
+    </div>
+  );
+}
+
+const DONE_STATUSES: WorkItemStatus[] = ["done", "blocked", "cancelled"];
+const ACTIVE_STATUSES: WorkItemStatus[] = ["queued", "in_progress", "needs_review"];
+
+function WorkItemDrawer({
+  item, onClose, onJumpToCell, clientId,
+}: { item: WorkItem; onClose: () => void; onJumpToCell: (sid: string) => void; clientId: string }) {
+  const qc = useQueryClient();
+  const [notes, setNotes] = useState(item.notes || "");
+  const [assignee, setAssignee] = useState(item.assignee || "");
+  const [relatedFactId, setRelatedFactId] = useState<string>(
+    item.related_fact_id ? String(item.related_fact_id) : ""
+  );
+
+  const patch = useMutation({
+    mutationFn: (body: Partial<WorkItem>) => api.patchWorkItem(item.id, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["work-items", clientId] }),
+  });
+
+  const setStatus = (status: WorkItemStatus) => patch.mutate({ status });
+
+  const isActive = ACTIVE_STATUSES.includes(item.status);
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="absolute inset-0 bg-black/20" onClick={onClose} />
+      <div className="relative ml-auto w-[400px] h-full bg-white shadow-xl flex flex-col border-l border-ink-line">
+        <div className="px-4 py-3 border-b border-ink-line flex items-start justify-between gap-2">
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <TypeBadge type={item.type} />
+              <PriorityDot p={item.priority} />
+              <span className="text-[10px] font-mono text-ink-mute uppercase">{item.status}</span>
+            </div>
+            <h3 className="text-sm font-semibold leading-snug">{item.title}</h3>
+          </div>
+          <button onClick={onClose} className="text-ink-mute hover:text-ink shrink-0 text-lg leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 text-sm">
+          {item.rationale && (
+            <div className="text-xs text-ink-mute bg-slate-50 rounded p-2 italic">{item.rationale}</div>
+          )}
+
+          {item.subsection_id && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-ink-mute">Cell:</span>
+              <button
+                onClick={() => { onJumpToCell(item.subsection_id!); onClose(); }}
+                className="text-xs text-blue-600 hover:underline font-mono"
+              >
+                {item.subsection_id} →
+              </button>
+            </div>
+          )}
+
+          {item.suggested_channel && (
+            <div className="text-xs text-ink-mute">
+              Suggested channel: <span className="font-mono">{item.suggested_channel}</span>
+            </div>
+          )}
+
+          {/* Actions */}
+          {isActive && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-semibold uppercase text-ink-mute tracking-wide">Actions</div>
+              <div className="flex flex-wrap gap-1.5">
+                {item.status === "queued" && (
+                  <ActionBtn label="Claim (assign me)" onClick={() => {
+                    patch.mutate({ status: "in_progress", assignee: assignee || "me" });
+                  }} />
+                )}
+                {item.status !== "in_progress" && (
+                  <ActionBtn label="In progress" onClick={() => setStatus("in_progress")} />
+                )}
+                {item.status !== "needs_review" && (
+                  <ActionBtn label="Needs review" onClick={() => setStatus("needs_review")} />
+                )}
+                <ActionBtn label="Done" variant="green" onClick={() => {
+                  const body: Partial<WorkItem> = { status: "done" };
+                  if (relatedFactId) body.related_fact_id = Number(relatedFactId);
+                  if (notes) body.notes = notes;
+                  patch.mutate(body);
+                }} />
+                <ActionBtn label="Block" variant="amber" onClick={() => setStatus("blocked")} />
+                <ActionBtn label="Cancel" variant="muted" onClick={() => setStatus("cancelled")} />
+              </div>
+            </div>
+          )}
+
+          {/* Assign */}
+          <div>
+            <label className="block text-[10px] font-semibold uppercase text-ink-mute tracking-wide mb-1">Assignee</label>
+            <div className="flex gap-2">
+              <input
+                value={assignee}
+                onChange={e => setAssignee(e.target.value)}
+                className="flex-1 text-xs border border-ink-line rounded px-2 py-1"
+                placeholder="Name or handle"
+              />
+              <button
+                onClick={() => patch.mutate({ assignee })}
+                className="text-xs px-2 py-1 border border-ink-line rounded hover:bg-slate-50"
+              >Save</button>
+            </div>
+          </div>
+
+          {/* Close with fact */}
+          {isActive && (
+            <div>
+              <label className="block text-[10px] font-semibold uppercase text-ink-mute tracking-wide mb-1">
+                Close with fact id (optional)
+              </label>
+              <input
+                type="number"
+                value={relatedFactId}
+                onChange={e => setRelatedFactId(e.target.value)}
+                className="w-full text-xs border border-ink-line rounded px-2 py-1 font-mono"
+                placeholder="Fact ID"
+              />
+            </div>
+          )}
+
+          {/* Notes */}
+          <div>
+            <label className="block text-[10px] font-semibold uppercase text-ink-mute tracking-wide mb-1">Notes</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={3}
+              className="w-full text-xs border border-ink-line rounded px-2 py-1.5 resize-none"
+            />
+            <button
+              onClick={() => patch.mutate({ notes })}
+              className="mt-1 text-xs px-2 py-1 border border-ink-line rounded hover:bg-slate-50"
+            >Save notes</button>
+          </div>
+
+          <div className="text-[10px] text-ink-mute space-y-0.5">
+            <div>Created: {item.created_at.slice(0, 10)}</div>
+            {item.completed_at && <div>Completed: {item.completed_at.slice(0, 10)}</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActionBtn({
+  label, onClick, variant = "default",
+}: { label: string; onClick: () => void; variant?: "default" | "green" | "amber" | "muted" }) {
+  const cls = variant === "green" ? "bg-emerald-600 text-white hover:bg-emerald-700"
+    : variant === "amber" ? "bg-amber-500 text-white hover:bg-amber-600"
+    : variant === "muted" ? "text-ink-mute border border-ink-line hover:bg-slate-50"
+    : "bg-ink text-white hover:bg-black";
+  return (
+    <button onClick={onClick} className={`text-xs px-2.5 py-1 rounded ${cls}`}>{label}</button>
+  );
+}
+
+export default function WorkView({ clientId, onJumpToCell }: Props) {
+  const qc = useQueryClient();
+  const [selected, setSelected] = useState<WorkItem | null>(null);
+
+  const items = useQuery<WorkItem[]>({
+    queryKey: ["work-items", clientId],
+    queryFn: () => api.listWorkItems(clientId),
+  });
+
+  const synthesize = useMutation({
+    mutationFn: () => api.synthesizeWorkItems(clientId),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["work-items", clientId] });
+      alert(`Created ${res.created.length} new work items.`);
+    },
+  });
+
+  const now = Date.now();
+  const colItems = (colKey: string): WorkItem[] => {
+    if (!items.data) return [];
+    if (colKey === "_done14") {
+      return items.data.filter(i =>
+        DONE_STATUSES.includes(i.status) &&
+        now - new Date(i.updated_at).getTime() < 14 * 86400000
+      );
+    }
+    return items.data.filter(i => i.status === colKey);
+  };
+
+  const total = items.data?.filter(i => ACTIVE_STATUSES.includes(i.status)).length ?? 0;
+
+  return (
+    <div className="p-5 space-y-4 h-full flex flex-col">
+      <div className="flex items-center justify-between">
+        <div className="flex items-baseline gap-3">
+          <h2 className="text-lg font-semibold">Work</h2>
+          <span className="text-xs text-ink-mute">{total} active</span>
+        </div>
+        <button
+          onClick={() => synthesize.mutate()}
+          disabled={synthesize.isPending}
+          className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:opacity-50"
+          title="Generate work items from punch-list and thin coverage"
+        >
+          {synthesize.isPending ? "Synthesizing…" : "Synthesize"}
+        </button>
+      </div>
+
+      {items.isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
+
+      {items.data && total === 0 && items.data.length === 0 && (
+        <div className="text-sm text-ink-mute italic">
+          No work items yet. Click «Synthesize» to generate from the current punch-list.
+        </div>
+      )}
+
+      <div className="flex-1 grid grid-cols-4 gap-3 min-h-0 overflow-hidden">
+        {STATUS_COLS.map(col => (
+          <div key={col.key} className="flex flex-col min-h-0">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-ink-mute uppercase tracking-wide">{col.label}</span>
+              <span className="text-[10px] text-ink-mute font-mono">{colItems(col.key).length}</span>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {colItems(col.key).map(item => (
+                <WorkItemCard key={item.id} item={item} onClick={() => setSelected(item)} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {selected && (
+        <WorkItemDrawer
+          item={selected}
+          onClose={() => setSelected(null)}
+          onJumpToCell={onJumpToCell}
+          clientId={clientId}
+        />
+      )}
+    </div>
+  );
+}
