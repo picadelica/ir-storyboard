@@ -8,6 +8,7 @@ Key public API:
     classify_facts_batch(texts)    -> List[FactCandidate]  (batch, 10-20x cheaper)
     web_search(query, max_hits)    -> List[SearchHit]
     summarize(text, max_chars)     -> str
+    generate(system, user, max_tokens) -> str  (cycle content generation)
 """
 from __future__ import annotations
 
@@ -114,11 +115,17 @@ def stub_summarize(text: str, max_chars: int = 280) -> str:
     return s
 
 
+def stub_generate(system: str, user: str, max_tokens: int = 1024) -> str:
+    """Stub — returns empty string; callers fall back to template rendering."""
+    return ""
+
+
 # ─────────────────── public callables (start as stubs) ─────────────────────
 
 classify_fact: Callable[[str], FactCandidate] = stub_classify
 web_search: Callable[[str, int], List[SearchHit]] = stub_web_search
 summarize: Callable[[str, int], str] = stub_summarize
+generate: Callable[[str, str, int], str] = stub_generate
 
 
 def classify_facts_batch(texts: List[str]) -> List[FactCandidate]:
@@ -157,7 +164,7 @@ One object per input fact, same order. Set sid to null if no subsection fits.\
 # ─────────────────── real Claude implementation ─────────────────────────────
 
 def _try_init_anthropic() -> None:
-    global classify_fact, summarize, classify_facts_batch
+    global classify_fact, summarize, classify_facts_batch, generate
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -237,9 +244,24 @@ def _try_init_anthropic() -> None:
         except Exception:
             return stub_summarize(text, max_chars)
 
+    _GENERATE_MODEL = os.environ.get("LLM_GENERATE_MODEL", "claude-haiku-4-5")
+
+    def _generate_real(system: str, user: str, max_tokens: int = 1024) -> str:
+        try:
+            resp = _client.messages.create(
+                model=_GENERATE_MODEL,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+            return next((b.text for b in resp.content if b.type == "text"), "").strip()
+        except Exception:
+            return ""
+
     classify_fact = _classify_single_real
     summarize = _summarize_real
     classify_facts_batch = _classify_batch_real
+    generate = _generate_real
 
 
 # ─────────────────── real Tavily implementation ─────────────────────────────

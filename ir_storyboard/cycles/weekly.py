@@ -5,9 +5,6 @@ Logic:  pick the active (highest-priority) narrative track for the quarter,
         focus on its target subsections, pull recent green/red facts,
         produce a video brief — hook + facts + suggested angle.
 Output: markdown artifact stored in DB and returned.
-
-The brief is meant to feed NotebookLM (or a human scriptwriter), not to be
-a publishable script.
 """
 from __future__ import annotations
 
@@ -16,7 +13,30 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import matrix
+from ..llm import generate
 from ..models import FLAG_GREEN, FLAG_RED, layer_by_id, subsection_by_id
+
+_WEEKLY_SYSTEM = """\
+You are an IR narrative analyst writing weekly video briefs for a PR/IR agency.
+The brief feeds a scriptwriter or NotebookLM — it must be ready to use, not a list of pointers.
+Write in the same language as the facts provided (Russian or English).
+
+Output exactly this structure (markdown):
+
+## Hook
+(1-2 punchy sentences that open the piece — concrete, not generic)
+
+## Narrative thread
+(2-3 sentences weaving the facts into the track angle — cause → effect → so what)
+
+## Talking points
+- (specific, quote-ready)
+- (specific, quote-ready)
+- (specific, quote-ready)
+
+## Close
+(One memorable line to end the 60-90 sec piece)
+"""
 
 
 def run_weekly(
@@ -34,7 +54,7 @@ def run_weekly(
         raise RuntimeError(
             f"No narrative tracks for {client_id} in {quarter}. Define a plan first."
         )
-    track = tracks[0]  # highest priority
+    track = tracks[0]
 
     target_sids = track["target_subsection_ids"]
     if not target_sids:
@@ -42,7 +62,6 @@ def run_weekly(
         for lid in track["target_layer_ids"]:
             target_sids.extend(s.id for s in layer_by_id(lid).subsections)
 
-    # Collect (subsection_id, fact_row) pairs so we can label by cell
     pairs: List[Tuple[str, sqlite3.Row]] = []
     for sid in target_sids:
         for f in matrix.facts_for_cell(conn, client_id, sid):
@@ -52,7 +71,8 @@ def run_weekly(
     pairs = pairs[:max_facts]
 
     client = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
-    body = _render_weekly_brief(client, track, pairs, week_label)
+
+    body = _generate_weekly(client, track, pairs, week_label)
     title = f"Weekly brief — {client['name']} — {week_label}"
 
     artifact_id = matrix.save_artifact(
@@ -65,11 +85,49 @@ def run_weekly(
             "week_label": week_label,
         },
     )
-
     return {"artifact_id": artifact_id, "title": title, "body": body}
 
 
-def _render_weekly_brief(client, track, pairs, week_label) -> str:
+def _generate_weekly(client, track, pairs, week_label) -> str:
+    header = (
+        f"# Weekly brief — {client['name']}\n"
+        f"_Week:_ {week_label}  \n"
+        f"_Sector:_ {client['sector'] or '—'}  \n"
+        f"_Track:_ **{track['name']}**\n"
+    )
+
+    if not pairs:
+        return (
+            header + "\n"
+            "> ⚠ No fresh green/red facts in target cells this week.\n"
+            "> Run an ingestion cycle, or work the punch-list of grey cells.\n"
+        )
+
+    facts_block = "\n".join(
+        f"{i+1}. [{f['flag'].upper()}] L{sid} "
+        f"{layer_by_id(int(sid.split('.')[0])).name} → "
+        f"{subsection_by_id(sid).name}: \"{f['text']}\""
+        for i, (sid, f) in enumerate(pairs)
+    )
+
+    user_prompt = (
+        f"Client: {client['name']}, sector: {client['sector'] or 'not specified'}\n"
+        f"Narrative track: {track['name']}\n"
+        f"Track angle: {track.get('angle') or 'not specified'}\n"
+        f"Week: {week_label}\n\n"
+        f"Facts (newest first):\n{facts_block}\n\n"
+        "Write the brief now."
+    )
+
+    llm_body = generate(_WEEKLY_SYSTEM, user_prompt, max_tokens=800)
+    if llm_body:
+        return header + "\n" + llm_body
+
+    # fallback: template render
+    return _render_template(client, track, pairs, week_label)
+
+
+def _render_template(client, track, pairs, week_label) -> str:
     lines: List[str] = []
     lines.append(f"# Weekly brief — {client['name']}")
     lines.append(f"_Week:_ {week_label}  ")
@@ -78,12 +136,6 @@ def _render_weekly_brief(client, track, pairs, week_label) -> str:
     if track.get("angle"):
         lines.append(f"_Angle:_ {track['angle']}")
     lines.append("")
-
-    if not pairs:
-        lines.append("> ⚠ No fresh green/red facts in target cells this week.")
-        lines.append("> Run an ingestion cycle, or work the punch-list of grey cells.")
-        return "\n".join(lines)
-
     lines.append("## Hook")
     lines.append(f"_Suggested angle:_ {track.get('angle') or track['name']}")
     lines.append("")
