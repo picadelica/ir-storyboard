@@ -803,10 +803,13 @@ def _guess_channel(url: str) -> str:
 
 def _build_queries(name: str, founder: str, sector: str) -> List[tuple[str, str]]:
     """Return list of (query, suggested_channel) tuples."""
-    q = []
+    # strip company suffixes for cleaner search
+    company = name.replace("AI", "").replace("ai", "").strip() or name
+    q: List[tuple[str, str]] = []
     if founder:
-        q.append((f'"{founder}" interview podcast', "online_interview"))
-        q.append((f'"{founder}" career background', "archival"))
+        # combine founder + company to avoid wrong people with same surname
+        q.append((f'"{founder}" "{company}" interview', "online_interview"))
+        q.append((f'"{founder}" "{company}"', "online_research"))
     q.append((f'"{name}" product technology', "online_research"))
     q.append((f'"{name}" investors funding', "online_research"))
     if sector:

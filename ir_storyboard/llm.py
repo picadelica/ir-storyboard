@@ -212,7 +212,8 @@ def _try_init_anthropic() -> None:
 
         out: List[FactCandidate] = []
         for i, item in enumerate(items):
-            text = texts[i] if i < len(texts) else ""
+            # LLM may return more items than input texts (multiple facts per paragraph)
+            text = texts[i] if i < len(texts) else texts[-1] if texts else ""
             flag = item.flag if item.flag in ("green", "red", "grey") else "grey"
             out.append(FactCandidate(
                 text=text,
