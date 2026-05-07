@@ -12,6 +12,7 @@ import PunchListView from "./components/PunchListView";
 import InterviewView from "./components/InterviewView";
 import ScorecardView from "./components/ScorecardView";
 import WorkView from "./components/WorkView";
+import ResearchView from "./components/ResearchView";
 
 export default function App() {
   return (
@@ -93,6 +94,9 @@ function ClientPage() {
           {activeTab === "work" && (
             <WorkView clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
+          {activeTab === "research" && (
+            <ResearchView clientId={clientId!} />
+          )}
         </div>
       </main>
 
@@ -124,12 +128,13 @@ function ClientPage() {
 
 function Tabs({ clientId, activeTab }: { clientId: string; activeTab: string }) {
   const tabs = [
-    { id: "matrix",     label: "Matrix" },
-    { id: "work",       label: "Work" },
-    { id: "punch",      label: "Punch-list" },
-    { id: "interview",  label: "Interview Qs" },
-    { id: "scorecard",  label: "Scorecard" },
-    { id: "artifacts",  label: "Artifacts" },
+    { id: "matrix",    label: "Matrix" },
+    { id: "research",  label: "Research" },
+    { id: "work",      label: "Work" },
+    { id: "punch",     label: "Punch-list" },
+    { id: "interview", label: "Interview Qs" },
+    { id: "scorecard", label: "Scorecard" },
+    { id: "artifacts", label: "Artifacts" },
   ];
   return (
     <div className="flex items-center gap-0 border-b border-ink-line bg-white px-4">

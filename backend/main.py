@@ -27,7 +27,8 @@ if str(ROOT) not in sys.path:
 from ir_storyboard import db, matrix, outputs, seed
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
-from ir_storyboard.models import LAYERS, ALL_CHANNELS
+from ir_storyboard.llm import web_search, classify_facts_batch
+from ir_storyboard.models import LAYERS, ALL_CHANNELS, subsection_by_id, layer_by_id
 from ir_storyboard.workitems import synthesize_work_items
 
 
@@ -728,6 +729,180 @@ def get_scorecard(client_id: str, conn=Depends(get_conn)):
                     and (r["n_grey"] or 0) == 0
                 ),
             }}
+
+
+# ---------- research & ingest ----------
+
+class SearchHitOut(BaseModel):
+    title: str
+    url: str
+    snippet: str
+    suggested_channel: str
+
+
+class ResearchResult(BaseModel):
+    hits: List[SearchHitOut]
+    queries_used: List[str]
+
+
+class FactCandidateOut(BaseModel):
+    text: str
+    suggested_subsection_id: Optional[str]
+    suggested_subsection_name: str
+    suggested_layer_id: Optional[int]
+    suggested_layer_name: str
+    suggested_flag: str
+    confidence: float
+    rationale: str
+
+
+class IngestPreviewIn(BaseModel):
+    channel: str
+    source_url: str = ""
+    source_title: str = ""
+    text: str
+
+
+class IngestPreviewOut(BaseModel):
+    channel: str
+    source_url: str
+    source_title: str
+    candidates: List[FactCandidateOut]
+
+
+class ConfirmFactIn(BaseModel):
+    text: str
+    subsection_id: str
+    flag: Literal["green", "red", "grey"]
+    channel: Literal["online_research", "online_interview", "archival", "offline_interview"]
+    source_url: str = ""
+    source_title: str = ""
+    evidence_snippet: str = ""
+    confidence: float = 1.0
+
+
+class IngestConfirmIn(BaseModel):
+    facts: List[ConfirmFactIn]
+
+
+class IngestConfirmOut(BaseModel):
+    written: List[int]
+    skipped: int
+
+
+def _guess_channel(url: str) -> str:
+    url_l = url.lower()
+    if any(d in url_l for d in ("youtube.com", "youtu.be", "spotify.com",
+                                 "podcasts.apple", "anchor.fm", "podbean")):
+        return "online_interview"
+    if any(d in url_l for d in ("sec.gov", "wikipedia.org", "books.google",
+                                 "archive.org", "jstor.org")):
+        return "archival"
+    return "online_research"
+
+
+def _build_queries(name: str, founder: str, sector: str) -> List[tuple[str, str]]:
+    """Return list of (query, suggested_channel) tuples."""
+    q = []
+    if founder:
+        q.append((f'"{founder}" interview podcast', "online_interview"))
+        q.append((f'"{founder}" career background', "archival"))
+    q.append((f'"{name}" product technology', "online_research"))
+    q.append((f'"{name}" investors funding', "online_research"))
+    if sector:
+        q.append((f'"{name}" {sector} market', "online_research"))
+    return q
+
+
+def _enrich_candidate(cand) -> FactCandidateOut:
+    sid = cand.suggested_subsection_id
+    sub_name, layer_id, layer_name = "", None, ""
+    if sid:
+        try:
+            sub = subsection_by_id(sid)
+            sub_name = sub.name
+            layer_id = int(sid.split(".")[0])
+            layer_name = layer_by_id(layer_id).name
+        except KeyError:
+            pass
+    return FactCandidateOut(
+        text=cand.text,
+        suggested_subsection_id=sid,
+        suggested_subsection_name=sub_name,
+        suggested_layer_id=layer_id,
+        suggested_layer_name=layer_name,
+        suggested_flag=cand.suggested_flag,
+        confidence=cand.confidence,
+        rationale=cand.rationale,
+    )
+
+
+@app.post("/api/clients/{client_id}/research", response_model=ResearchResult)
+def research_client(client_id: str, conn=Depends(get_conn)):
+    row = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "client not found")
+    d = dict(row)
+    queries = _build_queries(d.get("name", ""), d.get("founder_name", ""),
+                             d.get("sector", ""))
+    seen_urls: set = set()
+    hits: List[SearchHitOut] = []
+    for q, default_channel in queries:
+        for hit in web_search(q, max_hits=4):
+            if hit.url in seen_urls:
+                continue
+            seen_urls.add(hit.url)
+            channel = _guess_channel(hit.url) or default_channel
+            hits.append(SearchHitOut(
+                title=hit.title, url=hit.url,
+                snippet=hit.snippet, suggested_channel=channel,
+            ))
+    return ResearchResult(hits=hits, queries_used=[q for q, _ in queries])
+
+
+@app.post("/api/clients/{client_id}/ingest/preview", response_model=IngestPreviewOut)
+def ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(get_conn)):
+    # split by double newline or keep as single chunk
+    paras = [p.strip() for p in body.text.split("\n\n") if p.strip()]
+    if not paras:
+        paras = [body.text.strip()] if body.text.strip() else []
+    candidates = classify_facts_batch(paras)
+    return IngestPreviewOut(
+        channel=body.channel,
+        source_url=body.source_url,
+        source_title=body.source_title,
+        candidates=[_enrich_candidate(c) for c in candidates if c.suggested_subsection_id],
+    )
+
+
+@app.post("/api/clients/{client_id}/ingest/confirm", response_model=IngestConfirmOut)
+def ingest_confirm(client_id: str, body: IngestConfirmIn, conn=Depends(get_conn)):
+    written: List[int] = []
+    skipped = 0
+    for f in body.facts:
+        # for online channels use text as evidence_snippet if not provided
+        snippet = f.evidence_snippet or (f.text if f.channel in ("online_research", "online_interview", "archival") else "")
+        try:
+            matrix.validate_provenance(f.channel, f.source_url, snippet,
+                                       f.source_title, f.flag)
+        except ValueError:
+            skipped += 1
+            continue
+        archive_url = ""
+        if f.source_url and f.channel in ("online_research", "online_interview", "archival"):
+            archive_url = lookup_snapshot(f.source_url) or ""
+        src_id = matrix.add_source(conn, channel=f.channel,
+                                   title=f.source_title, url=f.source_url,
+                                   archive_url=archive_url)
+        fid = matrix.add_fact(conn, client_id=client_id, subsection_id=f.subsection_id,
+                              text=f.text, flag=f.flag, source_id=src_id,
+                              confidence=f.confidence, evidence_snippet=snippet)
+        if f.source_url and not archive_url and f.channel in ("online_research", "online_interview", "archival"):
+            enqueue_save(f.source_url, src_id, db.connect)
+        written.append(fid)
+    if written:
+        synthesize_work_items(conn, client_id)
+    return IngestConfirmOut(written=written, skipped=skipped)
 
 
 @app.get("/api/clients/{client_id}/notebooklm-bundle")

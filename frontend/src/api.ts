@@ -1,6 +1,8 @@
 import type {
   Artifact, ArtifactSummary, CellSummary, Client, CycleKind,
-  Fact, Layer, PunchList, Scorecard, SeedImportResult, SynthesizeResult, Track, WorkItem,
+  Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
+  Layer, PunchList, ResearchResult, Scorecard,
+  SeedImportResult, SynthesizeResult, Track, WorkItem,
 } from "./types";
 
 const API_BASE = "/api";
@@ -103,6 +105,22 @@ export const api = {
     }),
   patchWorkItem: (wid: number, body: Partial<WorkItem>) =>
     call<WorkItem>(`/work-items/${wid}`, { method: "PATCH", body: JSON.stringify(body) }),
+  research: (clientId: string) =>
+    call<ResearchResult>(`/clients/${clientId}/research`, { method: "POST" }),
+
+  ingestPreview: (clientId: string, body: {
+    channel: string; source_url: string; source_title: string; text: string;
+  }) => call<IngestPreviewOut>(`/clients/${clientId}/ingest/preview`, {
+    method: "POST", body: JSON.stringify(body),
+  }),
+
+  ingestConfirm: (clientId: string, facts: {
+    text: string; subsection_id: string; flag: string; channel: string;
+    source_url?: string; source_title?: string; evidence_snippet?: string; confidence?: number;
+  }[]) => call<IngestConfirmOut>(`/clients/${clientId}/ingest/confirm`, {
+    method: "POST", body: JSON.stringify({ facts }),
+  }),
+
   synthesizeWorkItems: (clientId: string, quarter?: string) => {
     const q = quarter ? `?quarter=${quarter}` : "";
     return call<SynthesizeResult>(`/clients/${clientId}/work-items/synthesize${q}`, { method: "POST" });

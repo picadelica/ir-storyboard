@@ -36,6 +36,41 @@ export interface SeedImportResult {
   track_count: number;
 }
 
+export interface SearchHit {
+  title: string;
+  url: string;
+  snippet: string;
+  suggested_channel: string;
+}
+
+export interface ResearchResult {
+  hits: SearchHit[];
+  queries_used: string[];
+}
+
+export interface FactCandidateOut {
+  text: string;
+  suggested_subsection_id?: string;
+  suggested_subsection_name: string;
+  suggested_layer_id?: number;
+  suggested_layer_name: string;
+  suggested_flag: Flag;
+  confidence: number;
+  rationale: string;
+}
+
+export interface IngestPreviewOut {
+  channel: string;
+  source_url: string;
+  source_title: string;
+  candidates: FactCandidateOut[];
+}
+
+export interface IngestConfirmOut {
+  written: number[];
+  skipped: number;
+}
+
 export type WorkItemStatus = "queued" | "in_progress" | "needs_review" | "done" | "blocked" | "cancelled";
 export type WorkItemType = "fill_gap" | "discover" | "verify" | "deepen" | "interview" | "adjacent" | "cross_ref";
 
