@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from .. import matrix
-from ..llm import classify_fact, FactCandidate
+from ..llm import classify_facts_batch, FactCandidate
 from ..models import LAYERS, channel_can_fill
 
 
@@ -81,9 +81,10 @@ class Channel(ABC):
                 written.append(fid)
             return IngestResult(source_id, written, skipped, warnings)
 
-        # 2) Otherwise auto-classify by paragraphs
-        for para in self._split_paragraphs(payload.raw_text):
-            cand: FactCandidate = classify_fact(para)
+        # 2) Otherwise auto-classify by paragraphs (batch = one LLM call)
+        paras = self._split_paragraphs(payload.raw_text)
+        candidates = classify_facts_batch(paras)
+        for para, cand in zip(paras, candidates):
             if cand.suggested_subsection_id is None:
                 skipped.append(para[:120])
                 continue
