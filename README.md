@@ -43,10 +43,10 @@ Vite-конфиг (`frontend/vite.config.ts`) прокинет все запро
 
 ### Матрица (данные)
 
-Один клиент = 25 ячеек = 8 концентрических слоёв × 2–4 подсекции:
+Один клиент = 24 ячейки = 8 концентрических слоёв × 3 подсекции каждый:
 
 ```
-L1 Founder Personal Story        ← интимность 1 (ядро)
+L1 Founder Personal Story        ← интимность 1 (ядро)   [1.1 Origin · 1.2 Values · 1.3 Fears, Dreams & Identity]
 L2 Founder Professional Story
 L3 Community Culture
 L4 Community Professional Experience

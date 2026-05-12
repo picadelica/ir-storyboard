@@ -88,8 +88,9 @@ LAYERS: List[LayerSpec] = [
         subsections=[
             SubsectionSpec("1.1", "ORIGIN_CHILDHOOD", "Origin & Childhood", sort_order=1),
             SubsectionSpec("1.2", "VALUES_BELIEFS", "Values & Beliefs", sort_order=2),
-            SubsectionSpec("1.3", "FEARS_VULNERABILITY", "Fears & Vulnerability", sort_order=3),
-            SubsectionSpec("1.4", "DREAMS_IDENTITY", "Dreams & Identity", sort_order=4),
+            SubsectionSpec("1.3", "FEARS_DREAMS_IDENTITY", "Fears, Dreams & Identity",
+                           description="Inner self: fears, vulnerabilities, dreams and identity of the founder",
+                           sort_order=3),
         ],
     ),
     LayerSpec(

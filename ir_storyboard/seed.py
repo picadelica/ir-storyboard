@@ -60,8 +60,8 @@ def load_accumulator(conn: sqlite3.Connection) -> None:
             _pf("Хартманн открыто признаёт 'ошибку на $300 миллионов' при инвестиции в Ozon — "
                 "превращает её в опыт, а не травму", "1.3"),
             _pf("Вайзер мечтает создать Founders OS — операционную систему для предпринимателей: "
-                "ликвидность, фандрайзинг, здоровье", "1.4"),
-            _pf("Цель — объединить 12 000 основателей единорогов в глобальную сеть взаимной поддержки", "1.4"),
+                "ликвидность, фандрайзинг, здоровье", "1.3"),
+            _pf("Цель — объединить 12 000 основателей единорогов в глобальную сеть взаимной поддержки", "1.3"),
             _pf("Вайзер — 'Архитектор Ликвидности'; роль — строить Founders OS", "2.2"),
             _pf("Хартманн — 'Защитник Ангелов'; отвечает за Angels Fund II", "2.2"),
         ],
@@ -174,7 +174,7 @@ def load_accumulator(conn: sqlite3.Connection) -> None:
         name="Founders OS — beyond liquidity",
         angle="Wider ecosystem: fundraising (Fundraisly) and energy (KamaLama).",
         target_layer_ids=[1, 2, 7],
-        target_subsection_ids=["1.4", "2.2", "7.1", "7.3"],
+        target_subsection_ids=["1.3", "2.2", "7.1", "7.3"],
         priority=2,
     )
     matrix.add_track(conn,

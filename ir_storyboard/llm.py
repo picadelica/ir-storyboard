@@ -43,8 +43,7 @@ class SearchHit:
 KEYWORDS_BY_SUBSECTION = {
     "1.1": ["родил", "детств", "школ", "семья", "отец", "мать", "born", "childhood"],
     "1.2": ["верит", "ценност", "убежд", "believe", "values"],
-    "1.3": ["страх", "потер", "уязвим", "fear", "loss", "vulnerab"],
-    "1.4": ["мечт", "видение", "идентичн", "dream", "identity", "vision"],
+    "1.3": ["страх", "потер", "уязвим", "мечт", "идентичн", "fear", "loss", "vulnerab", "dream", "identity"],
     "2.1": ["опыт", "построил", "запустил", "founded", "built", "experience", "expertise"],
     "2.2": ["роль", "мотив", "role", "motivation", "ceo", "founder"],
     "2.3": ["сооснователь", "партнёр", "co-founder", "cofounder", "partner"],

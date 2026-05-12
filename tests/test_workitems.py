@@ -34,13 +34,13 @@ def _count(conn, client_id, type_=None, status=None):
     return conn.execute(q, params).fetchone()[0]
 
 
-# ── empty client → 25 fill_gap + 10 interview ──────────────────────────────
+# ── empty client → 24 fill_gap + 9 interview ──────────────────────────────
 
 def test_synthesize_empty_client(conn):
     created = synthesize_work_items(conn, "acme")
-    assert _count(conn, "acme", "fill_gap") == 25
-    # layers 1-3 have 4+3+3=10 subsections
-    assert _count(conn, "acme", "interview") == 10
+    assert _count(conn, "acme", "fill_gap") == 24
+    # layers 1-3 have 3+3+3=9 subsections (L1 collapsed to 3)
+    assert _count(conn, "acme", "interview") == 9
     assert _count(conn, "acme", "deepen") == 0   # empty cells not deepen-eligible
 
 
@@ -58,7 +58,7 @@ def test_synthesize_idempotent(conn):
 def test_green_fact_auto_closes_fill_gap(conn):
     synthesize_work_items(conn, "acme")
     # fill_gap for 1.1 should be queued
-    assert _count(conn, "acme", "fill_gap", "queued") == 25
+    assert _count(conn, "acme", "fill_gap", "queued") == 24
 
     src_id = matrix.add_source(conn, channel="offline_interview",
                                title="Interview 2026-05-07", url="")
@@ -66,7 +66,7 @@ def test_green_fact_auto_closes_fill_gap(conn):
                     text="founder childhood", flag="green", source_id=src_id)
 
     assert _count(conn, "acme", "fill_gap", "needs_review") >= 1
-    assert _count(conn, "acme", "fill_gap", "queued") == 24
+    assert _count(conn, "acme", "fill_gap", "queued") == 23
 
 
 # ── red fact does NOT close fill_gap ───────────────────────────────────────

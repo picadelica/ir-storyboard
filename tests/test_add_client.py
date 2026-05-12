@@ -57,7 +57,7 @@ def test_empty_seed_creates_grid(conn):
     matrix.ensure_full_grid(conn, "empty")
     assert matrix.count_client_facts(conn, "empty") == 0
     summary = matrix.cell_summary(conn, "empty")
-    assert len(summary) == 25  # 25 subsections
+    assert len(summary) == 24  # 24 subsections (8 layers × 3)
 
 
 # ── import-seed with 3 facts → 3 facts + 3 sources ─────────────────────────
