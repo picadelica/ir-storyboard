@@ -9,15 +9,20 @@ Key public API:
     web_search(query, max_hits)    -> List[SearchHit]
     summarize(text, max_chars)     -> str
     generate(system, user, max_tokens) -> str  (cycle content generation)
+    extract_facts_from_llm_report(...)  -> List[ExtractedFact]  (LLM Report Ingest)
 """
 from __future__ import annotations
 
+import json
 import os
 import re
-from dataclasses import dataclass
-from typing import Callable, List, Optional
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 from .models import LAYERS, SubsectionSpec
+
+if TYPE_CHECKING:
+    from .channels.llm_report.citations import ResolvedCitation
 
 
 # ─────────────────────────── data types ────────────────────────────────────
@@ -28,6 +33,17 @@ class FactCandidate:
     suggested_subsection_id: Optional[str]   # "1.1" … "8.3", or None
     suggested_flag: str                       # green / red / grey
     confidence: float = 0.5
+
+
+@dataclass
+class ExtractedFact:
+    """Fact produced by extract_facts_from_llm_report."""
+    text: str                          # one-sentence atomic fact, ≤240 chars
+    subsection_id: str                 # proposed subsection, e.g. "6.1"
+    flag: str                          # green / red / grey
+    cite_ids: List[int] = field(default_factory=list)   # references to ResolvedCitation
+    confidence: float = 0.5
+    raw_paraphrase: str = ""           # source sentence from the LLM report (for audit + snippet MVP)
     rationale: str = ""
 
 
@@ -301,3 +317,129 @@ def _try_init_tavily() -> None:
 
 _try_init_anthropic()
 _try_init_tavily()
+
+
+# ─────────────────── LLM Report Ingest: fact extractor ──────────────────────
+
+_EXTRACT_SYSTEM = """\
+You are a fact extractor for a narrative IR matrix (ir-storyboard).
+
+Matrix subsections available (id — name):
+{subsection_list}
+
+Your task: given one section of a deep-research LLM report, extract ATOMIC facts.
+
+Rules:
+- One fact = one sentence, ≤240 characters.
+- Do NOT invent facts not present in the text.
+- Do NOT merge multiple claims into one fact.
+- Assign one subsection_id from the provided list. Choose the best fit.
+- Assign flag: green (positive/neutral confirmed claim), red (risk/concern/controversy), grey (gap / unknown / not covered).
+- Assign cite_ids: list of integer citation numbers referenced in the sentence (from [N] markers).
+- Assign confidence 0.0–1.0.
+- raw_paraphrase: copy the original sentence from the report that supports this fact (verbatim or near-verbatim, ≤400 chars).
+
+Return ONLY valid JSON, no markdown fences:
+{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey", "cite_ids": [1,2], "confidence": 0.8, "raw_paraphrase": "..."}]}
+
+If no usable facts in the section, return: {"facts": []}
+"""
+
+
+def extract_facts_from_llm_report(
+    section_heading: str,
+    section_paragraphs: List[str],
+    available_subsections: List[str],
+    citation_index: "dict[int, ResolvedCitation]",
+) -> List["ExtractedFact"]:
+    """Extract atomic facts from one report section using LLM.
+
+    Falls back to empty list if no API key configured (prototype mode).
+    """
+    from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
+
+    if not section_paragraphs:
+        return []
+
+    subsection_list = "\n".join(
+        f"{sub.id} — {sub.name} ({layer.name})"
+        for layer in LAYERS
+        for sub in layer.subsections
+        if sub.id in available_subsections
+    )
+
+    cite_ref = "\n".join(
+        f"[{cid}] {c.title or c.canonical_url}"
+        for cid, c in sorted(citation_index.items())
+    ) or "(no citations)"
+
+    user_content = (
+        f"Section: {section_heading}\n\n"
+        + "\n".join(section_paragraphs)
+        + f"\n\nAvailable citations:\n{cite_ref}"
+    )
+
+    system_prompt = _EXTRACT_SYSTEM.format(subsection_list=subsection_list)
+
+    raw = generate(system_prompt, user_content, max_tokens=2048)
+
+    if not raw:
+        return _stub_extract(section_heading, section_paragraphs, available_subsections)
+
+    try:
+        data = json.loads(raw)
+        facts_data = data.get("facts", [])
+    except (json.JSONDecodeError, AttributeError):
+        return _stub_extract(section_heading, section_paragraphs, available_subsections)
+
+    results: List[ExtractedFact] = []
+    for item in facts_data:
+        text = (item.get("text") or "").strip()
+        sid = item.get("subsection_id") or ""
+        if not text or sid not in available_subsections:
+            continue
+        llm_flag = item.get("flag", "green")
+        if llm_flag not in ("green", "red", "grey"):
+            llm_flag = "green"
+        # Apply safety-net heuristics (grey/red override)
+        final_flag = apply_heuristics(text, llm_flag)
+        results.append(ExtractedFact(
+            text=text[:240],
+            subsection_id=sid,
+            flag=final_flag,
+            cite_ids=[int(c) for c in (item.get("cite_ids") or []) if str(c).isdigit()],
+            confidence=max(0.0, min(1.0, float(item.get("confidence", 0.5)))),
+            raw_paraphrase=(item.get("raw_paraphrase") or text)[:400],
+        ))
+
+    return results
+
+
+def _stub_extract(
+    heading: str,
+    paragraphs: List[str],
+    available_subsections: List[str],
+) -> List["ExtractedFact"]:
+    """Deterministic stub when no LLM key is configured."""
+    from .channels.llm_report.classifiers.section_to_layer import suggest_subsection
+    from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
+
+    sid = suggest_subsection(heading)
+    if sid is None or sid not in available_subsections:
+        return []
+
+    results = []
+    for para in paragraphs[:5]:  # limit stub output
+        text = para.strip()
+        if len(text) < 20:
+            continue
+        flag = apply_heuristics(text, "green")
+        results.append(ExtractedFact(
+            text=text[:240],
+            subsection_id=sid,
+            flag=flag,
+            cite_ids=[],
+            confidence=0.3,
+            raw_paraphrase=text[:400],
+        ))
+    return results
