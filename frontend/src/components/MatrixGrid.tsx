@@ -36,12 +36,9 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
         {layers.data.map(L => (
           <div key={L.id} className="flex items-stretch gap-1.5">
             {/* Layer label */}
-            <div className="w-56 shrink-0 px-3 py-2 bg-white rounded border border-ink-line">
-              <div className="text-[10px] font-mono text-ink-mute">L{L.id}</div>
-              <div className="text-xs font-semibold leading-tight">{L.name}</div>
-              <div className="text-[10px] text-ink-mute mt-1 truncate" title={L.primary_channels.join(", ")}>
-                {L.primary_channels.map(ch => ch.replace("_", " ")).join(" · ")}
-              </div>
+            <div className="w-44 shrink-0 flex items-center gap-3 px-3 py-2 bg-white rounded border border-ink-line">
+              <span className="text-5xl font-bold text-slate-200 leading-none select-none">{L.id}</span>
+              <span className="text-xs font-semibold leading-tight text-ink">{L.name}</span>
             </div>
 
             {/* Cells in this layer */}
