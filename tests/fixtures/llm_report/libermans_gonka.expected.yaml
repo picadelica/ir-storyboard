@@ -1,0 +1,400 @@
+# Seed for ir-storyboard pilot: Libermans / Gonka AI
+#
+# ВАЖНО. Этот сид собран не вручную аналитиком, а парсером из готового
+# LLM-отчёта (ChatGPT Deep Research / Agent) — файл `Доработка openClaw.docx`.
+# Это первый прогон нового канала "LLM Report Ingest" (см. LLM_REPORT_INGEST_SPEC.md).
+#
+# Методологические оговорки:
+#   • LLM-отчёт — это всегда `online_research` или (если интервью) `online_interview`.
+#     Каналы offline_interview сюда не попадают по построению.
+#   • evidence_snippet здесь — парафраз из LLM-отчёта. На втором проходе система
+#     должна открыть source_url и заменить snippet на дословную цитату ≥20 chars.
+#   • Слой L1 (Founder Personal Story) намеренно ОСТАВЛЕН ПУСТЫМ —
+#     methodология ir-storyboard запрещает заполнять его через web-источники.
+#   • Несколько ячеек помечены flag=grey ("мы знаем, что не знаем") — это правильно
+#     по методологии: серое поле формирует interview-questions на Стадии 4.
+
+client:
+  id: libermans-gonka
+  name: Libermans (Gonka AI)
+  sector: decentralized AI compute / DePIN
+  one_liner: >
+    Family founder cluster (Liberman) building Gonka — community-owned PoW-2.0
+    network for AI inference, validated by $50M Bitfury investment (Dec 2025).
+founder_name: David & Daniil Liberman
+founder_handle: daniilliberman
+aliases:
+  - Libermans Co
+  - Liberman brothers
+  - Product Science
+  - Gonka Protocol
+initial_quarter: 2026Q2
+seed_tracks:
+  - name: "Bitcoin-of-AI thesis"
+    angle: >
+      Семья Либерман конвертирует капитал и сеть (Snapchat, Product Science,
+      $400M-оценочный Libermans Co) в первый community-owned AI-compute протокол.
+      $50M от Bitfury в первой сделке $1B этического фонда — институциональная
+      валидация тезиса "Bitcoin для AI".
+    target_layer_ids: [2, 6, 8]
+    target_subsection_ids: ["2.1", "2.3", "6.1", "6.2", "8.1", "8.2"]
+    priority: 1
+  - name: "Community-owned governance"
+    angle: >
+      Управление передано сообществу: нет фонда, нет делегирования, нет стейкинга.
+      Это и философия продукта (6.2), и социальная миссия (7.1), и потенциальный
+      регуляторный риск (8.3).
+    target_layer_ids: [6, 7, 8]
+    target_subsection_ids: ["6.2", "7.1", "8.3"]
+    priority: 2
+
+# ---------------- Facts ----------------
+# Каждый факт привязан к source_url (одному из ниже), снабжён flag и
+# evidence_snippet. Канал выбран строго из 4 канонических.
+
+seed_facts:
+
+  # ---------- L2 — Founder Professional Story ----------
+  - subsection_id: "2.1"
+    text: >
+      Братья Либерман выстроили путь из distributed-computing и AR-стартапов в
+      ML-консалтинг: Product Science (2016+) обслуживала Walmart, JP Morgan и
+      Airbnb — это и есть основание их экспертизы для Gonka.
+    flag: green
+    channel: online_interview
+    source_url: https://u.today/interviews/50-million-fundraising-chatgpt-competition-and-decentralized-ai-major-interview-with-gonka-founders-1
+    source_title: "U.Today — major interview with Gonka founders"
+    evidence_snippet: >
+      Their experience includes distributed computing, computer graphics and game
+      development, which later evolved into augmented-reality products and
+      infrastructure-performance optimization (Product Science with Walmart, JP
+      Morgan Chase and Airbnb).
+
+  - subsection_id: "2.1"
+    text: >
+      Gonka инкубирован внутри Product Science в 2024 г. как совместная инициатива
+      web2-учёных и Web3-операторов; mainnet запущен в августе 2025.
+    flag: green
+    channel: archival
+    source_url: https://www.businesswire.com/news/home/20251201364475/en/Bitfury-Announces-%2450-Million-Investment-in-Gonka%E2%80%94a-Decentralized-Network-for-Highefficiency-AI-Compute
+    source_title: "Bitfury — $50M Investment in Gonka (press release)"
+    evidence_snippet: >
+      Gonka launched in August 2025 as a decentralized network for high-efficiency
+      AI compute, incubated by Product Science before control was handed over to
+      the on-chain community.
+
+  - subsection_id: "2.3"
+    text: >
+      Product Science основана четырьмя братьями и сёстрами Либерман — Анной,
+      Давидом, Даниилом и Марией. Это и команда Gonka.
+    flag: green
+    channel: archival
+    source_url: https://www.businesswire.com/news/home/20251201364475/en/Bitfury-Announces-%2450-Million-Investment-in-Gonka%E2%80%94a-Decentralized-Network-for-Highefficiency-AI-Compute
+    source_title: "Bitfury — $50M Investment in Gonka (press release)"
+    evidence_snippet: >
+      Product Science was co-founded by four Liberman siblings — Anna, David,
+      Daniil and Maria — and previously raised funding from Coatue Management,
+      Slow Ventures and K5.
+
+  - subsection_id: "2.2"
+    text: >
+      После запуска основатели передали контроль над сетью сообществу: структура
+      проекта исключает единоличное влияние любого основателя, инвестора или
+      компании.
+    flag: green
+    channel: online_research
+    source_url: https://www.libermans.co/press/forbes
+    source_title: "Libermans Co. (repost Forbes) — Gonka governance"
+    evidence_snippet: >
+      Although Gonka was originally built by Product Science, control of the
+      network has been transferred to its users; no single founder, investor or
+      company can unilaterally influence its development.
+
+  # ---------- L3 — Community Culture (фрагментарно, через интервью) ----------
+  - subsection_id: "3.3"
+    text: >
+      Раунд: $50M от Bitfury в первой сделке $1B этического фонда. Дополнительный
+      слой инвесторов — Coatue, Slow Ventures, K5 (Product Science, 2023) и
+      Marc Andreessen, Chris Dixon, Arielle Zuckerberg, Josh Kushner (через
+      Libermans Co).
+    flag: green
+    channel: online_research
+    source_url: https://www.odaily.news/en/post/5207968
+    source_title: "Odaily — Bitfury invests $50M in Gonka"
+    evidence_snippet: >
+      Bitfury, the mining giant, committed $50 million to Gonka in late 2025;
+      earlier, Product Science raised $18M at a $200M valuation led by Coatue,
+      Slow Ventures and K5, with backing from Andreessen, Dixon and Kushner.
+
+  # ---------- L4 — Community Professional Experience ----------
+  - subsection_id: "4.1"
+    text: >
+      Команда — гибрид: web2-учёные (ML, оптимизация инфраструктуры) и операторы
+      Web3-инфраструктуры. Это методологическая особенность Gonka относительно
+      "чисто-крипто" DePIN-проектов.
+    flag: green
+    channel: online_interview
+    source_url: https://u.today/interviews/50-million-fundraising-chatgpt-competition-and-decentralized-ai-major-interview-with-gonka-founders-1
+    source_title: "U.Today — major interview with Gonka founders"
+    evidence_snippet: >
+      Gonka is the result of a collaboration between web2 scientists and Web3
+      infrastructure operators — a deliberate fusion the founders see as the
+      protocol's main competitive edge.
+
+  - subsection_id: "4.2"
+    text: >
+      Сеть выросла в 16 раз за 2 месяца после запуска; объявленные цели — 10K
+      H100-экв., затем 100K GPU, что сделает Gonka одним из крупнейших игроков
+      AI-инфраструктуры.
+    flag: green
+    channel: online_interview
+    source_url: https://www.binance.com/en/square/post/32276709244242
+    source_title: "CoinRank on Binance Square — Gonka roadmap"
+    evidence_snippet: >
+      The network has grown 16x in two months and is targeting 10,000 GPUs in
+      the short term and 100,000 GPUs longer term, the team told CoinRank.
+
+  - subsection_id: "4.3"
+    text: >
+      Публичных описаний коллективных провалов команды (Product Science или
+      Gonka) в отчёте не найдено. Open research target — серое поле.
+    flag: grey
+    channel: online_research
+    source_url: https://www.odaily.news/en/post/5207968
+    source_title: "Odaily — competitive analysis (no failure stories found)"
+    evidence_snippet: >
+      The article covers Gonka's growth and competitive positioning but does not
+      surface specific failure events, post-mortems or canceled product lines.
+
+  # ---------- L5 — Clients / Stories ----------
+  - subsection_id: "5.1"
+    text: >
+      К декабрю 2025 в сети 2 200+ разработчиков; целевой клиент — команда,
+      запускающая инференс открытых LLM на децентрализованной инфраструктуре.
+    flag: green
+    channel: online_research
+    source_url: https://medium.com/@BitfuryGeorge/gonka-why-i-believe-this-is-the-bitcoin-of-ai-fa702db742d9
+    source_title: "Medium / George Kikvadze — Gonka is the Bitcoin of AI"
+    evidence_snippet: >
+      As of December 2025 Gonka serves over 2,200 developers and 448+ active
+      hosts, processing inference for open-weight LLMs that previously would
+      have required cloud-tier capacity.
+
+  - subsection_id: "5.2"
+    text: >
+      Точка перехода клиентов — OpenAI-compatible API: миграция без переписывания
+      кода + бесплатный инференс в течение grace period (180 эпох, ~6 мес).
+    flag: green
+    channel: online_research
+    source_url: https://cryptobriefing.com/gonka-decentralized-ai-compute-launch/
+    source_title: "Crypto Briefing — Gonka launch coverage"
+    evidence_snippet: >
+      Gonka exposes an OpenAI-compatible API and offers a 180-epoch grace period
+      during which inference is free and active participants are rewarded in GNK
+      tokens daily.
+
+  - subsection_id: "5.3"
+    text: >
+      Конкретные истории клиентов (имена, кейсы, конфликты) не раскрыты в
+      доступных публичных источниках. Это серое поле для интервью со стороны
+      аналитика на Стадии 4.
+    flag: grey
+    channel: online_research
+    source_url: https://medium.com/@BitfuryGeorge/gonka-why-i-believe-this-is-the-bitcoin-of-ai-fa702db742d9
+    source_title: "Medium / George Kikvadze — no named-client cases"
+    evidence_snippet: >
+      The post discusses aggregate metrics (developers, hosts, inference jobs)
+      but does not name individual customers, their challenges or specific
+      migration stories.
+
+  # ---------- L6 — Product & Business ----------
+  - subsection_id: "6.1"
+    text: >
+      Proof-of-Work 2.0 (Sprint consensus): майнеры выполняют реальные задачи AI
+      — инференс и обучение моделей — вместо вычисления хешей; ~100% GPU-цикла
+      направлены на продуктивную работу.
+    flag: green
+    channel: online_research
+    source_url: https://cryptobriefing.com/gonka-decentralized-ai-compute-launch/
+    source_title: "Crypto Briefing — Gonka launch coverage"
+    evidence_snippet: >
+      Unlike traditional Proof-of-Work, Gonka's Sprint consensus channels nearly
+      100% of GPU cycles toward productive AI inference and training instead of
+      meaningless hash computation.
+
+  - subsection_id: "6.1"
+    text: >
+      Архитектура отказывается от стейкинга и делегирования; всё управление —
+      on-chain голосование, чтобы предотвратить концентрацию власти.
+    flag: green
+    channel: online_research
+    source_url: https://www.libermans.co/press/forbes
+    source_title: "Libermans Co. (repost Forbes) — Gonka governance"
+    evidence_snippet: >
+      To ensure fair participation the protocol drops staking and delegation
+      mechanisms; almost all governance is exercised through on-chain votes to
+      prevent concentration of power.
+
+  - subsection_id: "6.2"
+    text: >
+      Grace period — 180 эпох (~6 мес): бесплатный инференс плюс ежедневное
+      распределение GNK активным участникам. Это сознательный subsidy на
+      bootstrap-фазе сети.
+    flag: green
+    channel: online_research
+    source_url: https://cryptobriefing.com/gonka-decentralized-ai-compute-launch/
+    source_title: "Crypto Briefing — Gonka launch coverage"
+    evidence_snippet: >
+      For the first 180 epochs (roughly six months) inference on Gonka is free,
+      and GNK tokens are distributed daily to active participants of the
+      network.
+
+  - subsection_id: "6.2"
+    text: >
+      Управление децентрализовано принципиально: фонд не создан, ни один игрок
+      не может единолично влиять на развитие. 12% всего предложения (120M GNK)
+      выделено community-пулу.
+    flag: green
+    channel: archival
+    source_url: https://www.businesswire.com/news/home/20251201364475/en/Bitfury-Announces-%2450-Million-Investment-in-Gonka%E2%80%94a-Decentralized-Network-for-Highefficiency-AI-Compute
+    source_title: "Bitfury — $50M Investment in Gonka (press release)"
+    evidence_snippet: >
+      Gonka was "fairly launched" with no foundation in control; 120 million GNK
+      (12% of supply) was allocated to the community pool, and the sale of 12
+      million GNK to Bitfury was approved via on-chain vote.
+
+  - subsection_id: "6.3"
+    text: >
+      Капасити: 6 000 H100-экв. к декабрю 2025 (Medium/Bitfury), 10 000 (Product
+      Science), 12 000+ (U.Today, январь 2026) — система растёт быстрее, чем
+      успевают писать обзоры.
+    flag: green
+    channel: online_research
+    source_url: https://medium.com/@BitfuryGeorge/gonka-why-i-believe-this-is-the-bitcoin-of-ai-fa702db742d9
+    source_title: "Medium / George Kikvadze — capacity report"
+    evidence_snippet: >
+      By December 2025 Gonka's resources exceeded the equivalent of 6,000 NVIDIA
+      H100 GPUs, with 448+ active hosts and more than 2,200 developers building
+      on the network.
+
+  - subsection_id: "6.3"
+    text: >
+      Дорожная карта на 2–3 мес: one-click mining + конфиденциальные вычисления
+      (упрощение входа + privacy-сценарии). Также — листинг GNK на крупных
+      биржах.
+    flag: green
+    channel: online_interview
+    source_url: https://www.binance.com/en/square/post/32276709244242
+    source_title: "CoinRank on Binance Square — Gonka roadmap"
+    evidence_snippet: >
+      In the next two to three months the team plans to launch one-click mining
+      and confidential compute, then pursue GNK listings on major exchanges to
+      broaden liquidity.
+
+  # ---------- L7 — Social Impact Vision ----------
+  - subsection_id: "7.1"
+    text: >
+      Декларируемая миссия — "разрушить монополию облаков" и обеспечить
+      демократичный доступ к AI-вычислениям; любой владелец GPU может
+      подключиться и получать GNK.
+    flag: green
+    channel: online_research
+    source_url: https://cryptobriefing.com/gonka-decentralized-ai-compute-launch/
+    source_title: "Crypto Briefing — Gonka launch coverage"
+    evidence_snippet: >
+      The project frames itself as an alternative to centralized cloud
+      providers, opening compute capacity to anyone with a GPU and paying them
+      in GNK tokens for productive work.
+
+  - subsection_id: "7.2"
+    text: >
+      Основатели публично декларируют кооперацию с другими DePIN-сетями
+      (Bittensor, Render, Aethir) и не считают их конкурентами. Цена этой
+      позиции — отказ от "враждебного" нарратива в маркетинге.
+    flag: green
+    channel: online_interview
+    source_url: https://www.binance.com/en/square/post/32276709244242
+    source_title: "CoinRank on Binance Square — cooperation stance"
+    evidence_snippet: >
+      The founders explicitly say they do not view other decentralized-AI
+      projects as competitors but as fellow participants in a movement to
+      democratize compute.
+
+  - subsection_id: "7.3"
+    text: >
+      Внешнее позиционирование (Bitfury / George Kikvadze): Gonka — "Bitcoin для
+      AI". Это амбиция legacy-уровня — стать базовым слоем децентрализованного
+      AI-compute.
+    flag: green
+    channel: online_research
+    source_url: https://medium.com/@BitfuryGeorge/gonka-why-i-believe-this-is-the-bitcoin-of-ai-fa702db742d9
+    source_title: "Medium / George Kikvadze — Bitcoin-of-AI thesis"
+    evidence_snippet: >
+      I believe Gonka is the Bitcoin of AI — a neutral, community-owned base
+      layer for compute, exactly the kind of infrastructure the AI economy is
+      missing today.
+
+  # ---------- L8 — PEST Context ----------
+  - subsection_id: "8.1"
+    text: >
+      Bitfury стартовал $1B фонд этичных технологий — Gonka стала первой и
+      крупнейшей инвестицией этого фонда ($50M, ноябрь-декабрь 2025).
+    flag: green
+    channel: archival
+    source_url: https://www.businesswire.com/news/home/20251201364475/en/Bitfury-Announces-%2450-Million-Investment-in-Gonka%E2%80%94a-Decentralized-Network-for-Highefficiency-AI-Compute
+    source_title: "Bitfury — $50M Investment in Gonka (press release)"
+    evidence_snippet: >
+      Gonka is the first deployment of Bitfury's newly announced $1 billion
+      fund for ethical technology, with $50 million committed across two
+      tranches in late November and early December 2025.
+
+  - subsection_id: "8.2"
+    text: >
+      Конкурентная среда: Bittensor (>12K GPU, фокус на collaboration моделей),
+      Render Network ($30M раунд 2024, визуальные вычисления), Aethir (Q3 2025
+      revenue $39.8M, ARR $147M, enterprise GPU), Cocoon/Toncoin (Telegram,
+      privacy, ранняя стадия).
+    flag: green
+    channel: online_research
+    source_url: https://www.odaily.news/en/post/5207968
+    source_title: "Odaily — competitive landscape of decentralized AI compute"
+    evidence_snippet: >
+      Compared with Bittensor (>12,000 GPUs, model collaboration), Render (raised
+      $30M in 2024 for visual compute), Aethir (enterprise GPU containers, $39.8M
+      Q3 2025 revenue and $147M ARR) and Cocoon (Telegram-native, privacy-first,
+      early stage), Gonka focuses on AI inference and broad GPU participation.
+
+  - subsection_id: "8.3"
+    text: >
+      Регуляторные риски DePIN/AI (securities-классификация GNK, экспортный
+      контроль на AI-инфраструктуру, KYC для майнеров) в отчёте не покрыты.
+      Серое поле — open research target.
+    flag: grey
+    channel: online_research
+    source_url: https://cryptobriefing.com/gonka-decentralized-ai-compute-launch/
+    source_title: "Crypto Briefing — regulatory angle not covered"
+    evidence_snippet: >
+      The launch coverage does not address how regulators in the U.S., EU or
+      Asia might classify GNK or treat decentralized AI compute under
+      AI-specific or securities frameworks.
+
+# ---------------- Ingestion audit ----------------
+ingestion_audit:
+  source_artifact: "Доработка openClaw.docx"
+  agent: "ChatGPT Deep Research / Agent"
+  cite_format: "numbered footnotes [1]..[32]"
+  parsed_at: "2026-05-12T00:00:00"
+  unique_urls_extracted: 7
+  facts_emitted: 23
+  greys: 3
+  channel_methodology_warnings: 3   # L2.2/L3.3 через online_research, L6.3 через online_interview
+                                    # — известные soft-warnings, см. LLM_REPORT_INGEST_SPEC.md §5
+  needs_second_pass:
+    - "Открыть каждый source_url и заменить evidence_snippet парафраз → дословной цитатой ≥20 chars"
+    - "Прогнать identity resolver (Claude/DeepSeek/Tavily) по сущностям Anna/Maria Liberman"
+    - "Cross-check capacity numbers (6K vs 10K vs 12K H100) и расставить даты валидности"
+    - "Tavily-verifier на каждый URL: жив ли источник, что на нём сейчас"
+notes: >
+  Первый прогон нового канала "LLM Report Ingest". Слой L1 не заполнен сознательно —
+  ждёт offline_interview с основателями. Серые ячейки сформируют interview-questions
+  для аналитика на следующем Quarterly-цикле.
