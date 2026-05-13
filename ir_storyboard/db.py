@@ -13,7 +13,7 @@ def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
     """Open (and create if needed) a SQLite connection with FK enforcement."""
     path = Path(db_path) if db_path else DEFAULT_DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
