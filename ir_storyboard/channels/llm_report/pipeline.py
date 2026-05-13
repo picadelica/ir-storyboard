@@ -132,11 +132,12 @@ def preview_llm_report(
             notes.append(f"Skipped section '{section.heading}' (meta/conclusions)")
             continue
 
-        sid = suggest_subsection(section.heading)
-        if sid is None:
-            stats["sections_skipped"] += 1
-            notes.append(f"Section '{section.heading}' not mapped to any subsection — skipped")
-            continue
+        sid_hint = suggest_subsection(section.heading)
+        if sid_hint is None:
+            notes.append(
+                f"Section '{section.heading}' heading not in synonym map — "
+                "passing to LLM for subsection assignment"
+            )
 
         stats["sections_processed"] += 1
         paragraphs = section.paragraphs
@@ -144,6 +145,8 @@ def preview_llm_report(
             for row in section.table_rows:
                 paragraphs = paragraphs + [" | ".join(cell for cell in row if cell)]
 
+        # Always pass all available subsections — LLM picks the best fit even for
+        # unmapped headings (e.g. Claude Research uses different heading names)
         extracted: list[ExtractedFact] = extract_facts_from_llm_report(
             section_heading=section.heading,
             section_paragraphs=paragraphs,

@@ -425,11 +425,14 @@ def _stub_extract(
     from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
 
     sid = suggest_subsection(heading)
+    # If heading not in synonym map, use first available subsection as fallback
     if sid is None or sid not in available_subsections:
+        sid = available_subsections[0] if available_subsections else None
+    if sid is None:
         return []
 
     results = []
-    for para in paragraphs[:5]:  # limit stub output
+    for para in paragraphs[:20]:  # process up to 20 paragraphs in stub mode
         text = para.strip()
         if len(text) < 20:
             continue
