@@ -1020,8 +1020,8 @@ def ingest_preview(
     client_id: str,
     file: UploadFile = File(...),
     agent_hint: Optional[str] = Form(None),
-    conn=Depends(get_conn),
 ):
+    """Preview endpoint opens its own DB connection to avoid SQLite thread issues."""
     from ir_storyboard.channels.llm_report.pipeline import preview_llm_report
     import tempfile, shutil
 
@@ -1029,24 +1029,29 @@ def ingest_preview(
     if suffix not in _ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type: {suffix}. Allowed: {_ALLOWED_EXTENSIONS}")
 
-    # Verify client exists
-    client = conn.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
-    if not client:
-        raise HTTPException(404, f"Client '{client_id}' not found")
-
-    # Save upload to temp location
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = Path(tmp.name)
+    conn = db.connect()
+    db.init_schema(conn)
+    matrix.seed_layers(conn)
 
     try:
-        preview = preview_llm_report(tmp_path, client_id, conn, agent_hint=agent_hint)
-    except Exception as exc:
-        tmp_path.unlink(missing_ok=True)
-        raise HTTPException(422, f"Failed to parse document: {exc}")
+        client = conn.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
+        if not client:
+            raise HTTPException(404, f"Client '{client_id}' not found")
 
-    # Don't delete tmp file yet — commit will move it to artifacts dir
-    # Store temp path in preview for commit phase
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = Path(tmp.name)
+
+        try:
+            preview = preview_llm_report(tmp_path, client_id, conn, agent_hint=agent_hint)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            tmp_path.unlink(missing_ok=True)
+            raise HTTPException(422, f"Failed to parse document: {exc}")
+    finally:
+        conn.close()
+
     return IngestPreviewOut(
         audit_id=preview.audit_id,
         source_artifact_path=str(tmp_path),
