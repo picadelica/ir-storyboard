@@ -1016,13 +1016,14 @@ _ARTIFACTS_DIR = ROOT / "data" / "llm_reports"
         "Returns extracted sources and facts for expert review."
     ),
 )
-async def ingest_preview(
+def ingest_preview(
     client_id: str,
     file: UploadFile = File(...),
     agent_hint: Optional[str] = Form(None),
     conn=Depends(get_conn),
 ):
     from ir_storyboard.channels.llm_report.pipeline import preview_llm_report
+    import tempfile, shutil
 
     suffix = Path(file.filename or "upload.docx").suffix.lower()
     if suffix not in _ALLOWED_EXTENSIONS:
@@ -1034,7 +1035,6 @@ async def ingest_preview(
         raise HTTPException(404, f"Client '{client_id}' not found")
 
     # Save upload to temp location
-    import tempfile, shutil
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = Path(tmp.name)
