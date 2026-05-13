@@ -381,10 +381,16 @@ def extract_facts_from_llm_report(
 
     system_prompt = _EXTRACT_SYSTEM_TMPL.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
 
-    raw = generate(system_prompt, user_content, max_tokens=2048)
+    raw = generate(system_prompt, user_content, max_tokens=4096)
 
     if not raw:
         return _stub_extract(section_heading, section_paragraphs, available_subsections)
+
+    # Strip markdown fences if model wrapped JSON in ```
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1]
+        raw = raw.rsplit("```", 1)[0].strip()
 
     try:
         data = json.loads(raw)
