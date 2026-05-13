@@ -264,31 +264,39 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
         </details>
       )}
 
-      {/* Sources */}
+      {/* Sources — only show those with a URL or title */}
       <div>
-        <div className="text-xs font-medium uppercase text-ink-mute tracking-wide mb-2">
-          Sources ({preview.sources.length})
-        </div>
-        <div className="space-y-1">
-          {preview.sources.map(s => (
-            <div key={s.cite_id} className="flex items-start gap-2 text-xs py-1">
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${CHANNEL_COLORS[s.channel] ?? "bg-slate-100"}`}>
-                {s.channel}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="truncate font-medium">{s.title || s.canonical_url}</div>
-                {s.canonical_url && (
-                  <a href={`https://${s.canonical_url}`} target="_blank" rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline truncate block"
-                    onClick={e => e.stopPropagation()}>
-                    {s.canonical_url}
-                  </a>
-                )}
+        {(() => {
+          const usable = preview.sources.filter(s => s.canonical_url || s.title);
+          const empty = preview.sources.length - usable.length;
+          return (
+            <>
+              <div className="text-xs font-medium uppercase text-ink-mute tracking-wide mb-2">
+                Sources ({usable.length}{empty > 0 ? ` + ${empty} without URL` : ""})
               </div>
-              <span className="text-ink-mute">{s.publisher}</span>
-            </div>
-          ))}
-        </div>
+              <div className="space-y-1">
+                {usable.map(s => (
+                  <div key={s.cite_id} className="flex items-start gap-2 text-xs py-1">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${CHANNEL_COLORS[s.channel] ?? "bg-slate-100"}`}>
+                      {s.channel}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate font-medium">{s.title || s.canonical_url}</div>
+                      {s.canonical_url && (
+                        <a href={`https://${s.canonical_url}`} target="_blank" rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline truncate block"
+                          onClick={e => e.stopPropagation()}>
+                          {s.canonical_url}
+                        </a>
+                      )}
+                    </div>
+                    <span className="text-ink-mute">{s.publisher}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       {/* Facts */}

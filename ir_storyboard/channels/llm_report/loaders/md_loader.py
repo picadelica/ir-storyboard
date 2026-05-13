@@ -9,6 +9,8 @@ from ..ir import LLMReportIR, RawCitation, RawSection
 _RE_BRACKET_N = re.compile(r"\[(\d+)\]")
 _RE_URL = re.compile(r"https?://[^\s\]\)\>\"']+")
 _RE_HEADING = re.compile(r"^(#{1,3})\s+(.+)$")
+# Gemini/Perplexity inline links: [title](url) or [^N]: url
+_RE_INLINE_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)")
 
 _SOURCES_HINTS = ["источники", "sources", "references", "bibliography", "ссылки"]
 _OPEN_Q_HINTS = ["open questions", "вопросы для интервью", "interview questions", "открытые вопросы"]
@@ -79,14 +81,22 @@ def load(path: Path) -> LLMReportIR:
 
     cite_list = [citations[k] for k in sorted(citations)]
     if not cite_list:
-        cite_list = _fallback_extract(text)
+        # Try inline links first (Gemini / Perplexity format)
+        cite_list = _extract_inline_links(text)
         if cite_list:
-            parser_notes.append("No structured citation block; extracted from inline markers")
+            parser_notes.append("No structured citation block; extracted inline [text](url) links")
+        else:
+            cite_list = _fallback_extract(text)
+            if cite_list:
+                parser_notes.append("No structured citation block; extracted [N] markers only (no URLs)")
 
+    cite_format = "bracket_n" if _RE_BRACKET_N.search(text) else (
+        "inline_links" if _RE_INLINE_LINK.search(text) else "unknown"
+    )
     return LLMReportIR(
         source_filename=path.name,
         detected_agent="unknown",
-        detected_cite_format="bracket_n" if _RE_BRACKET_N.search(text) else "unknown",
+        detected_cite_format=cite_format,
         sections=sections,
         citations=cite_list,
         open_questions=open_questions,
@@ -123,7 +133,28 @@ def _parse_md_cite_line(text: str, out: dict[int, RawCitation]) -> None:
         out[cid] = RawCitation(cite_id=cid, raw_marker=str(cid), url=url, title=title[:200])
 
 
+def _extract_inline_links(text: str) -> list[RawCitation]:
+    """Extract [title](url) inline Markdown links (Gemini / Perplexity format)."""
+    seen_urls: dict[str, int] = {}
+    result = []
+    for m in _RE_INLINE_LINK.finditer(text):
+        title = m.group(1).strip()
+        url = m.group(2).rstrip(".,)>")
+        if url in seen_urls:
+            continue
+        cid = len(result) + 1
+        seen_urls[url] = cid
+        result.append(RawCitation(
+            cite_id=cid,
+            raw_marker=m.group(0)[:80],
+            url=url,
+            title=title[:200],
+        ))
+    return result
+
+
 def _fallback_extract(text: str) -> list[RawCitation]:
+    """Last resort: collect unique [N] markers without URLs."""
     seen: set[int] = set()
     result = []
     for m in _RE_BRACKET_N.finditer(text):
