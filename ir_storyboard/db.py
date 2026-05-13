@@ -45,6 +45,25 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "sources", "published_at", "DATE")
     # task-5: collapse L1 from 4 subsections to 3 (merge 1.4 → 1.3)
     _migrate_collapse_1_4(conn)
+    # llm-5: ingest_audit table for LLM Report Ingest provenance
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ingest_audit (
+            id              TEXT PRIMARY KEY,
+            client_id       TEXT NOT NULL,
+            ingest_kind     TEXT NOT NULL CHECK(ingest_kind IN ('llm_report', 'manual_seed')),
+            source_artifact TEXT NOT NULL,
+            agent           TEXT,
+            cite_format     TEXT,
+            parsed_at       TIMESTAMP NOT NULL,
+            facts_emitted   INTEGER NOT NULL,
+            facts_committed INTEGER NOT NULL,
+            greys_emitted   INTEGER NOT NULL,
+            channel_warnings INTEGER NOT NULL,
+            expert_email    TEXT NOT NULL,
+            confirmed_at    TIMESTAMP NOT NULL,
+            preview_json    TEXT NOT NULL
+        )
+    """)
     conn.commit()
 
 
