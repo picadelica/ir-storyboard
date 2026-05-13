@@ -38,7 +38,7 @@ class FactCandidate:
 @dataclass
 class ExtractedFact:
     """Fact produced by extract_facts_from_llm_report."""
-    text: str                          # one-sentence atomic fact, ≤240 chars
+    text: str                          # one-sentence atomic fact, ≤400 chars
     subsection_id: str                 # proposed subsection, e.g. "6.1"
     flag: str                          # green / red / grey
     cite_ids: List[int] = field(default_factory=list)   # references to ResolvedCitation
@@ -328,7 +328,7 @@ Matrix subsections (id — name — parent layer):
 SUBSECTION_LIST_PLACEHOLDER
 
 Extract ATOMIC facts from the ENTIRE document below. Rules:
-- One fact = one sentence, <=240 characters.
+- One fact = one sentence, <=400 characters.
 - Do NOT invent facts not in the text.
 - Do NOT merge multiple claims into one fact.
 - Assign one subsection_id from the list above. Choose the best fit.
@@ -357,7 +357,7 @@ SUBSECTION_LIST_PLACEHOLDER
 Your task: given one section of a deep-research LLM report, extract ATOMIC facts.
 
 Rules:
-- One fact = one sentence, <=240 characters.
+- One fact = one sentence, <=400 characters.
 - Do NOT invent facts not present in the text.
 - Do NOT merge multiple claims into one fact.
 - Assign one subsection_id from the provided list. Choose the best fit.
@@ -437,7 +437,7 @@ def extract_facts_from_llm_report(
         # Apply safety-net heuristics (grey/red override)
         final_flag = apply_heuristics(text, llm_flag)
         results.append(ExtractedFact(
-            text=text[:240],
+            text=text[:400],
             subsection_id=sid,
             flag=final_flag,
             cite_ids=[int(c) for c in (item.get("cite_ids") or []) if str(c).isdigit()],
@@ -471,7 +471,7 @@ def _stub_extract(
             continue
         flag = apply_heuristics(text, "green")
         results.append(ExtractedFact(
-            text=text[:240],
+            text=text[:400],
             subsection_id=sid,
             flag=flag,
             cite_ids=[],
@@ -560,7 +560,7 @@ def extract_facts_from_full_document(
             llm_flag = "green"
         final_flag = apply_heuristics(text, llm_flag)
         results.append(ExtractedFact(
-            text=text[:240],
+            text=text[:400],
             subsection_id=sid,
             flag=final_flag,
             cite_ids=[int(c) for c in (item.get("cite_ids") or []) if str(c).isdigit()],

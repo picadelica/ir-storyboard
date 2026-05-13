@@ -156,7 +156,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                     <span className="px-1.5 py-0.5 bg-white border border-ink-line rounded">{f.source_channel}</span>
                   )}
                   {f.source_title && <span className="truncate">{f.source_title}</span>}
-                  {f.source_url && (
+                  {f.source_url && !f.source_url.startsWith("internal://") && (
                     <a href={f.source_url} target="_blank" rel="noreferrer"
                        className="text-blue-600 underline truncate">src</a>
                   )}
@@ -164,8 +164,15 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                     <a href={f.source_archive_url} target="_blank" rel="noreferrer"
                        className="text-emerald-600 underline truncate" title="Wayback snapshot">📦</a>
                   )}
-                  {f.source_url && isOnlineChannel(f.source_channel as Channel) && !f.source_archive_url && (
+                  {f.source_url && isOnlineChannel(f.source_channel as Channel) && !f.source_archive_url && !f.source_url.startsWith("internal://") && (
                     <span className="text-amber-500" title="Archiving in background…">⏳</span>
+                  )}
+                  {f.ingest_audit_id && (
+                    <a
+                      href={`/api/clients/${clientId}/ingest/llm-report/${f.ingest_audit_id}/file`}
+                      target="_blank" rel="noreferrer"
+                      className="text-violet-600 underline truncate" title="Download source LLM report"
+                    >report</a>
                   )}
                   <span className="ml-auto">{(f.captured_at ?? "").slice(0, 10)}</span>
                 </div>

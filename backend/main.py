@@ -196,6 +196,7 @@ class FactOut(BaseModel):
     source_title: Optional[str] = None
     source_url: Optional[str] = None
     source_archive_url: Optional[str] = None
+    ingest_audit_id: Optional[str] = None
 
 
 class FactCreate(BaseModel):
@@ -1190,6 +1191,42 @@ def ingest_history(
         )
         for r in rows
     ]
+
+
+@app.get(
+    "/api/clients/{client_id}/ingest/llm-report/{audit_id}/file",
+    summary="Download the original LLM report file for a given audit run",
+)
+def download_llm_report_file(
+    client_id: str,
+    audit_id: str,
+    conn=Depends(get_conn),
+):
+    row = conn.execute(
+        "SELECT source_artifact FROM ingest_audit WHERE id = ? AND client_id = ?",
+        (audit_id, client_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "Audit entry not found")
+
+    artifact_path = Path(row["source_artifact"])
+    if not artifact_path.exists():
+        raise HTTPException(404, f"Report file not found at {artifact_path}")
+
+    suffix = artifact_path.suffix.lower()
+    media_types = {
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".md": "text/markdown; charset=utf-8",
+        ".txt": "text/plain; charset=utf-8",
+        ".pdf": "application/pdf",
+    }
+    media_type = media_types.get(suffix, "application/octet-stream")
+    content = artifact_path.read_bytes()
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{artifact_path.name}"'},
+    )
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

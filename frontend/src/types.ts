@@ -187,6 +187,7 @@ export interface Fact {
   source_title?: string;
   source_url?: string;
   source_archive_url?: string;
+  ingest_audit_id?: string;
 }
 
 export interface Track {

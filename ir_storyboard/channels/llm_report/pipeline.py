@@ -223,6 +223,19 @@ def commit_llm_report(
         if canon:
             url_to_source_id[canon] = row["id"]
 
+    # Create a source row for the LLM report itself (fallback source for facts without web URL)
+    report_filename = Path(preview.source_artifact_path).name
+    report_source_key = f"__llm_report_{preview.audit_id}"
+    report_source_id = matrix.add_source(
+        conn,
+        channel="archival",
+        title=f"LLM Report: {report_filename}",
+        url=f"internal://llm_report/{preview.audit_id}",
+        notes=f"audit_id={preview.audit_id}",
+    )
+    url_to_source_id[report_source_key] = report_source_id
+    committed_sources += 1
+
     for rf in facts_to_commit:
         # Find citation for this fact
         cit: ResolvedCitation | None = None
@@ -231,8 +244,8 @@ def commit_llm_report(
             if cit and cit.canonical_url:
                 break
 
-        # Get or create source
-        source_id: int | None = None
+        # Get or create web source; fall back to LLM report source
+        source_id: int = report_source_id
         if cit and cit.canonical_url:
             canon = cit.canonical_url
             if canon in url_to_source_id:
@@ -265,7 +278,7 @@ def commit_llm_report(
             continue
 
         try:
-            matrix.add_fact(
+            fact_id = matrix.add_fact(
                 conn,
                 client_id=client_id,
                 subsection_id=rf.subsection_id,
@@ -274,6 +287,11 @@ def commit_llm_report(
                 source_id=source_id,
                 confidence=rf.confidence,
                 evidence_snippet=rf.evidence_snippet,
+            )
+            # Tag fact with the audit row so we can find the original report
+            conn.execute(
+                "UPDATE facts SET ingest_audit_id = ? WHERE id = ?",
+                (preview.audit_id, fact_id),
             )
             committed_facts += 1
         except ValueError:
