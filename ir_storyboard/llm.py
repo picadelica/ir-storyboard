@@ -321,23 +321,23 @@ _try_init_tavily()
 
 # ─────────────────── LLM Report Ingest: fact extractor ──────────────────────
 
-_EXTRACT_SYSTEM = """\
+_EXTRACT_SYSTEM_TMPL = """\
 You are a fact extractor for a narrative IR matrix (ir-storyboard).
 
 Matrix subsections available (id — name):
-{subsection_list}
+SUBSECTION_LIST_PLACEHOLDER
 
 Your task: given one section of a deep-research LLM report, extract ATOMIC facts.
 
 Rules:
-- One fact = one sentence, ≤240 characters.
+- One fact = one sentence, <=240 characters.
 - Do NOT invent facts not present in the text.
 - Do NOT merge multiple claims into one fact.
 - Assign one subsection_id from the provided list. Choose the best fit.
 - Assign flag: green (positive/neutral confirmed claim), red (risk/concern/controversy), grey (gap / unknown / not covered).
 - Assign cite_ids: list of integer citation numbers referenced in the sentence (from [N] markers).
-- Assign confidence 0.0–1.0.
-- raw_paraphrase: copy the original sentence from the report that supports this fact (verbatim or near-verbatim, ≤400 chars).
+- Assign confidence 0.0-1.0.
+- raw_paraphrase: copy the original sentence from the report that supports this fact (verbatim or near-verbatim, <=400 chars).
 
 Return ONLY valid JSON, no markdown fences:
 {"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey", "cite_ids": [1,2], "confidence": 0.8, "raw_paraphrase": "..."}]}
@@ -379,7 +379,7 @@ def extract_facts_from_llm_report(
         + f"\n\nAvailable citations:\n{cite_ref}"
     )
 
-    system_prompt = _EXTRACT_SYSTEM.format(subsection_list=subsection_list)
+    system_prompt = _EXTRACT_SYSTEM_TMPL.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
 
     raw = generate(system_prompt, user_content, max_tokens=2048)
 
