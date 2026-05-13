@@ -19,7 +19,7 @@ from typing import Optional
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from ... import matrix, db as _db
-from ...llm import ExtractedFact, extract_facts_from_llm_report
+from ...llm import ExtractedFact, extract_facts_from_llm_report, extract_facts_from_full_document
 from ...models import LAYERS
 from .citations import ResolvedCitation, extract_citations
 from .classifiers.section_to_layer import suggest_subsection, SKIP_SECTION_HINTS
@@ -120,75 +120,61 @@ def preview_llm_report(
     citation_index: dict[int, ResolvedCitation] = {c.cite_id: c for c in resolved_citations}
     stats["sources_extracted"] = len(resolved_citations)
 
-    # Step 3: extract facts per section
-    all_extracted: list[tuple[ResolvedFact, ResolvedCitation | None]] = []
-
+    # Step 3: collect content sections (filter meta), then ONE batched LLM call
+    content_sections: list[tuple[str, list[str]]] = []
     for section in ir.sections:
         heading_low = section.heading.lower()
-
-        # Skip meta sections
         if any(skip in heading_low for skip in SKIP_SECTION_HINTS):
             stats["sections_skipped"] += 1
             notes.append(f"Skipped section '{section.heading}' (meta/conclusions)")
             continue
-
-        sid_hint = suggest_subsection(section.heading)
-        if sid_hint is None:
-            notes.append(
-                f"Section '{section.heading}' heading not in synonym map — "
-                "passing to LLM for subsection assignment"
-            )
-
-        stats["sections_processed"] += 1
-        paragraphs = section.paragraphs
+        paragraphs = section.paragraphs[:]
         if section.table_rows:
             for row in section.table_rows:
-                paragraphs = paragraphs + [" | ".join(cell for cell in row if cell)]
+                paragraphs.append(" | ".join(cell for cell in row if cell))
+        content_sections.append((section.heading, paragraphs))
+        stats["sections_processed"] += 1
 
-        # Always pass all available subsections — LLM picks the best fit even for
-        # unmapped headings (e.g. Claude Research uses different heading names)
-        extracted: list[ExtractedFact] = extract_facts_from_llm_report(
-            section_heading=section.heading,
-            section_paragraphs=paragraphs,
-            available_subsections=_AVAILABLE_SUBSECTIONS,
-            citation_index=citation_index,
-        )
+    # Single LLM call for the entire document (avoids per-section timeout issues)
+    all_extracted_facts: list[ExtractedFact] = extract_facts_from_full_document(
+        sections=content_sections,
+        available_subsections=_AVAILABLE_SUBSECTIONS,
+        citation_index=citation_index,
+    )
 
-        # Resolve snippets (paraphrase MVP)
-        resolved = resolve_snippets(extracted, citation_index, mode="paraphrase")
+    resolved_facts = resolve_snippets(all_extracted_facts, citation_index, mode="paraphrase")
 
-        for rf in resolved:
-            layer_id = int(rf.subsection_id.split(".")[0])
+    all_extracted: list[tuple[ResolvedFact, ResolvedCitation | None]] = []
+    for rf in resolved_facts:
+        layer_id = int(rf.subsection_id.split(".")[0])
 
-            # Find citation for this fact (first cite_id)
-            cit: ResolvedCitation | None = None
-            for cid in rf.cite_ids:
-                cit = citation_index.get(cid)
-                if cit:
-                    break
+        cit: ResolvedCitation | None = None
+        for cid in rf.cite_ids:
+            cit = citation_index.get(cid)
+            if cit:
+                break
 
-            # Check methodological restrictions
-            if layer_id in _BLOCKED_LAYERS_FOR_WEB:
-                channel = cit.channel if cit else "online_research"
-                if channel not in _WEB_ALLOWED_FOR:
-                    stats["channel_warnings"] += 1
-                    notes.append(
-                        f"Skipped fact for L{layer_id} subsection {rf.subsection_id} "
-                        f"via {channel} (methodology: L1 blocked for web sources)"
-                    )
-                    continue
-
-            if layer_id in (2, 3) and cit and cit.channel == "online_research":
+        if layer_id in _BLOCKED_LAYERS_FOR_WEB:
+            channel = cit.channel if cit else "online_research"
+            if channel not in _WEB_ALLOWED_FOR:
                 stats["channel_warnings"] += 1
                 notes.append(
-                    f"Soft warning: L{layer_id} fact via online_research "
-                    f"(subsection {rf.subsection_id}) — consider interview confirmation"
+                    f"Skipped fact for L{layer_id} subsection {rf.subsection_id} "
+                    f"via {channel} (methodology: L1 blocked for web sources)"
                 )
+                continue
 
-            all_extracted.append((rf, cit))
-            stats["facts_emitted"] += 1
-            if rf.flag == "grey":
-                stats["greys"] += 1
+        if layer_id in (2, 3) and cit and cit.channel == "online_research":
+            stats["channel_warnings"] += 1
+            notes.append(
+                f"Soft warning: L{layer_id} fact via online_research "
+                f"(subsection {rf.subsection_id}) — consider interview confirmation"
+            )
+
+        all_extracted.append((rf, cit))
+        stats["facts_emitted"] += 1
+        if rf.flag == "grey":
+            stats["greys"] += 1
 
     # Collect unique sources actually used
     used_cite_ids: set[int] = set()

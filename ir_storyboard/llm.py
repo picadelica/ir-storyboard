@@ -319,6 +319,33 @@ _try_init_anthropic()
 _try_init_tavily()
 
 
+# ─────────────────── LLM Report Ingest: full-document batch extractor ────────
+
+_BATCH_EXTRACT_SYSTEM_TMPL = """\
+You are a fact extractor for a narrative IR matrix (ir-storyboard).
+
+Matrix subsections (id — name — parent layer):
+SUBSECTION_LIST_PLACEHOLDER
+
+Extract ATOMIC facts from the ENTIRE document below. Rules:
+- One fact = one sentence, <=240 characters.
+- Do NOT invent facts not in the text.
+- Do NOT merge multiple claims into one fact.
+- Assign one subsection_id from the list above. Choose the best fit.
+- flag: green=confirmed positive/neutral, red=risk/concern, grey=gap/unknown/not covered.
+- cite_ids: list of [N] citation numbers from the sentence.
+- confidence: 0.0-1.0.
+- raw_paraphrase: the original sentence this fact is based on (<=400 chars).
+- Skip L1 subsections (1.1, 1.2, 1.3) — those require live interviews only.
+- Skip "Conclusions" / "Выводы" sections entirely.
+
+Return ONLY valid JSON, no markdown fences:
+{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey", "cite_ids": [1,2], "confidence": 0.85, "raw_paraphrase": "..."}]}
+
+If no usable facts, return: {"facts": []}
+"""
+
+
 # ─────────────────── LLM Report Ingest: fact extractor ──────────────────────
 
 _EXTRACT_SYSTEM_TMPL = """\
@@ -451,4 +478,94 @@ def _stub_extract(
             confidence=0.3,
             raw_paraphrase=text[:400],
         ))
+    return results
+
+
+def extract_facts_from_full_document(
+    sections: "list[tuple[str, list[str]]]",   # [(heading, paragraphs), ...]
+    available_subsections: List[str],
+    citation_index: "dict[int, ResolvedCitation]",
+) -> List["ExtractedFact"]:
+    """Single LLM call for the ENTIRE document — much faster than per-section calls.
+
+    sections: list of (heading, paragraphs) tuples (meta/conclusions already filtered out).
+    Falls back to per-section stub if no LLM key.
+    """
+    from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
+
+    if not sections:
+        return []
+
+    subsection_list = "\n".join(
+        f"{sub.id}  {sub.name}  ({layer.name})"
+        for layer in LAYERS
+        for sub in layer.subsections
+        if sub.id in available_subsections
+    )
+
+    cite_ref = "\n".join(
+        f"[{cid}] {c.title or c.canonical_url}"
+        for cid, c in sorted(citation_index.items())
+    ) or "(no citations)"
+
+    # Build full document text with section headers
+    doc_text = ""
+    for heading, paragraphs in sections:
+        doc_text += f"\n\n## {heading}\n\n"
+        doc_text += "\n".join(paragraphs)
+
+    user_content = (
+        f"Available citations:\n{cite_ref}\n\n"
+        f"Document:\n{doc_text[:12000]}"  # cap at ~12K chars to stay within context
+    )
+
+    system_prompt = _BATCH_EXTRACT_SYSTEM_TMPL.replace(
+        "SUBSECTION_LIST_PLACEHOLDER", subsection_list
+    )
+
+    raw = generate(system_prompt, user_content, max_tokens=8192)
+
+    if not raw:
+        # Stub fallback: process each section individually
+        from .channels.llm_report.classifiers.section_to_layer import suggest_subsection
+        results = []
+        for heading, paragraphs in sections:
+            results.extend(_stub_extract(heading, paragraphs, available_subsections))
+        return results
+
+    # Strip markdown fences
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1]
+        raw = raw.rsplit("```", 1)[0].strip()
+
+    try:
+        data = json.loads(raw)
+        facts_data = data.get("facts", [])
+    except (json.JSONDecodeError, AttributeError, KeyError):
+        from .channels.llm_report.classifiers.section_to_layer import suggest_subsection
+        results = []
+        for heading, paragraphs in sections:
+            results.extend(_stub_extract(heading, paragraphs, available_subsections))
+        return results
+
+    results: List[ExtractedFact] = []
+    for item in facts_data:
+        text = (item.get("text") or "").strip()
+        sid = item.get("subsection_id") or ""
+        if not text or sid not in available_subsections:
+            continue
+        llm_flag = item.get("flag", "green")
+        if llm_flag not in ("green", "red", "grey"):
+            llm_flag = "green"
+        final_flag = apply_heuristics(text, llm_flag)
+        results.append(ExtractedFact(
+            text=text[:240],
+            subsection_id=sid,
+            flag=final_flag,
+            cite_ids=[int(c) for c in (item.get("cite_ids") or []) if str(c).isdigit()],
+            confidence=max(0.0, min(1.0, float(item.get("confidence", 0.5)))),
+            raw_paraphrase=(item.get("raw_paraphrase") or text)[:400],
+        ))
+
     return results
