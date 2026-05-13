@@ -13,6 +13,7 @@ import InterviewView from "./components/InterviewView";
 import ScorecardView from "./components/ScorecardView";
 import WorkView from "./components/WorkView";
 import ResearchView from "./components/ResearchView";
+import IngestLLMReport from "./components/IngestLLMReport";
 
 export default function App() {
   return (
@@ -97,6 +98,9 @@ function ClientPage() {
           {activeTab === "research" && (
             <ResearchView clientId={clientId!} />
           )}
+          {activeTab === "ingest" && (
+            <IngestLLMReport clientId={clientId!} onJumpToCell={onJumpToCell} />
+          )}
         </div>
       </main>
 
@@ -129,6 +133,7 @@ function ClientPage() {
 function Tabs({ clientId, activeTab }: { clientId: string; activeTab: string }) {
   const tabs = [
     { id: "matrix",    label: "Matrix" },
+    { id: "ingest",    label: "Ingest" },
     { id: "research",  label: "Research" },
     { id: "work",      label: "Work" },
     { id: "punch",     label: "Punch-list" },

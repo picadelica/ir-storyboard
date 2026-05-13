@@ -100,6 +100,70 @@ export interface SynthesizeResult {
   skipped: number;
 }
 
+// ── LLM Report Ingest types ──────────────────────────────────────────────────
+
+export interface LLMResolvedCitation {
+  cite_id: number;
+  canonical_url: string;
+  title: string;
+  publisher: string;
+  channel: string;
+  classification_reason: string;
+}
+
+export interface LLMResolvedFact {
+  text: string;
+  subsection_id: string;
+  flag: "green" | "red" | "grey";
+  cite_ids: number[];
+  confidence: number;
+  raw_paraphrase: string;
+  evidence_snippet: string;
+  needs_review: boolean;
+  snippet_source: string;
+}
+
+export interface LLMIngestPreview {
+  audit_id: string;
+  source_artifact_path: string;
+  detected_agent: string | null;
+  sources: LLMResolvedCitation[];
+  facts: LLMResolvedFact[];
+  notes: string[];
+  stats: Record<string, number>;
+}
+
+export interface LLMIngestEdit {
+  fact_idx: number;
+  action: "keep" | "edit" | "drop";
+  new_text?: string;
+  new_subsection_id?: string;
+  new_flag?: string;
+}
+
+export interface LLMIngestCommitOut {
+  audit_id: string;
+  committed_facts: number;
+  committed_sources: number;
+  skipped_facts: number;
+  ingested_at: string;
+}
+
+export interface LLMIngestAuditRow {
+  id: string;
+  client_id: string;
+  ingest_kind: string;
+  source_artifact: string;
+  agent: string | null;
+  parsed_at: string;
+  facts_emitted: number;
+  facts_committed: number;
+  greys_emitted: number;
+  channel_warnings: number;
+  expert_email: string;
+  confirmed_at: string;
+}
+
 export interface CellSummary {
   subsection_id: string;
   subsection_name: string;

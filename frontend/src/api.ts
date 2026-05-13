@@ -1,7 +1,9 @@
 import type {
   Artifact, ArtifactSummary, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
-  Layer, PunchList, ResearchResult, Scorecard,
+  Layer,
+  LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
+  PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem,
 } from "./types";
 
@@ -125,4 +127,35 @@ export const api = {
     const q = quarter ? `?quarter=${quarter}` : "";
     return call<SynthesizeResult>(`/clients/${clientId}/work-items/synthesize${q}`, { method: "POST" });
   },
+
+  // LLM Report Ingest
+  llmIngestPreview: (clientId: string, file: File, agentHint?: string): Promise<LLMIngestPreview> => {
+    const form = new FormData();
+    form.append("file", file);
+    if (agentHint) form.append("agent_hint", agentHint);
+    return fetch(`${API_BASE}/clients/${clientId}/ingest/llm-report/preview`, {
+      method: "POST",
+      body: form,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(`${res.status} ${res.statusText} — ${detail}`);
+      }
+      return res.json() as Promise<LLMIngestPreview>;
+    });
+  },
+
+  llmIngestCommit: (
+    clientId: string,
+    preview: LLMIngestPreview,
+    edits: LLMIngestEdit[],
+    expertEmail: string,
+  ): Promise<LLMIngestCommitOut> =>
+    call<LLMIngestCommitOut>(`/clients/${clientId}/ingest/llm-report/commit`, {
+      method: "POST",
+      body: JSON.stringify({ preview, edits, expert_email: expertEmail }),
+    }),
+
+  llmIngestHistory: (clientId: string): Promise<LLMIngestAuditRow[]> =>
+    call<LLMIngestAuditRow[]>(`/clients/${clientId}/ingest/llm-report/history`),
 };
