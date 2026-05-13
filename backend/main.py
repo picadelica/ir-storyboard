@@ -12,10 +12,10 @@ import json
 import sqlite3
 import sys
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import yaml
-from fastapi import FastAPI, HTTPException, Depends, Query, Response
+from fastapi import FastAPI, File, Form, HTTPException, Depends, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
 
@@ -925,3 +925,280 @@ def download_notebooklm_bundle(client_id: str, artifact_ids: str,
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="notebooklm_bundle_{client_id}.md"'},
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM Report Ingest endpoints (Task 6)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Pydantic schemas ──────────────────────────────────────────────────────────
+
+class ResolvedCitationOut(BaseModel):
+    cite_id: int
+    canonical_url: str
+    title: str
+    publisher: str
+    channel: str
+    classification_reason: str
+
+
+class ResolvedFactOut(BaseModel):
+    text: str
+    subsection_id: str
+    flag: str
+    cite_ids: List[int]
+    confidence: float
+    raw_paraphrase: str
+    evidence_snippet: str
+    needs_review: bool
+    snippet_source: str
+
+
+class IngestPreviewOut(BaseModel):
+    audit_id: str
+    source_artifact_path: str
+    detected_agent: Optional[str]
+    sources: List[ResolvedCitationOut]
+    facts: List[ResolvedFactOut]
+    notes: List[str]
+    stats: Dict[str, Any]
+
+
+class IngestEditIn(BaseModel):
+    fact_idx: int
+    action: Literal["keep", "edit", "drop"]
+    new_text: Optional[str] = None
+    new_subsection_id: Optional[str] = None
+    new_flag: Optional[str] = None
+
+
+class IngestCommitIn(BaseModel):
+    preview: IngestPreviewOut
+    edits: List[IngestEditIn] = []
+    expert_email: str
+
+
+class IngestCommitOut(BaseModel):
+    audit_id: str
+    committed_facts: int
+    committed_sources: int
+    skipped_facts: int
+    ingested_at: str
+
+
+class IngestAuditOut(BaseModel):
+    id: str
+    client_id: str
+    ingest_kind: str
+    source_artifact: str
+    agent: Optional[str]
+    parsed_at: str
+    facts_emitted: int
+    facts_committed: int
+    greys_emitted: int
+    channel_warnings: int
+    expert_email: str
+    confirmed_at: str
+
+
+# ── Preview endpoint ──────────────────────────────────────────────────────────
+
+_ALLOWED_EXTENSIONS = {".docx", ".md", ".txt", ".pdf"}
+_ARTIFACTS_DIR = ROOT / "data" / "llm_reports"
+
+
+@app.post(
+    "/api/clients/{client_id}/ingest/llm-report/preview",
+    response_model=IngestPreviewOut,
+    summary="Parse LLM report and return preview (no DB writes)",
+    description=(
+        "Upload a .docx/.md/.pdf LLM deep-research report. "
+        "Returns extracted sources and facts for expert review."
+    ),
+)
+async def ingest_preview(
+    client_id: str,
+    file: UploadFile = File(...),
+    agent_hint: Optional[str] = Form(None),
+    conn=Depends(get_conn),
+):
+    from ir_storyboard.channels.llm_report.pipeline import preview_llm_report
+
+    suffix = Path(file.filename or "upload.docx").suffix.lower()
+    if suffix not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type: {suffix}. Allowed: {_ALLOWED_EXTENSIONS}")
+
+    # Verify client exists
+    client = conn.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
+    if not client:
+        raise HTTPException(404, f"Client '{client_id}' not found")
+
+    # Save upload to temp location
+    import tempfile, shutil
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = Path(tmp.name)
+
+    try:
+        preview = preview_llm_report(tmp_path, client_id, conn, agent_hint=agent_hint)
+    except Exception as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(422, f"Failed to parse document: {exc}")
+
+    # Don't delete tmp file yet — commit will move it to artifacts dir
+    # Store temp path in preview for commit phase
+    return IngestPreviewOut(
+        audit_id=preview.audit_id,
+        source_artifact_path=str(tmp_path),
+        detected_agent=preview.detected_agent,
+        sources=[ResolvedCitationOut(**s.__dict__) for s in preview.sources],
+        facts=[ResolvedFactOut(**f.__dict__) for f in preview.facts],
+        notes=preview.notes,
+        stats=preview.stats,
+    )
+
+
+# ── Commit endpoint ───────────────────────────────────────────────────────────
+
+@app.post(
+    "/api/clients/{client_id}/ingest/llm-report/commit",
+    response_model=IngestCommitOut,
+    summary="Commit previewed LLM report into the matrix",
+    description=(
+        "Takes an IngestPreviewOut (from preview endpoint) + expert edits, "
+        "writes sources and facts to the matrix. Idempotent — safe to call twice."
+    ),
+)
+def ingest_commit(
+    client_id: str,
+    body: IngestCommitIn,
+    conn=Depends(get_conn),
+):
+    from ir_storyboard.channels.llm_report.pipeline import (
+        commit_llm_report, IngestPreview,
+    )
+    from ir_storyboard.channels.llm_report.citations import ResolvedCitation
+    from ir_storyboard.channels.llm_report.snippet_resolver import ResolvedFact
+
+    client = conn.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
+    if not client:
+        raise HTTPException(404, f"Client '{client_id}' not found")
+
+    # Reconstruct internal preview from pydantic model
+    sources = [
+        ResolvedCitation(
+            cite_id=s.cite_id,
+            canonical_url=s.canonical_url,
+            title=s.title,
+            publisher=s.publisher,
+            channel=s.channel,  # type: ignore[arg-type]
+            classification_reason=s.classification_reason,
+        )
+        for s in body.preview.sources
+    ]
+    facts = [
+        ResolvedFact(
+            text=f.text,
+            subsection_id=f.subsection_id,
+            flag=f.flag,
+            cite_ids=f.cite_ids,
+            confidence=f.confidence,
+            raw_paraphrase=f.raw_paraphrase,
+            evidence_snippet=f.evidence_snippet,
+            needs_review=f.needs_review,
+            snippet_source=f.snippet_source,  # type: ignore[arg-type]
+        )
+        for f in body.preview.facts
+    ]
+
+    preview = IngestPreview(
+        audit_id=body.preview.audit_id,
+        source_artifact_path=body.preview.source_artifact_path,
+        detected_agent=body.preview.detected_agent,
+        sources=sources,
+        facts=facts,
+        notes=body.preview.notes,
+        stats=body.preview.stats,
+    )
+
+    # Archive source artifact
+    artifact_path = _archive_artifact(
+        src=Path(body.preview.source_artifact_path),
+        client_id=client_id,
+        audit_id=body.preview.audit_id,
+    )
+    if artifact_path:
+        preview.source_artifact_path = str(artifact_path)
+
+    edits = [e.model_dump() for e in body.edits]
+
+    try:
+        result = commit_llm_report(preview, client_id, conn, body.expert_email, edits)
+    except Exception as exc:
+        raise HTTPException(422, f"Commit failed: {exc}")
+
+    return IngestCommitOut(
+        audit_id=result.audit_id,
+        committed_facts=result.committed_facts,
+        committed_sources=result.committed_sources,
+        skipped_facts=result.skipped_facts,
+        ingested_at=result.ingested_at,
+    )
+
+
+# ── History endpoint ──────────────────────────────────────────────────────────
+
+@app.get(
+    "/api/clients/{client_id}/ingest/llm-report/history",
+    response_model=List[IngestAuditOut],
+    summary="List past LLM Report Ingest runs for a client",
+)
+def ingest_history(
+    client_id: str,
+    limit: int = Query(20, ge=1, le=200),
+    conn=Depends(get_conn),
+):
+    rows = conn.execute(
+        """SELECT id, client_id, ingest_kind, source_artifact, agent,
+                  parsed_at, facts_emitted, facts_committed, greys_emitted,
+                  channel_warnings, expert_email, confirmed_at
+             FROM ingest_audit
+             WHERE client_id = ? AND ingest_kind = 'llm_report'
+             ORDER BY confirmed_at DESC
+             LIMIT ?""",
+        (client_id, limit),
+    ).fetchall()
+    return [
+        IngestAuditOut(
+            id=r["id"],
+            client_id=r["client_id"],
+            ingest_kind=r["ingest_kind"],
+            source_artifact=r["source_artifact"],
+            agent=r["agent"],
+            parsed_at=r["parsed_at"],
+            facts_emitted=r["facts_emitted"],
+            facts_committed=r["facts_committed"],
+            greys_emitted=r["greys_emitted"],
+            channel_warnings=r["channel_warnings"],
+            expert_email=r["expert_email"],
+            confirmed_at=r["confirmed_at"],
+        )
+        for r in rows
+    ]
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _archive_artifact(src: Path, client_id: str, audit_id: str) -> Optional[Path]:
+    """Move uploaded file to data/llm_reports/<client_id>/<audit_id>.<ext>."""
+    if not src.exists():
+        return None
+    import shutil
+    dest_dir = _ARTIFACTS_DIR / client_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{audit_id}{src.suffix}"
+    try:
+        shutil.move(str(src), dest)
+        return dest
+    except Exception:
+        return src
