@@ -310,15 +310,21 @@ def get_channels():
 # ---------- clients ----------
 
 def _row_to_fact(row) -> FactOut:
+    keys = row.keys()
+    source_url = row["source_url"]
+    # Don't expose internal:// pseudo-URLs to the frontend — use ingest_audit_id link instead
+    if source_url and source_url.startswith("internal://"):
+        source_url = None
     return FactOut(
         id=row["id"], text=row["text"], flag=row["flag"],
         confidence=row["confidence"] or 1.0,
         captured_at=row["captured_at"],
-        evidence_snippet=row["evidence_snippet"] if "evidence_snippet" in row.keys() else None,
+        evidence_snippet=row["evidence_snippet"] if "evidence_snippet" in keys else None,
         source_channel=row["source_channel"],
         source_title=row["source_title"],
-        source_url=row["source_url"],
-        source_archive_url=row["source_archive_url"] if "source_archive_url" in row.keys() else None,
+        source_url=source_url,
+        source_archive_url=row["source_archive_url"] if "source_archive_url" in keys else None,
+        ingest_audit_id=row["ingest_audit_id"] if "ingest_audit_id" in keys else None,
     )
 
 
