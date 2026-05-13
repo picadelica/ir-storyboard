@@ -30,11 +30,23 @@ def load(path: Path) -> LLMReportIR:
         ) from e
 
     pages_text: list[str] = []
-    with pdfplumber.open(str(path)) as pdf:
-        for page in pdf.pages:
-            t = page.extract_text()
-            if t:
-                pages_text.append(t)
+    try:
+        with pdfplumber.open(str(path)) as pdf:
+            for page in pdf.pages:
+                try:
+                    t = page.extract_text()
+                    if t:
+                        pages_text.append(t)
+                except Exception:
+                    continue
+    except Exception as e:
+        # pdfplumber can't read this PDF — try to extract raw text via pypdf fallback
+        pages_text = _pypdf_fallback(path)
+        if not pages_text:
+            raise ValueError(
+                f"Cannot extract text from PDF: {e}. "
+                "The file may be scanned, encrypted, or in an unsupported format."
+            ) from e
 
     full_text = "\n".join(pages_text)
     lines = full_text.splitlines()
@@ -147,6 +159,21 @@ def _parse_cite_line(text: str, out: dict[int, RawCitation]) -> None:
         url = um.group(0).rstrip(".,)>") if um else ""
         title = rest[: um.start()].strip() if um else rest[:200]
         out[cid] = RawCitation(cite_id=cid, raw_marker=str(cid), url=url, title=title[:200])
+
+
+def _pypdf_fallback(path: Path) -> list[str]:
+    """Try pypdf as a second PDF text extractor if pdfplumber fails."""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(str(path))
+        pages = []
+        for page in reader.pages:
+            t = page.extract_text()
+            if t:
+                pages.append(t)
+        return pages
+    except Exception:
+        return []
 
 
 def _fallback_extract(text: str) -> list[RawCitation]:
