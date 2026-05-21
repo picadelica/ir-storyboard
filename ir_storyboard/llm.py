@@ -45,6 +45,10 @@ class ExtractedFact:
     confidence: float = 0.5
     raw_paraphrase: str = ""           # source sentence from the LLM report (for audit + snippet MVP)
     rationale: str = ""
+    # Transcript-mode fields (populated only for YouTube ingest)
+    segment_idx_start: Optional[int] = None   # index into transcript.segments
+    segment_idx_end: Optional[int] = None
+    layer_warning: bool = False               # True if LLM flagged this as a restricted layer
 
 
 @dataclass
@@ -339,9 +343,23 @@ Extract ATOMIC facts from the ENTIRE document below. Rules:
 - Skip L1 subsections (1.1, 1.2, 1.3) — those require live interviews only.
 - Skip "Conclusions" / "Выводы" sections entirely.
 
-Return ONLY valid JSON, no markdown fences:
-{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey", "cite_ids": [1,2], "confidence": 0.85, "raw_paraphrase": "..."}]}
+If input is a TRANSCRIPT (single section with timestamped segments,
+indicated by transcript_segments in metadata):
+- For each fact, return segment_idx_start and segment_idx_end pointing
+  to segment indices that contain the literal phrasing supporting the fact.
+- Range should be tight: prefer 1-3 segments. Wider only if a single
+  segment is shorter than 20 characters.
+- Skip filler segments ("um, you know, like, basically...").
+- DO NOT invent segments — if the transcript doesn't say it, don't emit the fact.
+- L1 subsections (1.1, 1.2, 1.3) ARE allowed for transcripts when the founder
+  directly speaks about personal history, values, or fears.
+- LayerGuard will reject facts mapped to L5/L6/L8 (online_interview cannot feed
+  those layers). If you must emit such a fact, set layer_warning=true.
 
+Return ONLY valid JSON, no markdown fences:
+{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey", "cite_ids": [1], "confidence": 0.85, "raw_paraphrase": "...", "segment_idx_start": 0, "segment_idx_end": 2, "layer_warning": false}]}
+
+For non-transcript mode, omit segment_idx_* and layer_warning fields.
 If no usable facts, return: {"facts": []}
 """
 
@@ -559,6 +577,10 @@ def extract_facts_from_full_document(
         if llm_flag not in ("green", "red", "grey"):
             llm_flag = "green"
         final_flag = apply_heuristics(text, llm_flag)
+
+        seg_start = item.get("segment_idx_start")
+        seg_end = item.get("segment_idx_end")
+
         results.append(ExtractedFact(
             text=text[:400],
             subsection_id=sid,
@@ -566,6 +588,9 @@ def extract_facts_from_full_document(
             cite_ids=[int(c) for c in (item.get("cite_ids") or []) if str(c).isdigit()],
             confidence=max(0.0, min(1.0, float(item.get("confidence", 0.5)))),
             raw_paraphrase=(item.get("raw_paraphrase") or text)[:400],
+            segment_idx_start=int(seg_start) if seg_start is not None else None,
+            segment_idx_end=int(seg_end) if seg_end is not None else None,
+            layer_warning=bool(item.get("layer_warning", False)),
         ))
 
     return results
