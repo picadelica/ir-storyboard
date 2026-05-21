@@ -166,6 +166,13 @@ export interface LLMIngestAuditRow {
 
 // ── YouTube Ingest ────────────────────────────────────────────────────────────
 
+export interface YouTubeJobOut {
+  job_id: string;
+  status: "processing" | "done" | "error";
+  error?: string | null;
+  result?: YouTubePreviewResult | null;
+}
+
 export interface YouTubeVideoMeta {
   video_id: string;
   canonical_url: string;

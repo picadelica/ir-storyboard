@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
@@ -29,6 +29,9 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
   const [dropped, setDropped] = useState<Set<number>>(new Set());
   const [overrides, setOverrides] = useState<Set<number>>(new Set());
   const [expertEmail, setExpertEmail] = useState("");
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<string>("");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qc = useQueryClient();
 
   const history = useQuery({
@@ -36,13 +39,32 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
     queryFn: () => api.youtubeHistory(clientId),
   });
 
+  function stopPolling() {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }
+
+  useEffect(() => () => stopPolling(), []);
+
   const previewMut = useMutation({
-    mutationFn: () => api.youtubePreview(clientId, url),
-    onSuccess: (data) => {
-      setPreview(data);
-      setDropped(new Set());
-      setOverrides(new Set());
-      setScreen("preview");
+    mutationFn: () => api.youtubePreviewStart(clientId, url),
+    onSuccess: (job) => {
+      setJobId(job.job_id);
+      setJobStatus("processing");
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await api.youtubePreviewStatus(clientId, job.job_id);
+          setJobStatus(status.status);
+          if (status.status === "done" && status.result) {
+            stopPolling();
+            setPreview(status.result);
+            setDropped(new Set());
+            setOverrides(new Set());
+            setScreen("preview");
+          } else if (status.status === "error") {
+            stopPolling();
+          }
+        } catch { stopPolling(); }
+      }, 5000);
     },
   });
 
@@ -115,18 +137,22 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
               {previewMut.isPending ? "Processing…" : "Preview"}
             </button>
           </div>
-          {previewMut.isPending && (
-            <div className="text-xs text-ink-mute">
-              Downloading audio and transcribing… (~5–10 min for a 1h video)
+          {(previewMut.isPending || jobStatus === "processing") && (
+            <div className="text-xs text-ink-mute space-y-1">
+              <div>Запущено в фоне — обрабатываем…</div>
+              <div className="text-[10px] text-slate-400">
+                Скачиваем аудио → транскрибируем → извлекаем факты.
+                Для часового видео ~5–15 мин. Можно закрыть этот таб и вернуться.
+              </div>
+            </div>
+          )}
+          {jobStatus === "error" && (
+            <div className="text-sm text-red-600 bg-red-50 rounded p-3">
+              Ошибка: {previewMut.error ? String(previewMut.error) : "что-то пошло не так"}
             </div>
           )}
         </div>
 
-        {previewMut.isError && (
-          <div className="text-sm text-red-600 bg-red-50 rounded p-3">
-            {String(previewMut.error)}
-          </div>
-        )}
 
         {/* History table */}
         {history.data && history.data.length > 0 && (
@@ -189,6 +215,9 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
               setScreen("input");
               setPreview(null);
               setUrl("");
+              setJobId(null);
+              setJobStatus("");
+              stopPolling();
               previewMut.reset();
               commitMut.reset();
             }}

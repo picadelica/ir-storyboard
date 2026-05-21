@@ -1235,6 +1235,31 @@ def download_llm_report_file(
     )
 
 
+# ── YouTube Ingest — async job store ─────────────────────────────────────────
+import threading as _threading
+
+_yt_jobs: dict[str, dict] = {}   # job_id → {status, result, error}
+_yt_jobs_lock = _threading.Lock()
+
+
+def _yt_job_run(job_id: str, client_id: str, url: str, db_path: str) -> None:
+    """Background thread: run full preview pipeline and store result."""
+    import sqlite3 as _sq
+    from ir_storyboard import db as _db
+    conn = _db.connect(_db.DEFAULT_DB_PATH if not db_path else _db.Path(db_path))
+    _db.init_schema(conn)
+    from ir_storyboard.channels.llm_report.youtube_pipeline import run_youtube_preview
+    try:
+        result = run_youtube_preview(client_id, url, conn)
+        with _yt_jobs_lock:
+            _yt_jobs[job_id] = {"status": "done", "result": result, "error": None}
+    except Exception as exc:
+        with _yt_jobs_lock:
+            _yt_jobs[job_id] = {"status": "error", "result": None, "error": str(exc)}
+    finally:
+        conn.close()
+
+
 # ── YouTube Ingest endpoints ──────────────────────────────────────────────────
 
 class YouTubePreviewIn(BaseModel):
@@ -1310,21 +1335,14 @@ class YouTubeHistoryOut(BaseModel):
     confirmed_at: Optional[str]
 
 
-@app.post(
-    "/api/clients/{client_id}/ingest/youtube/preview",
-    response_model=YouTubePreviewOut,
-    summary="Parse YouTube video and return preview (no DB writes except transcript cache)",
-)
-def youtube_preview(client_id: str, body: YouTubePreviewIn, conn=Depends(get_conn)):
-    _check_client(client_id, conn)
-    from ir_storyboard.channels.llm_report.youtube_pipeline import run_youtube_preview
-    try:
-        result = run_youtube_preview(client_id, body.url, conn)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+class YouTubeJobOut(BaseModel):
+    job_id: str
+    status: str   # queued | processing | done | error
+    error: Optional[str] = None
+    result: Optional[YouTubePreviewOut] = None
 
+
+def _preview_out_from_result(result) -> YouTubePreviewOut:
     return YouTubePreviewOut(
         preview_id=result.preview_id,
         meta=YouTubeMetaOut(
@@ -1366,6 +1384,48 @@ def youtube_preview(client_id: str, body: YouTubePreviewIn, conn=Depends(get_con
         notes=result.notes,
         stats=result.stats,
     )
+
+
+@app.post(
+    "/api/clients/{client_id}/ingest/youtube/preview",
+    response_model=YouTubeJobOut,
+    summary="Start async YouTube preview job — returns job_id immediately",
+)
+def youtube_preview(client_id: str, body: YouTubePreviewIn, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    import uuid as _uuid
+    from ir_storyboard import db as _db
+    job_id = str(_uuid.uuid4())
+    with _yt_jobs_lock:
+        _yt_jobs[job_id] = {"status": "processing", "result": None, "error": None}
+    t = _threading.Thread(
+        target=_yt_job_run,
+        args=(job_id, client_id, body.url, str(_db.DEFAULT_DB_PATH)),
+        daemon=True,
+    )
+    t.start()
+    return YouTubeJobOut(job_id=job_id, status="processing")
+
+
+@app.get(
+    "/api/clients/{client_id}/ingest/youtube/preview/{job_id}",
+    response_model=YouTubeJobOut,
+    summary="Poll async YouTube preview job status",
+)
+def youtube_preview_status(client_id: str, job_id: str, conn=Depends(get_conn)):
+    with _yt_jobs_lock:
+        job = _yt_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if job["status"] == "done" and job["result"] is not None:
+        return YouTubeJobOut(
+            job_id=job_id,
+            status="done",
+            result=_preview_out_from_result(job["result"]),
+        )
+    if job["status"] == "error":
+        return YouTubeJobOut(job_id=job_id, status="error", error=job["error"])
+    return YouTubeJobOut(job_id=job_id, status="processing")
 
 
 @app.post(

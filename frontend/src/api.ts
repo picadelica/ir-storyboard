@@ -5,7 +5,7 @@ import type {
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem,
-  YouTubeCommitOut, YouTubeHistoryRow, YouTubePreviewResult,
+  YouTubeCommitOut, YouTubeHistoryRow, YouTubeJobOut, YouTubePreviewResult,
 } from "./types";
 
 const API_BASE = "/api";
@@ -161,11 +161,14 @@ export const api = {
     call<LLMIngestAuditRow[]>(`/clients/${clientId}/ingest/llm-report/history`),
 
   // ── YouTube Ingest ──────────────────────────────────────────────────────────
-  youtubePreview: (clientId: string, url: string): Promise<YouTubePreviewResult> =>
-    call<YouTubePreviewResult>(`/clients/${clientId}/ingest/youtube/preview`, {
+  youtubePreviewStart: (clientId: string, url: string): Promise<YouTubeJobOut> =>
+    call<YouTubeJobOut>(`/clients/${clientId}/ingest/youtube/preview`, {
       method: "POST",
       body: JSON.stringify({ url }),
     }),
+
+  youtubePreviewStatus: (clientId: string, jobId: string): Promise<YouTubeJobOut> =>
+    call<YouTubeJobOut>(`/clients/${clientId}/ingest/youtube/preview/${jobId}`),
 
   youtubeCommit: (
     clientId: string,
