@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# System deps: ffmpeg for audio chunking (YouTube ingest)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Install backend deps
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
