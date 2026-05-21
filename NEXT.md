@@ -10,79 +10,43 @@
 
 **Последнее обновление:** 2026-05-21
 **Ветка:** `feat/v2`
-**Working tree:** clean (untracked: `.claude/settings.local.json`, `12.jpeg`, `CLAUDE.md`, `NEXT.md`, `YOUTUBE_INGEST_SPEC.md`, `CLAUDE_TASKS_youtube_ingest.md` — все ждут первого коммита)
-**HEAD:** `65fea25 fix: pdf_loader per-page error isolation + pypdf fallback for Claude PDFs`
+**Working tree:** clean
+**HEAD:** `youtube-8: e2e test + DEPLOY + docs update`
 
 ## Что в фокусе
 
-**YouTube Ingest — дизайн готов, код впереди.** Сегодня согласовали с
-пользователем feature: YouTube URL → Whisper → факты в матрице с
-timestamp-anchor URL и дословной цитатой. Решения:
+**YouTube Ingest — реализован (youtube-1..8).** Серия коммитов полностью закрыта:
 
-* Channel: `online_interview` детерминистично (не новый пятый канал)
-* Transcriber: **local-faster-whisper + large-v3-turbo по умолчанию**.
-  Данные клиента не покидают VPS. OpenAI Whisper API и Deepgram — за
-  feature-flag, как «emergency mode» если capacity сервера не хватает.
-  Модель (~1.6 GB) хранится в Docker volume `whisper-models:/data/whisper`,
-  загружается lazy.
-* Captions не используем — Whisper всегда (выбор пользователя за качество)
-* **Видео любой длины** — режется ffmpeg'ом на 60-минутные куски с 5-сек
-  overlap, transcribe идёт по куску, timestamps сдвигаются обратно к
-  глобальной шкале, overlap-дубликаты режутся по Jaccard ≥ 0.8 + timestamp
-  proximity
-* LayerGuard режет факты в L5/L6/L8 (online_interview не имеет на них права)
-* Provenance: `source_url` с `?t={start_sec}s`, `evidence_snippet` —
-  literal text из transcript segments
-* Preview UI — копия `IngestLLMReport.tsx` с URL-input вместо file-upload
-* Идемпотентность по `video_id` через новую таблицу `youtube_transcripts`
-
-**Артефакты дизайна** (не закоммичены, ждут ревью):
-* `YOUTUBE_INGEST_SPEC.md` — контракт (12 разделов)
-* `CLAUDE_TASKS_youtube_ingest.md` — план на 8 задач (`youtube-1` .. `youtube-8`),
-  с готовым промптом для Claude Code и блоком pre-flight вопросов
+* **Task 1** `youtube-1`: URL normalization + yt-dlp metadata (12 тестов)
+* **Task 2** `youtube-2`: Audio fetch + ffmpeg chunking + faster-whisper transcriber + cache (11 тестов)
+* **Task 3** `youtube-3`: Transcript → ReportIR adapter + forced_channel (5 тестов)
+* **Task 4** `youtube-4`: FactExtractor transcript-mode (segment_idx_*, layer_warning) (3 теста)
+* **Task 5** `youtube-5`: SnippetAnchor + LayerGuard (10 тестов)
+* **Task 6** `youtube-6`: Backend endpoints (preview/commit/history) + youtube_pipeline (6 тестов)
+* **Task 7** `youtube-7`: Frontend IngestYouTube component + tab
+* **Task 8** `youtube-8`: E2E test + DEPLOY + docs update (2 cached тестов)
 
 **LLM Report Ingest** — закрыт (серия `llm-1 … llm-8` + ~14 пост-фиксов).
 
-## Чего ещё не делали (известные хвосты)
+## Открытые вопросы (известные хвосты)
 
-Это не TODO-лист, это просто «осознанно отложено». Хвататься без явного
-запроса пользователя не нужно.
+- **Embedding-dedup** — используется string similarity (Jaccard ≥ 0.85). Embeddings — v2,
+  когда станет ясно где string similarity не справляется.
+- **Speaker diarization** — не реализовано. Whisper не различает спикеров.
+  Deepgram nova-3 умеет — за feature-flag, v2.
+- **Параллелизация chunks** — `TRANSCRIBE_PARALLEL_CHUNKS=1` (последовательно).
+  Замерить на реальном сервере перед включением > 1.
+- **Private/age-restricted видео** — не поддерживаются (требуют cookies yt-dlp).
+- **Видео без аудио / только музыка** — Whisper вернёт пустой транскрипт, ingest пропустится.
 
-- **YouTube Ingest** — спека готова, имплементация ждёт. Полный план
-  в `CLAUDE_TASKS_youtube_ingest.md`.
-- **SnippetResolver v2 (LLM Report Ingest).** На MVP `evidence_snippet`
-  = парафраз LLM, помеченный `paraphrase=True` в audit. Дословная
-  цитата с открытием URL — за feature-flag, не дефолт.
-- **Idempotency на повторный ингест того же файла** заявлена в LLM
-  Report spec; проверить, что test_llm_report_e2e реально гоняет два
-  прохода и ассертит `0 new sources / 0 new facts` на втором.
-- **Adjacent / cross_ref work-items** так и не генерируются автоматически.
-- **Audit log diff-вью** — нет UI, только данные.
-- **Hygiene refactor:** переименовать `channels/llm_report/` →
-  `ingest/` после YouTube Ingest (см. конец `CLAUDE_TASKS_youtube_ingest.md`).
+## Следующие разумные шаги (если пользователь скажет «продолжаем»)
 
-## Открытые вопросы (по YouTube Ingest)
-
-Решения, принятые в этой сессии (НЕ переоткрывать):
-- ✓ Transcriber по умолчанию: local-faster-whisper + large-v3-turbo
-- ✓ Длинные видео: ffmpeg chunking 60 мин + 5 сек overlap, в MVP
-
-Остался один open вопрос, задан в pre-flight промпта для Claude Code:
-1. Embedding для fact-dedup: реальный provider или fallback на string
-   similarity (Jaccard/Levenshtein)? Default: string similarity на MVP.
-
-## Следующий разумный шаг (если пользователь скажет «продолжаем»)
-
-1. Закоммитить артефакты дизайна:
-   ```
-   git add CLAUDE.md NEXT.md YOUTUBE_INGEST_SPEC.md CLAUDE_TASKS_youtube_ingest.md
-   git commit -m "docs: session-continuity (CLAUDE.md/NEXT.md) + YouTube Ingest spec"
-   ```
-2. Запустить Claude Code в этой папке с промптом из
-   `CLAUDE_TASKS_youtube_ingest.md` (§Промпт для Claude Code) — он начнёт
-   с pre-flight вопросов, потом пойдёт по `youtube-1` .. `youtube-8`.
-3. Альтернативно — вместе пройти Task 1 (URL normalization + metadata)
-   здесь, в этой сессии, чтобы откалибровать стиль и подход. Это ~30 мин.
+1. **Деплой youtube-1..8 на сервер** (git push + docker-compose rebuild).
+   Проверить `GET /api/clients/gonkaai/ingest/youtube/history`.
+2. **Протестировать на реальном YouTube URL** (gonkaai / accumulator интервью).
+3. **Hygiene refactor** (отдельная сессия):
+   - Переименовать `channels/llm_report/` → `ingest/`
+   - Вынести shared компоненты `<IngestPreview>` из IngestLLMReport + IngestYouTube
 
 ## Как обновлять этот файл
 
@@ -96,6 +60,3 @@ timestamp-anchor URL и дословной цитатой. Решения:
 5. Скорректировать "Следующий разумный шаг".
 6. git add NEXT.md && git commit -m "chore: update NEXT.md"
 ```
-
-Цель — чтобы в следующей сессии я по этому файлу + git log за минуту
-восстановил картину и продолжил без расспросов.

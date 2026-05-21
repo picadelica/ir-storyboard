@@ -356,6 +356,84 @@ dcp up -d --build
 
 ---
 
+---
+
+## YouTube Ingest — операционные требования
+
+### Новые переменные окружения (.env)
+
+```
+# YouTube Ingest
+TRANSCRIBER=local-faster-whisper          # дефолт; или openai-whisper-1, deepgram-nova-3
+FASTER_WHISPER_MODEL=large-v3-turbo       # или large-v3 (точнее, в 2× медленнее)
+FASTER_WHISPER_COMPUTE_TYPE=int8          # int8_float16 для GPU; int8 для CPU
+FASTER_WHISPER_DEVICE=auto                # cpu / cuda / auto
+FASTER_WHISPER_MODEL_DIR=/data/whisper    # volume mount — модель скачивается при первом запуске
+TRANSCRIBE_PARALLEL_CHUNKS=1             # 2+ для параллелизации >2h видео (замерить сначала)
+MAX_CHUNK_SEC=3600                        # 60-минутные куски (ffmpeg); менять не нужно
+CHUNK_OVERLAP_SEC=5                       # overlap между кусками (s)
+OPENAI_API_KEY=                           # опционально — для TRANSCRIBER=openai-whisper-1
+DEEPGRAM_API_KEY=                         # опционально — для TRANSCRIBER=deepgram-nova-3
+```
+
+### Инфраструктурные требования
+
+**ffmpeg в backend Dockerfile:**
+```dockerfile
+RUN apt-get update && apt-get install -y ffmpeg
+```
+
+**Volume для весов faster-whisper (~1.6 GB) в docker-compose.yml:**
+```yaml
+services:
+  backend:
+    volumes:
+      - whisper-models:/data/whisper
+
+volumes:
+  whisper-models:
+```
+Модель скачивается lazy при первом ingest-запросе (~60 сек на первый cold start).
+После рестарта контейнера веса остаются в volume.
+
+**nginx proxy_read_timeout ≥ 1800s** (уже настроен для LLM ingest).
+Worst-case: 2-часовое видео на CPU — ~80 мин wall-clock.
+
+### Операционный профиль (без внешних API)
+
+| Ресурс | Пик | Комментарий |
+|--------|-----|-------------|
+| CPU    | ~100% | faster-whisper использует все ядра во время транскрипции |
+| RAM    | ~4 GB | модель + pipeline |
+| Disk   | ~2 GB | модель в volume; до ~50 MB на аудио-файл в /tmp |
+| Network | ~30 MB/час | только скачивание аудио (yt-dlp) |
+| Стоимость | $0 | только электричество сервера |
+
+### Emergency mode (OpenAI Whisper API)
+
+Если capacity сервера не хватает (CPU < 4 ядер / RAM < 4 GB):
+```
+TRANSCRIBER=openai-whisper-1
+OPENAI_API_KEY=sk-...
+```
+Стоимость: ~$0.006/мин, ~$0.36/час аудио. Wall-clock: ~5–10 мин.
+Данные клиента передаются в OpenAI — учитывать при NDA.
+
+### Проверка после деплоя
+
+```bash
+# Проверить что ffmpeg доступен
+docker compose exec backend ffmpeg -version | head -1
+
+# Проверить volume
+docker volume inspect ir-storyboard_whisper-models
+
+# Тест endpoint (должен вернуть [])
+curl -s https://<domain>/api/clients/accumulator/ingest/youtube/history
+```
+
+---
+
 ## Известные ограничения v1
 
 - Нет авторизации. Доступ к UI и API — у любого, кто знает домен. Если нужно ограничить — поставить Basic Auth в Caddy или базовый IP-allowlist:

@@ -66,8 +66,18 @@ ir_storyboard/          ← ядро (чистый Python пакет, без Fas
 │   ├── online_interview.py
 │   ├── online_research.py
 │   ├── archival.py
-│   └── llm_report/     ← LLM Report Ingest pipeline (loaders, citation,
-│                         classifier, extractor, snippet, merger)
+│   └── llm_report/     ← LLM Report Ingest + YouTube Ingest pipeline
+│       ├── ir.py              ← LLMReportIR, RawCitation (+ forced_channel)
+│       ├── citations.py       ← extract_citations (respects forced_channel)
+│       ├── transcript_to_ir.py ← Transcript → LLMReportIR adapter
+│       ├── youtube_pipeline.py ← run_youtube_preview / run_youtube_commit
+│       ├── snippet_anchor.py  ← AnchoredFact + timestamp URL + literal snippet
+│       ├── layer_guard.py     ← LayerGuard: blocks L5/L6/L8 for online_interview
+│       └── loaders/
+│           ├── youtube_url.py    ← URL normalization + yt-dlp metadata
+│           ├── youtube_audio.py  ← fetch_audio (yt-dlp → opus 16kHz mono)
+│           ├── audio_chunker.py  ← split_audio (ffmpeg, ≤3600s + overlap)
+│           └── transcriber.py    ← Transcriber protocol + faster-whisper / OpenAI / Deepgram
 ├── cycles/             ← weekly / event / quarterly
 ├── outputs.py          ← punch-list, interview qs, scorecard, NotebookLM bundle
 ├── workitems.py        ← Process Layer (fill_gap / interview / adjacent / cross_ref)
@@ -104,9 +114,18 @@ tests/fixtures/llm_report/
    исключение, если LLM-отчёт цитирует подкаст/интервью с фаундером. Веб-факт в
    L1/L2/L3 → `skipped` с warning, не в БД.
 
-3. **LLM Report Ingest — это оркестратор, не пятый канал.** Источники из
-   LLM-отчёта классифицируются и пишутся через один из четырёх существующих
-   каналов. Никаких новых `Channel` подклассов.
+3. **LLM Report Ingest и YouTube Ingest — оркестраторы, не новые каналы.**
+   Источники пишутся через один из четырёх существующих каналов (`online_interview`
+   для YouTube — детерминистично, без URL-классификатора). Никаких новых
+   `Channel` подклассов.
+
+4a. **LayerGuard (YouTube Ingest).** `layer_guard.guard_layers()` вызывается
+    до `MatrixMerger`. Факты в L5/L6/L8 → `skipped` с warning; аналитик
+    может override на confirm-экране явным кликом. Никаких новых каналов.
+
+4b. **forced_channel в RawCitation.** YouTube ingest выставляет
+    `forced_channel='online_interview'` — `extract_citations` пропускает
+    URL-классификатор и использует значение напрямую.
 
 4. **Идемпотентность.** `add-client` с тем же id → fail (или `--force`).
    Повторный ингест того же LLM-отчёта → 0 new sources / 0 new facts (по
