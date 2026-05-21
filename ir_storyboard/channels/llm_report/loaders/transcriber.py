@@ -133,8 +133,16 @@ class OpenAIWhisperTranscriber:
         if language_hint:
             kwargs["language"] = language_hint
 
+        # OpenAI requires a supported extension; .opus files are ogg containers
+        upload_name = audio_path.name
+        if audio_path.suffix.lower() == ".opus":
+            upload_name = audio_path.stem + ".ogg"
+
         with open(audio_path, "rb") as f:
-            resp = client.audio.transcriptions.create(file=f, **kwargs)
+            resp = client.audio.transcriptions.create(
+                file=(upload_name, f, "audio/ogg"),
+                **kwargs,
+            )
 
         segments = []
         for seg in (resp.segments or []):
