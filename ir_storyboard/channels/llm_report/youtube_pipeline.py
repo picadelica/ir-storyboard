@@ -133,6 +133,8 @@ def run_youtube_preview(
     from pathlib import Path
 
     _ensure_audit_table_youtube(conn)
+    from .loaders.transcriber import _ensure_transcripts_table
+    _ensure_transcripts_table(conn)
 
     preview_id = str(uuid.uuid4())
     notes: list[str] = []
