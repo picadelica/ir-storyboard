@@ -1235,6 +1235,208 @@ def download_llm_report_file(
     )
 
 
+# ── YouTube Ingest endpoints ──────────────────────────────────────────────────
+
+class YouTubePreviewIn(BaseModel):
+    url: str
+
+
+class YouTubeFactOut(BaseModel):
+    text: str
+    subsection_id: str
+    flag: str
+    confidence: float
+    evidence_snippet: str
+    source_url: str
+    snippet_start_sec: float
+    snippet_end_sec: float
+    needs_review: bool
+    layer_warning: bool
+
+
+class YouTubeSkippedOut(BaseModel):
+    text: str
+    subsection_id: str
+    reason: str
+    source_url: str
+    evidence_snippet: str
+    override_allowed: bool = True
+
+
+class YouTubeMetaOut(BaseModel):
+    video_id: str
+    canonical_url: str
+    title: str
+    channel_name: str
+    duration_sec: int
+    upload_date: str
+    language: Optional[str]
+
+
+class YouTubePreviewOut(BaseModel):
+    preview_id: str
+    meta: YouTubeMetaOut
+    facts: List[YouTubeFactOut]
+    skipped: List[YouTubeSkippedOut]
+    from_cache: bool
+    transcribe_cost_usd: Optional[float]
+    notes: List[str]
+    stats: Dict[str, Any]
+
+
+class YouTubeCommitIn(BaseModel):
+    preview_id: str
+    accepted_fact_ids: Optional[List[int]] = None   # None = accept all
+    overrides: List[Dict[str, Any]] = []
+    expert_email: str = "anonymous@example.com"
+
+
+class YouTubeCommitOut(BaseModel):
+    committed: int
+    skipped: int
+
+
+class YouTubeHistoryOut(BaseModel):
+    id: str
+    client_id: str
+    video_id: Optional[str]
+    transcriber: Optional[str]
+    transcribe_cost_usd: Optional[float]
+    parsed_at: str
+    facts_emitted: int
+    facts_committed: int
+    channel_warnings: int
+    expert_email: str
+    confirmed_at: Optional[str]
+
+
+@app.post(
+    "/api/clients/{client_id}/ingest/youtube/preview",
+    response_model=YouTubePreviewOut,
+    summary="Parse YouTube video and return preview (no DB writes except transcript cache)",
+)
+def youtube_preview(client_id: str, body: YouTubePreviewIn, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    from ir_storyboard.channels.llm_report.youtube_pipeline import run_youtube_preview
+    try:
+        result = run_youtube_preview(client_id, body.url, conn)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+
+    return YouTubePreviewOut(
+        preview_id=result.preview_id,
+        meta=YouTubeMetaOut(
+            video_id=result.meta.video_id,
+            canonical_url=result.meta.canonical_url,
+            title=result.meta.title,
+            channel_name=result.meta.channel_name,
+            duration_sec=result.meta.duration_sec,
+            upload_date=result.meta.upload_date,
+            language=result.meta.language,
+        ),
+        facts=[
+            YouTubeFactOut(
+                text=f.text,
+                subsection_id=f.subsection_id,
+                flag=f.flag,
+                confidence=f.confidence,
+                evidence_snippet=f.evidence_snippet,
+                source_url=f.source_url,
+                snippet_start_sec=f.snippet_start_sec,
+                snippet_end_sec=f.snippet_end_sec,
+                needs_review=f.needs_review,
+                layer_warning=f.layer_warning,
+            )
+            for f in result.facts
+        ],
+        skipped=[
+            YouTubeSkippedOut(
+                text=s.fact.text,
+                subsection_id=s.fact.subsection_id,
+                reason=s.reason,
+                source_url=s.fact.source_url,
+                evidence_snippet=s.fact.evidence_snippet,
+            )
+            for s in result.skipped
+        ],
+        from_cache=result.from_cache,
+        transcribe_cost_usd=result.transcribe_cost_usd,
+        notes=result.notes,
+        stats=result.stats,
+    )
+
+
+@app.post(
+    "/api/clients/{client_id}/ingest/youtube/commit",
+    response_model=YouTubeCommitOut,
+    summary="Commit previewed YouTube facts into the matrix",
+)
+def youtube_commit(client_id: str, body: YouTubeCommitIn, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    from ir_storyboard.channels.llm_report.youtube_pipeline import run_youtube_commit
+    try:
+        result = run_youtube_commit(
+            preview_id=body.preview_id,
+            accepted_fact_ids=body.accepted_fact_ids or [],
+            overrides=body.overrides,
+            conn=conn,
+            expert_email=body.expert_email,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return YouTubeCommitOut(committed=result.committed, skipped=result.skipped)
+
+
+@app.get(
+    "/api/clients/{client_id}/ingest/youtube/history",
+    response_model=List[YouTubeHistoryOut],
+    summary="List past YouTube Ingest runs for a client",
+)
+def youtube_history(
+    client_id: str,
+    limit: int = Query(20, ge=1, le=200),
+    conn=Depends(get_conn),
+):
+    _check_client(client_id, conn)
+    from ir_storyboard.channels.llm_report.youtube_pipeline import _ensure_audit_table_youtube
+    _ensure_audit_table_youtube(conn)
+    rows = conn.execute(
+        """SELECT id, client_id, video_id, transcriber, transcribe_cost_usd,
+                  parsed_at, facts_emitted, facts_committed, channel_warnings,
+                  expert_email, confirmed_at
+             FROM ingest_audit
+             WHERE client_id = ? AND ingest_kind = 'youtube'
+             ORDER BY parsed_at DESC
+             LIMIT ?""",
+        (client_id, limit),
+    ).fetchall()
+    return [
+        YouTubeHistoryOut(
+            id=r["id"],
+            client_id=r["client_id"],
+            video_id=r["video_id"],
+            transcriber=r["transcriber"],
+            transcribe_cost_usd=r["transcribe_cost_usd"],
+            parsed_at=r["parsed_at"],
+            facts_emitted=r["facts_emitted"],
+            facts_committed=r["facts_committed"],
+            channel_warnings=r["channel_warnings"],
+            expert_email=r["expert_email"],
+            confirmed_at=r["confirmed_at"],
+        )
+        for r in rows
+    ]
+
+
+def _check_client(client_id: str, conn) -> None:
+    row = conn.execute("SELECT id FROM clients WHERE id = ?", (client_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, f"Client '{client_id}' not found")
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _archive_artifact(src: Path, client_id: str, audit_id: str) -> Optional[Path]:

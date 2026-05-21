@@ -52,21 +52,85 @@ def init_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS ingest_audit (
             id              TEXT PRIMARY KEY,
             client_id       TEXT NOT NULL,
-            ingest_kind     TEXT NOT NULL CHECK(ingest_kind IN ('llm_report', 'manual_seed')),
+            ingest_kind     TEXT NOT NULL CHECK(ingest_kind IN ('llm_report', 'manual_seed', 'youtube')),
             source_artifact TEXT NOT NULL,
             agent           TEXT,
             cite_format     TEXT,
             parsed_at       TIMESTAMP NOT NULL,
-            facts_emitted   INTEGER NOT NULL,
-            facts_committed INTEGER NOT NULL,
-            greys_emitted   INTEGER NOT NULL,
-            channel_warnings INTEGER NOT NULL,
-            expert_email    TEXT NOT NULL,
-            confirmed_at    TIMESTAMP NOT NULL,
-            preview_json    TEXT NOT NULL
+            facts_emitted   INTEGER NOT NULL DEFAULT 0,
+            facts_committed INTEGER NOT NULL DEFAULT 0,
+            greys_emitted   INTEGER NOT NULL DEFAULT 0,
+            channel_warnings INTEGER NOT NULL DEFAULT 0,
+            expert_email    TEXT NOT NULL DEFAULT '',
+            confirmed_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            preview_json    TEXT NOT NULL DEFAULT '{}'
         )
     """)
+    # youtube ingest: extend CHECK constraint to include 'youtube' on existing DBs
+    _migrate_audit_add_youtube(conn)
+    # youtube ingest: add youtube-specific columns to ingest_audit
+    _add_column_if_missing(conn, "ingest_audit", "video_id", "TEXT")
+    _add_column_if_missing(conn, "ingest_audit", "transcriber", "TEXT")
+    _add_column_if_missing(conn, "ingest_audit", "transcribe_cost_usd", "REAL")
+    _add_column_if_missing(conn, "ingest_audit", "transcribe_duration_sec", "INTEGER")
+    # youtube ingest: add source_url to facts for timestamp deep-links
+    _add_column_if_missing(conn, "facts", "source_url", "TEXT DEFAULT ''")
     conn.commit()
+
+
+def _migrate_audit_add_youtube(conn: sqlite3.Connection) -> None:
+    """Extend ingest_audit CHECK constraint to include 'youtube' kind (idempotent)."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='ingest_audit'"
+    ).fetchone()
+    if row is None:
+        return  # table not yet created
+    ddl = row[0] or ""
+    if "'youtube'" in ddl or '"youtube"' in ddl:
+        return  # already has youtube in constraint
+
+    # Recreate table with extended CHECK + new columns, preserving existing data
+    conn.executescript("""
+        ALTER TABLE ingest_audit RENAME TO _ingest_audit_old;
+
+        CREATE TABLE ingest_audit (
+            id              TEXT PRIMARY KEY,
+            client_id       TEXT NOT NULL,
+            ingest_kind     TEXT NOT NULL CHECK(ingest_kind IN ('llm_report', 'manual_seed', 'youtube')),
+            source_artifact TEXT NOT NULL,
+            agent           TEXT,
+            cite_format     TEXT,
+            parsed_at       TIMESTAMP NOT NULL,
+            facts_emitted   INTEGER NOT NULL DEFAULT 0,
+            facts_committed INTEGER NOT NULL DEFAULT 0,
+            greys_emitted   INTEGER NOT NULL DEFAULT 0,
+            channel_warnings INTEGER NOT NULL DEFAULT 0,
+            expert_email    TEXT NOT NULL DEFAULT '',
+            confirmed_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            preview_json    TEXT NOT NULL DEFAULT '{}',
+            video_id        TEXT,
+            transcriber     TEXT,
+            transcribe_cost_usd REAL,
+            transcribe_duration_sec INTEGER
+        );
+
+        INSERT INTO ingest_audit
+            (id, client_id, ingest_kind, source_artifact, agent, cite_format,
+             parsed_at, facts_emitted, facts_committed, greys_emitted,
+             channel_warnings, expert_email, confirmed_at, preview_json)
+        SELECT id, client_id, ingest_kind, source_artifact, agent, cite_format,
+               parsed_at,
+               COALESCE(facts_emitted, 0),
+               COALESCE(facts_committed, 0),
+               COALESCE(greys_emitted, 0),
+               COALESCE(channel_warnings, 0),
+               COALESCE(expert_email, ''),
+               COALESCE(confirmed_at, parsed_at),
+               COALESCE(preview_json, '{}')
+        FROM _ingest_audit_old;
+
+        DROP TABLE _ingest_audit_old;
+    """)
 
 
 def _migrate_collapse_1_4(conn: sqlite3.Connection) -> None:
