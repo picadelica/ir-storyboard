@@ -164,6 +164,70 @@ export interface LLMIngestAuditRow {
   confirmed_at: string;
 }
 
+// ── YouTube Ingest ────────────────────────────────────────────────────────────
+
+export interface YouTubeVideoMeta {
+  video_id: string;
+  canonical_url: string;
+  title: string;
+  channel_name: string;
+  duration_sec: number;
+  upload_date: string;
+  language: string | null;
+}
+
+export interface YouTubeFact {
+  text: string;
+  subsection_id: string;
+  flag: "green" | "red" | "grey";
+  confidence: number;
+  evidence_snippet: string;
+  source_url: string;
+  snippet_start_sec: number;
+  snippet_end_sec: number;
+  needs_review: boolean;
+  layer_warning: boolean;
+}
+
+export interface YouTubeSkipped {
+  text: string;
+  subsection_id: string;
+  reason: string;
+  source_url: string;
+  evidence_snippet: string;
+  override_allowed: boolean;
+}
+
+export interface YouTubePreviewResult {
+  preview_id: string;
+  meta: YouTubeVideoMeta;
+  facts: YouTubeFact[];
+  skipped: YouTubeSkipped[];
+  from_cache: boolean;
+  transcribe_cost_usd: number | null;
+  notes: string[];
+  stats: Record<string, number>;
+}
+
+export interface YouTubeCommitOut {
+  committed: number;
+  skipped: number;
+}
+
+export interface YouTubeHistoryRow {
+  id: string;
+  client_id: string;
+  video_id: string | null;
+  transcriber: string | null;
+  transcribe_cost_usd: number | null;
+  parsed_at: string;
+  facts_emitted: number;
+  facts_committed: number;
+  channel_warnings: number;
+  expert_email: string;
+  confirmed_at: string | null;
+}
+
 export interface CellSummary {
   subsection_id: string;
   subsection_name: string;

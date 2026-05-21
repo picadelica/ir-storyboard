@@ -14,6 +14,7 @@ import ScorecardView from "./components/ScorecardView";
 import WorkView from "./components/WorkView";
 import ResearchView from "./components/ResearchView";
 import IngestLLMReport from "./components/IngestLLMReport";
+import IngestYouTube from "./components/IngestYouTube";
 
 export default function App() {
   return (
@@ -101,6 +102,9 @@ function ClientPage() {
           {activeTab === "ingest" && (
             <IngestLLMReport clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
+          {activeTab === "youtube" && (
+            <IngestYouTube clientId={clientId!} onJumpToCell={onJumpToCell} />
+          )}
         </div>
       </main>
 
@@ -134,6 +138,7 @@ function Tabs({ clientId, activeTab }: { clientId: string; activeTab: string }) 
   const tabs = [
     { id: "matrix",    label: "Matrix" },
     { id: "ingest",    label: "Ingest" },
+    { id: "youtube",   label: "YouTube" },
     { id: "research",  label: "Research" },
     { id: "work",      label: "Work" },
     { id: "punch",     label: "Punch-list" },

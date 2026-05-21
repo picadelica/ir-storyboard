@@ -5,6 +5,7 @@ import type {
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem,
+  YouTubeCommitOut, YouTubeHistoryRow, YouTubePreviewResult,
 } from "./types";
 
 const API_BASE = "/api";
@@ -158,4 +159,31 @@ export const api = {
 
   llmIngestHistory: (clientId: string): Promise<LLMIngestAuditRow[]> =>
     call<LLMIngestAuditRow[]>(`/clients/${clientId}/ingest/llm-report/history`),
+
+  // ── YouTube Ingest ──────────────────────────────────────────────────────────
+  youtubePreview: (clientId: string, url: string): Promise<YouTubePreviewResult> =>
+    call<YouTubePreviewResult>(`/clients/${clientId}/ingest/youtube/preview`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+
+  youtubeCommit: (
+    clientId: string,
+    previewId: string,
+    acceptedFactIds: number[],
+    overrides: Array<{ fact_idx: number; force_keep: boolean }>,
+    expertEmail: string,
+  ): Promise<YouTubeCommitOut> =>
+    call<YouTubeCommitOut>(`/clients/${clientId}/ingest/youtube/commit`, {
+      method: "POST",
+      body: JSON.stringify({
+        preview_id: previewId,
+        accepted_fact_ids: acceptedFactIds,
+        overrides,
+        expert_email: expertEmail,
+      }),
+    }),
+
+  youtubeHistory: (clientId: string): Promise<YouTubeHistoryRow[]> =>
+    call<YouTubeHistoryRow[]>(`/clients/${clientId}/ingest/youtube/history`),
 };
