@@ -130,7 +130,10 @@ def extract_citations(ir: LLMReportIR) -> list[ResolvedCitation]:
 
     result: list[ResolvedCitation] = []
     for canon, raw in url_to_raw.items():
-        channel, reason = classify_url(raw.url)
+        if raw.forced_channel:
+            channel, reason = raw.forced_channel, f"forced_channel={raw.forced_channel}"
+        else:
+            channel, reason = classify_url(raw.url)
         publisher = _publisher_from_url(raw.url) or raw.publisher
         result.append(ResolvedCitation(
             cite_id=raw.cite_id,

@@ -15,6 +15,7 @@ class RawCitation:
     url: str               # extracted URL, or "" if none found
     title: str = ""
     publisher: str = ""    # from URL hostname or inline label
+    forced_channel: str | None = None   # if set, skip URL classifier
 
 
 @dataclass
