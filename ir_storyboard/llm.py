@@ -14,10 +14,14 @@ Key public API:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from .models import LAYERS, SubsectionSpec
 
@@ -271,16 +275,33 @@ def _try_init_anthropic() -> None:
     _GENERATE_MODEL = os.environ.get("LLM_GENERATE_MODEL", "claude-haiku-4-5")
 
     def _generate_real(system: str, user: str, max_tokens: int = 1024) -> str:
-        try:
-            resp = _client.messages.create(
-                model=_GENERATE_MODEL,
-                max_tokens=max_tokens,
-                system=system,
-                messages=[{"role": "user", "content": user}],
-            )
-            return next((b.text for b in resp.content if b.type == "text"), "").strip()
-        except Exception:
-            return ""
+        backoffs = [2.0, 5.0, 10.0]
+        last_exc: Optional[BaseException] = None
+        for attempt, delay in enumerate(backoffs, start=1):
+            try:
+                resp = _client.messages.create(
+                    model=_GENERATE_MODEL,
+                    max_tokens=max_tokens,
+                    system=system,
+                    messages=[{"role": "user", "content": user}],
+                )
+                return next((b.text for b in resp.content if b.type == "text"), "").strip()
+            except anthropic.APIError as e:
+                last_exc = e
+                logger.warning(
+                    "generate(): Anthropic APIError on attempt %d/%d (%s): %s — retrying in %.1fs",
+                    attempt, len(backoffs), type(e).__name__, e, delay,
+                )
+                if attempt < len(backoffs):
+                    time.sleep(delay)
+            except Exception as e:
+                logger.error("generate(): non-retryable error (%s): %s", type(e).__name__, e)
+                return ""
+        logger.error(
+            "generate(): exhausted %d retries, giving up. Last error: %s",
+            len(backoffs), last_exc,
+        )
+        return ""
 
     classify_fact = _classify_single_real
     summarize = _summarize_real
@@ -642,16 +663,18 @@ def extract_facts_from_transcript(
     segments: List[dict],
     available_subsections: List[str],
     chunk_duration_sec: float = 900.0,  # 15-min chunks for better LLM focus
-) -> List["ExtractedFact"]:
+) -> Tuple[List["ExtractedFact"], List[dict]]:
     """Extract facts from a full transcript processed in time-windowed chunks.
 
     segments: list of {text, start, end} in global video time.
-    Returns ExtractedFact list with segment_idx referencing global indices.
+    Returns (facts, chunk_errors). chunk_errors entries:
+        {"chunk_start_min": int, "chunk_end_min": int, "reason": str, "detail": str}
+    Reasons: "empty_llm_response" (LLM returned ""), "invalid_json" (parse failed).
     """
     from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
 
     if not segments:
-        return []
+        return [], []
 
     subsection_list = "\n".join(
         f"{sub.id}  {sub.name}  ({layer.name})"
@@ -662,6 +685,7 @@ def extract_facts_from_transcript(
     system_prompt = _TRANSCRIPT_CHUNK_SYSTEM.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
 
     all_facts: List["ExtractedFact"] = []
+    chunk_errors: List[dict] = []
     chunk_start_sec = 0.0
     i = 0
 
@@ -694,7 +718,20 @@ def extract_facts_from_transcript(
         )
 
         raw = generate(system_prompt, user_content, max_tokens=4096)
-        if raw:
+        chunk_start_min = int(chunk_start_sec // 60)
+        chunk_end_min = int(chunk_end_sec // 60)
+        if not raw:
+            chunk_errors.append({
+                "chunk_start_min": chunk_start_min,
+                "chunk_end_min": chunk_end_min,
+                "reason": "empty_llm_response",
+                "detail": "LLM returned empty string (rate-limit, overloaded, or network error)",
+            })
+            logger.warning(
+                "extract_facts_from_transcript: chunk %d-%d min produced no LLM output",
+                chunk_start_min, chunk_end_min,
+            )
+        else:
             raw = raw.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
@@ -734,12 +771,21 @@ def extract_facts_from_transcript(
                         text_en=text_en[:400],
                         quote=quote[:600],
                     ))
-            except (json.JSONDecodeError, KeyError, IndexError):
-                pass
+            except (json.JSONDecodeError, KeyError, IndexError) as e:
+                chunk_errors.append({
+                    "chunk_start_min": chunk_start_min,
+                    "chunk_end_min": chunk_end_min,
+                    "reason": "invalid_json",
+                    "detail": f"{type(e).__name__}: {str(e)[:160]} | raw[:200]={raw[:200]!r}",
+                })
+                logger.warning(
+                    "extract_facts_from_transcript: chunk %d-%d min returned unparseable JSON (%s)",
+                    chunk_start_min, chunk_end_min, type(e).__name__,
+                )
 
         i = j
         chunk_start_sec = chunk_end_sec
         if i >= len(segments):
             break
 
-    return all_facts
+    return all_facts, chunk_errors

@@ -201,10 +201,17 @@ export interface YouTubeFact {
 
 export interface YouTubeSkipped {
   text: string;
+  text_ru: string;
+  text_en: string;
+  quote: string;
   subsection_id: string;
+  flag: string;
+  confidence: number;
   reason: string;
   source_url: string;
   evidence_snippet: string;
+  snippet_start_sec: number;
+  snippet_end_sec: number;
   override_allowed: boolean;
 }
 

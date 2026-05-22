@@ -1284,10 +1284,17 @@ class YouTubeFactOut(BaseModel):
 
 class YouTubeSkippedOut(BaseModel):
     text: str
+    text_ru: str = ""
+    text_en: str = ""
+    quote: str = ""
     subsection_id: str
+    flag: str = "green"
+    confidence: float = 0.5
     reason: str
     source_url: str
     evidence_snippet: str
+    snippet_start_sec: float = 0.0
+    snippet_end_sec: float = 0.0
     override_allowed: bool = True
 
 
@@ -1378,10 +1385,18 @@ def _preview_out_from_result(result) -> YouTubePreviewOut:
         skipped=[
             YouTubeSkippedOut(
                 text=s.fact.text,
+                text_ru=s.fact.text_ru,
+                text_en=s.fact.text_en,
+                quote=s.fact.quote,
                 subsection_id=s.fact.subsection_id,
+                flag=s.fact.flag,
+                confidence=s.fact.confidence,
                 reason=s.reason,
                 source_url=s.fact.source_url,
                 evidence_snippet=s.fact.evidence_snippet,
+                snippet_start_sec=s.fact.snippet_start_sec,
+                snippet_end_sec=s.fact.snippet_end_sec,
+                override_allowed=s.override_allowed,
             )
             for s in result.skipped
         ],

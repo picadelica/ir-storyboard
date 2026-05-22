@@ -142,6 +142,8 @@ def run_youtube_preview(
         "channel_warnings": 0,
         "skipped_layer_guard": 0,
         "duplicates_skipped": 0,
+        "chunks_total": 0,
+        "chunks_failed": 0,
     }
 
     # Step 1: normalize + metadata
@@ -175,11 +177,22 @@ def run_youtube_preview(
         {"text": s.text, "start": s.start, "end": s.end}
         for s in transcript.segments
     ]
-    raw_facts = extract_facts_from_transcript(
+    chunk_duration_sec = 900.0   # 15-min chunks
+    raw_facts, chunk_errors = extract_facts_from_transcript(
         segments=segments_dicts,
         available_subsections=_ALL_SUBSECTIONS,
-        chunk_duration_sec=900.0,   # 15-min chunks
+        chunk_duration_sec=chunk_duration_sec,
     )
+
+    # Surface chunk-level failures so user can see "X of Y chunks failed"
+    if segments_dicts:
+        total_duration = max(s["end"] for s in segments_dicts)
+        stats["chunks_total"] = max(1, int((total_duration + chunk_duration_sec - 1) // chunk_duration_sec))
+    stats["chunks_failed"] = len(chunk_errors)
+    for ce in chunk_errors:
+        notes.append(
+            f"Chunk {ce['chunk_start_min']}-{ce['chunk_end_min']} min skipped: {ce['reason']}"
+        )
 
     # Step 6: anchor
     anchored = anchor_facts(raw_facts, transcript, canonical_url)
@@ -207,13 +220,22 @@ def run_youtube_preview(
         "video_id": meta.video_id,
         "canonical_url": canonical_url,
         "facts": [_anchored_to_dict(f) for f in deduped],
-        "skipped": [{"text": s.fact.text, "reason": s.reason,
+        "skipped": [{"text": s.fact.text,
+                     "text_ru": s.fact.text_ru,
+                     "text_en": s.fact.text_en,
+                     "quote": s.fact.quote,
+                     "reason": s.reason,
                      "subsection_id": s.fact.subsection_id,
+                     "flag": s.fact.flag,
+                     "confidence": s.fact.confidence,
                      "source_url": s.fact.source_url,
-                     "evidence_snippet": s.fact.evidence_snippet}
+                     "evidence_snippet": s.fact.evidence_snippet,
+                     "snippet_start_sec": s.fact.snippet_start_sec,
+                     "snippet_end_sec": s.fact.snippet_end_sec}
                     for s in skipped],
         "stats": stats,
         "notes": notes,
+        "chunk_errors": chunk_errors,
     })
 
     now = datetime.now(timezone.utc).isoformat()

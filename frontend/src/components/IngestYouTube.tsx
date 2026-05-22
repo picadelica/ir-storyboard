@@ -310,6 +310,19 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
         </a>
       </div>
 
+      {/* Chunk-failure warning: facts may be missing from those time windows */}
+      {(preview.stats.chunks_failed ?? 0) > 0 && (
+        <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-900">
+          <div className="font-medium">
+            ⚠ {preview.stats.chunks_failed} of {preview.stats.chunks_total ?? "?"} chunks failed
+          </div>
+          <div className="text-xs mt-1">
+            Some 15-min windows produced no facts because the LLM returned an empty
+            or unparseable response (likely rate-limit / overload). Re-run preview to retry — transcript is cached, retry is free.
+          </div>
+        </div>
+      )}
+
       {/* Parser notes */}
       {preview.notes.length > 0 && (
         <details className="text-xs text-ink-mute">
@@ -490,25 +503,47 @@ interface SkippedCardProps {
 }
 
 function SkippedCard({ skipped, overridden, onToggleOverride }: SkippedCardProps) {
+  const tSec = Math.floor(skipped.snippet_start_sec ?? 0);
+  const timeStr = `${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, "0")}`;
+  const displayRu = skipped.text_ru || skipped.text;
+  const displayEn = skipped.text_en || "";
+  const displayQuote = skipped.quote || skipped.evidence_snippet || "";
+
   return (
     <div className={`border rounded-lg p-3 text-sm ${
       overridden ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50 opacity-70"
     }`}>
       <div className="flex items-start gap-2">
-        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/60 border shrink-0 mt-0.5 text-slate-500">
-          L{skipped.subsection_id}
-        </span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 shrink-0 mt-0.5">
-          ⚠ skipped
-        </span>
+        <div className="flex flex-col gap-1 shrink-0 mt-0.5">
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/60 border text-slate-500 text-center">
+            {skipped.subsection_id}
+          </span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 text-center">
+            ⚠ skipped
+          </span>
+        </div>
 
-        <div className="flex-1 min-w-0">
-          <div className="text-slate-600">{skipped.text}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">{skipped.reason}</div>
-          {skipped.evidence_snippet && (
-            <div className="mt-1 text-xs text-ink-mute italic line-clamp-2">
-              "{skipped.evidence_snippet}"
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <div className="font-medium text-slate-700">{displayRu}</div>
+          {displayEn && displayEn !== displayRu && (
+            <div className="text-xs text-slate-500 italic">{displayEn}</div>
+          )}
+          <div className="text-[10px] text-slate-400">{skipped.reason}</div>
+          {displayQuote && (
+            <div className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2 line-clamp-3 italic">
+              "{displayQuote}"
             </div>
+          )}
+          {skipped.source_url && (
+            <a
+              href={skipped.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              ▶ {timeStr}
+            </a>
           )}
         </div>
 
