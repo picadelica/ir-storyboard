@@ -11,60 +11,73 @@
 **Последнее обновление:** 2026-05-22
 **Ветка:** `feat/v2`
 **Working tree:** clean (untracked: `12.jpeg` — не относится к проекту)
-**HEAD:** `fix: surface silent LLM chunk failures + skipped fact timestamps`
+**HEAD:** `3e3aa08 fix: rename Research IngestPreviewOut to ResearchPreviewOut`
 
 ## Что в фокусе
 
-**Диагноз "preview пропускает первые 2 часа" — closed.** На одном и том же
-кэшированном транскрипте (`HdDNw-VxCvA`) три прогона выдали 20 / 28 / 7 фактов.
-Причина: `_generate_real` молча возвращал `""` при любой Anthropic-ошибке
-(overloaded / rate-limit / network), а `extract_facts_from_transcript:697`
-`if raw:` тихо проглатывал пустой chunk. Plus `skipped` сериализация теряла
-timestamp/quote → в UI skipped-карточки выглядели без таймкода.
+Сессия 2026-05-22 закрыла четыре бага, обнаруженных при первом реальном
+прогоне YouTube ingest на двухчасовом интервью `HdDNw-VxCvA`:
 
-Один коммит закрывает оба бага:
+1. **Silent LLM chunk failures** (`7ed859e`). Из 9 chunks 8 молча отваливались,
+   результат варьировался 20/28/7 фактов на одном и том же кэшированном
+   транскрипте. Причина: `_generate_real` возвращал `""` на любую
+   `anthropic.APIError`, `extract_facts_from_transcript` глотал пустой ответ
+   без retry/лога. Добавлен retry 3× (backoff 2/5/10s), функция возвращает
+   `(facts, chunk_errors)`, UI рисует оранжевый баннер "X of Y chunks failed".
+   Skipped-карточки потеряли таймкод/quote — выровнял сериализацию с facts.
+2. **Max-tokens cutoff + JSON repair** (`c2cd7c6`). После retry-фикса всё ещё
+   падали 8/9 chunks — `chunk_errors.detail` показал `JSONDecodeError:
+   Unterminated string at char ~13000`: Anthropic обрезал ответ на
+   `max_tokens=4096`. Поднял до 16k + добавил `_repair_truncated_facts_json`
+   (находит последний `},` в `facts[]`, закрывает массив, спасает N-1
+   фактов). Chunk reduced 15→10 мин. Прогон дал 173 факта — ✅.
+3. **Per-card edit before commit** (`af03dfa`). 173 факта в матрицу одним
+   разом — без экспертного разбора. На FactCard / SkippedCard добавлена
+   кнопка `edit` → форма с textarea (text_ru), dropdown (24 subsections),
+   flag picker. Edits хранятся в localStorage; при commit отправляются как
+   `overrides[]` с `kind`/`idx`/`text_ru`/`subsection_id`/`flag`. Backend
+   `run_youtube_commit` применяет patch через `_apply_edit`. Legacy формат
+   `{fact_idx, force_keep}` ещё поддерживается.
+4. **Research /ingest/preview 500** (`4c3138f` + `3e3aa08`). Два бага в
+   одной фиче. (a) `FactCandidate` dataclass без поля `rationale`, а
+   `stub_classify` / `_classify_batch_real` передавали `rationale=...`
+   → `TypeError`. (b) Два `class IngestPreviewOut` в `main.py` (старый
+   Research + новый LLM-Report) — Python оставлял в namespace второй,
+   Research-функция при runtime попадала в LLM-Report-модель и валилась
+   с `ValidationError: 7 fields missing`. Старый переименован в
+   `ResearchPreviewOut`.
 
-* **`ir_storyboard/llm.py`** — retry 3× (backoff 2/5/10s) на `anthropic.APIError`
-  в `_generate_real`, logger.warning/error на attempt-ах.
-  `extract_facts_from_transcript` → `(facts, chunk_errors)`. Каждый
-  `empty_llm_response` / `invalid_json` записывается с `chunk_start_min`,
-  `chunk_end_min`, `reason`, `detail`.
-* **`youtube_pipeline.py`** — `stats.chunks_total/chunks_failed`,
-  `preview_json.chunk_errors`, по строке на каждый failed chunk в `notes`.
-  `skipped` сериализация выровнена с `facts` (text_ru/text_en/quote/
-  snippet_start_sec/snippet_end_sec/flag/confidence).
-* **`backend/main.py:YouTubeSkippedOut`** — те же поля.
-* **`frontend/IngestYouTube.tsx`** — оранжевый баннер "X of Y chunks failed —
-  re-run preview, transcript is cached". `SkippedCard` теперь рендерит
-  RU/EN/quote/timestamp ровно как `FactCard`.
-
-**YouTube Ingest** — основная серия (`youtube-1..8` + ~10 пост-фиксов)
-закрыта.
+**YouTube Ingest** — основная серия (`youtube-1..8` + post-фиксы) закрыта.
 
 **LLM Report Ingest** — закрыт.
 
-## Открытые вопросы (что ещё пользователь просил по YouTube)
+## Открытые вопросы
 
-- **#2 edit-before-drop в preview** — сейчас только `drop`/`restore`. Нужно
-  inline-редактирование `text_ru`/`text_en`/`subsection_id`/`flag` перед
-  коммитом. Не сделано.
-- **#4 history tab в UI** — endpoint `/api/clients/{id}/ingest/youtube/history`
-  есть (`youtube-6`), но фронт-таба, который его показывает списком прошлых
-  preview-ов, нет. Не сделано.
-- **chunks_failed на ранних chunks** — даже с retry Haiku-4.5 может быть
-  занят. Решение пока: оранжевый баннер + re-run (бесплатно из кэша).
-  Если будет упорно падать — попробовать поднять `LLM_GENERATE_MODEL` до
-  Sonnet через env var.
+- **#4 history tab в UI** — endpoint
+  `/api/clients/{id}/ingest/youtube/history` уже есть (`youtube-6`),
+  но фронтенд-таба, который показывает список прошлых previews, нет.
+- **Bulk-actions в preview** — multi-select чекбоксы и групповые
+  drop/change-flag для скоростного разбора 100+ фактов. Не сделано.
+- **chunks_failed retry** — если max_tokens cutoff повторится несмотря на
+  16k, fallback на `LLM_GENERATE_MODEL=claude-sonnet-4-6` через env var.
 - **Embedding-dedup / speaker diarization / параллелизация chunks** — v2.
 
 ## Следующие разумные шаги (если пользователь скажет «продолжаем»)
 
-1. Доделать **#2 edit-before-drop** — inline-edit на FactCard перед commit.
-2. Доделать **#4 history tab** — отдельный экран со списком past previews
-   (id / video / parsed_at / facts_emitted / committed) + кнопка "open".
-3. **Skipped facts: режим override+edit** — после override разрешить
-   менять subsection_id (если LayerGuard ругался на запрещённый layer,
-   аналитик может перебросить факт в L4/L7 и принять).
+1. **#4 history tab**: отдельный экран со списком прошлых previews
+   (id / video / parsed_at / facts_emitted / committed) + кнопка
+   "reopen" → подгрузить preview_json и открыть в режиме разбора.
+2. **Bulk-actions**: multi-select + bulk drop / bulk change-flag /
+   bulk move-to-subsection. Особенно полезно когда LLM путает layer
+   у целой группы фактов.
+3. **filter/sort** в preview (по layer / по flag / по timestamp) —
+   173 факта в одном списке — много.
+4. **Hygiene refactor** (отдельная сессия):
+   - Переименовать `channels/llm_report/` → `ingest/` (включает
+     YouTube ingest, не только LLM-Report).
+   - Развести два `def ingest_preview` в `main.py` (Research + LLM-Report)
+     — имена функций сейчас shadow-ят друг друга (FastAPI работает, но
+     это smell, и однажды приведёт к ещё одному 500 как у нас).
 
 ## Как обновлять этот файл
 
