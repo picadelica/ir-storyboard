@@ -594,3 +594,146 @@ def extract_facts_from_full_document(
         ))
 
     return results
+
+
+# ─────────────────── Transcript extractor (YouTube ingest) ──────────────────
+
+_TRANSCRIPT_CHUNK_SYSTEM = """\
+You are an IR analyst extracting facts from a podcast/interview transcript.
+
+Your task: identify statements made BY THE GUEST (interviewee) that reveal
+meaningful information about the founder, their company, team, vision or background.
+
+Matrix subsections (use ONLY these ids):
+SUBSECTION_LIST_PLACEHOLDER
+
+Rules:
+- SKIP questions asked by the interviewer/host.
+- SKIP filler phrases ("um", "you know", "basically", etc.).
+- SKIP pure opinions without factual content.
+- Each fact = one concise BRIEF sentence (<=120 chars). Do NOT copy raw transcript.
+  Write a compressed factual statement in the SAME language as the interview.
+- flag: green=positive/confirmed fact, red=risk/problem/concern, grey=vague/uncertain.
+- segment_idx_start / segment_idx_end: the [N] indices from the numbered input list
+  of the 1-3 segments that most directly support this fact.
+- confidence: 0.0-1.0.
+- Subsection guidance for podcast interviews:
+  1.1 = childhood, family, origin story
+  1.2 = values, beliefs, what matters to them
+  1.3 = fears, dreams, identity, motivation
+  2.1 = career path, previous jobs, expertise built
+  2.2 = current founder role, why they do this
+  2.3 = co-founder dynamics, team formation
+  3.1 = how community/team was recruited
+  3.3 = investors, partners, backers
+  4.2 = team growth, scaling, transformation
+  7.1 = big vision, mission, what change they want
+  7.2 = tensions, trade-offs, what they sacrifice
+
+Return ONLY valid JSON, no markdown:
+{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey",
+            "segment_idx_start": N, "segment_idx_end": N, "confidence": 0.8}]}
+
+If no relevant guest facts in this chunk, return: {"facts": []}
+"""
+
+
+def extract_facts_from_transcript(
+    segments: List[dict],
+    available_subsections: List[str],
+    chunk_duration_sec: float = 1800.0,
+) -> List["ExtractedFact"]:
+    """Extract facts from a full transcript processed in time-windowed chunks.
+
+    segments: list of {text, start, end} in global video time.
+    Returns ExtractedFact list with segment_idx referencing global indices.
+    """
+    from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
+
+    if not segments:
+        return []
+
+    subsection_list = "\n".join(
+        f"{sub.id}  {sub.name}  ({layer.name})"
+        for layer in LAYERS
+        for sub in layer.subsections
+        if sub.id in available_subsections
+    )
+    system_prompt = _TRANSCRIPT_CHUNK_SYSTEM.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+
+    all_facts: List["ExtractedFact"] = []
+    chunk_start_sec = 0.0
+    i = 0
+
+    while i < len(segments):
+        chunk_end_sec = chunk_start_sec + chunk_duration_sec
+        chunk_segs: list = []
+        chunk_indices: list = []
+        j = i
+        while j < len(segments) and segments[j]["start"] < chunk_end_sec:
+            chunk_segs.append(segments[j])
+            chunk_indices.append(j)
+            j += 1
+
+        if not chunk_segs:
+            i = max(j + 1, i + 1)
+            chunk_start_sec = chunk_end_sec
+            continue
+
+        lines = []
+        for local_idx, seg in enumerate(chunk_segs):
+            t = int(seg["start"])
+            mm, ss = divmod(t, 60)
+            hh, mm = divmod(mm, 60)
+            ts = f"{hh}:{mm:02d}:{ss:02d}" if hh else f"{mm}:{ss:02d}"
+            lines.append(f"[{local_idx}]({ts}) {seg['text'].strip()}")
+
+        user_content = (
+            f"Chunk: {int(chunk_start_sec//60)}-{int(chunk_end_sec//60)} min\n\n"
+            + "\n".join(lines)
+        )
+
+        raw = generate(system_prompt, user_content, max_tokens=4096)
+        if raw:
+            raw = raw.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            try:
+                data = json.loads(raw)
+                for item in data.get("facts", []):
+                    text = (item.get("text") or "").strip()
+                    sid = item.get("subsection_id") or ""
+                    if not text or sid not in available_subsections:
+                        continue
+                    llm_flag = item.get("flag", "green")
+                    if llm_flag not in ("green", "red", "grey"):
+                        llm_flag = "green"
+
+                    local_start = item.get("segment_idx_start")
+                    local_end = item.get("segment_idx_end")
+                    ls = int(local_start) if local_start is not None else 0
+                    le = int(local_end) if local_end is not None else ls
+                    ls = max(0, min(ls, len(chunk_indices) - 1))
+                    le = max(ls, min(le, len(chunk_indices) - 1))
+                    global_start = chunk_indices[ls]
+                    global_end = chunk_indices[le]
+
+                    all_facts.append(ExtractedFact(
+                        text=text[:400],
+                        subsection_id=sid,
+                        flag=apply_heuristics(text, llm_flag),
+                        cite_ids=[1],
+                        confidence=max(0.0, min(1.0, float(item.get("confidence", 0.7)))),
+                        raw_paraphrase=chunk_segs[ls]["text"][:400],
+                        segment_idx_start=global_start,
+                        segment_idx_end=global_end,
+                    ))
+            except (json.JSONDecodeError, KeyError, IndexError):
+                pass
+
+        i = j
+        chunk_start_sec = chunk_end_sec
+        if i >= len(segments):
+            break
+
+    return all_facts

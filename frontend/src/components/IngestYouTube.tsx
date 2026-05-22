@@ -23,16 +23,30 @@ function fmtDuration(sec: number): string {
 }
 
 export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
-  const [screen, setScreen] = useState<"input" | "preview" | "done">("input");
-  const [url, setUrl] = useState("");
-  const [preview, setPreview] = useState<YouTubePreviewResult | null>(null);
+  const lsKey = `yt-ingest-${clientId}`;
+  const lsSaved = (() => { try { return JSON.parse(localStorage.getItem(lsKey) || "{}"); } catch { return {}; } })();
+
+  const [screen, setScreen] = useState<"input" | "preview" | "done">(lsSaved.screen || "input");
+  const [url, setUrl] = useState(lsSaved.url || "");
+  const [preview, setPreview] = useState<YouTubePreviewResult | null>(lsSaved.preview || null);
   const [dropped, setDropped] = useState<Set<number>>(new Set());
   const [overrides, setOverrides] = useState<Set<number>>(new Set());
   const [expertEmail, setExpertEmail] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<string>("");
+  const [jobId, setJobId] = useState<string | null>(lsSaved.jobId || null);
+  const [jobStatus, setJobStatus] = useState<string>(lsSaved.jobStatus || "");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qc = useQueryClient();
+
+  function saveState(patch: Record<string, unknown>) {
+    try {
+      const cur = JSON.parse(localStorage.getItem(lsKey) || "{}");
+      localStorage.setItem(lsKey, JSON.stringify({ ...cur, ...patch }));
+    } catch {}
+  }
+
+  function clearState() {
+    try { localStorage.removeItem(lsKey); } catch {}
+  }
 
   const history = useQuery({
     queryKey: ["yt-ingest-history", clientId],
@@ -43,13 +57,36 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }
 
-  useEffect(() => () => stopPolling(), []);
+  // Resume polling if we have a jobId that was processing when tab was left
+  useEffect(() => {
+    if (jobId && jobStatus === "processing" && !pollRef.current) {
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await api.youtubePreviewStatus(clientId, jobId);
+          setJobStatus(status.status);
+          if (status.status === "done" && status.result) {
+            stopPolling();
+            setPreview(status.result);
+            setDropped(new Set());
+            setOverrides(new Set());
+            setScreen("preview");
+            saveState({ screen: "preview", preview: status.result, jobStatus: "done" });
+          } else if (status.status === "error") {
+            stopPolling();
+            saveState({ jobStatus: "error" });
+          }
+        } catch { stopPolling(); }
+      }, 5000);
+    }
+    return () => stopPolling();
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const previewMut = useMutation({
     mutationFn: () => api.youtubePreviewStart(clientId, url),
     onSuccess: (job) => {
       setJobId(job.job_id);
       setJobStatus("processing");
+      saveState({ jobId: job.job_id, jobStatus: "processing", url });
       pollRef.current = setInterval(async () => {
         try {
           const status = await api.youtubePreviewStatus(clientId, job.job_id);
@@ -60,8 +97,10 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
             setDropped(new Set());
             setOverrides(new Set());
             setScreen("preview");
+            saveState({ screen: "preview", preview: status.result, jobStatus: "done" });
           } else if (status.status === "error") {
             stopPolling();
+            saveState({ jobStatus: "error" });
           }
         } catch { stopPolling(); }
       }, 5000);
@@ -212,6 +251,7 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
           </button>
           <button
             onClick={() => {
+              clearState();
               setScreen("input");
               setPreview(null);
               setUrl("");

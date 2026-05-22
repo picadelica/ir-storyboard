@@ -14,11 +14,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from ... import matrix
-from ...llm import extract_facts_from_full_document
+from ...llm import extract_facts_from_transcript
 from .loaders.youtube_url import normalize_url, fetch_metadata, YouTubeVideoMeta
 from .loaders.transcriber import get_transcriber, get_or_transcribe
-from .transcript_to_ir import transcript_to_ir
-from .citations import extract_citations
 from .snippet_anchor import anchor_facts, AnchoredFact
 from .layer_guard import guard_layers, SkippedFact
 
@@ -172,19 +170,15 @@ def run_youtube_preview(
     if transcriber.name == "openai-whisper-1":
         transcribe_cost_usd = round((meta.duration_sec / 60.0) * 0.006, 4)
 
-    # Step 3: transcript → IR
-    ir = transcript_to_ir(transcript, meta)
-
-    # Step 4: citations
-    resolved_citations = extract_citations(ir)
-    citation_index = {c.cite_id: c for c in resolved_citations}
-
-    # Step 5: extract facts (transcript-mode)
-    content_sections = [(s.heading, s.paragraphs) for s in ir.sections]
-    raw_facts = extract_facts_from_full_document(
-        sections=content_sections,
+    # Steps 3-5: extract facts directly from transcript segments (chunk-by-chunk)
+    segments_dicts = [
+        {"text": s.text, "start": s.start, "end": s.end}
+        for s in transcript.segments
+    ]
+    raw_facts = extract_facts_from_transcript(
+        segments=segments_dicts,
         available_subsections=_ALL_SUBSECTIONS,
-        citation_index=citation_index,
+        chunk_duration_sec=1800.0,
     )
 
     # Step 6: anchor
