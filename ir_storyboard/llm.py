@@ -659,10 +659,26 @@ If truly no guest content in this chunk, return: {"facts": []}
 """
 
 
+def _repair_truncated_facts_json(raw: str) -> Optional[dict]:
+    """Salvage a JSON of shape {"facts":[{...},{...,]} truncated by max_tokens.
+
+    Strategy: trim everything after the last "}," (or "}]" if intact) inside
+    the array, then close. Returns parsed dict or None if unsalvageable.
+    """
+    last_close = max(raw.rfind("},"), raw.rfind("}]"))
+    if last_close < 0:
+        return None
+    repaired = raw[:last_close + 1].rstrip(",") + "]}"
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        return None
+
+
 def extract_facts_from_transcript(
     segments: List[dict],
     available_subsections: List[str],
-    chunk_duration_sec: float = 900.0,  # 15-min chunks for better LLM focus
+    chunk_duration_sec: float = 600.0,  # 10-min chunks (smaller output → less truncation)
 ) -> Tuple[List["ExtractedFact"], List[dict]]:
     """Extract facts from a full transcript processed in time-windowed chunks.
 
@@ -717,7 +733,7 @@ def extract_facts_from_transcript(
             + "\n".join(lines)
         )
 
-        raw = generate(system_prompt, user_content, max_tokens=4096)
+        raw = generate(system_prompt, user_content, max_tokens=16000)
         chunk_start_min = int(chunk_start_sec // 60)
         chunk_end_min = int(chunk_end_sec // 60)
         if not raw:
@@ -735,53 +751,78 @@ def extract_facts_from_transcript(
             raw = raw.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            data = None
+            parse_error: Optional[Exception] = None
+            repaired_count: Optional[int] = None
             try:
                 data = json.loads(raw)
-                for item in data.get("facts", []):
-                    text_ru = (item.get("text_ru") or "").strip()
-                    text_en = (item.get("text_en") or item.get("text") or "").strip()
-                    quote = (item.get("quote") or "").strip()
-                    sid = item.get("subsection_id") or ""
-                    primary = text_ru or text_en
-                    if not primary or sid not in available_subsections:
-                        continue
-                    llm_flag = item.get("flag", "green")
-                    if llm_flag not in ("green", "red", "grey"):
-                        llm_flag = "green"
+            except json.JSONDecodeError as e:
+                parse_error = e
+                repaired = _repair_truncated_facts_json(raw)
+                if repaired is not None:
+                    data = repaired
+                    repaired_count = len(data.get("facts", []))
+                    logger.warning(
+                        "extract_facts_from_transcript: chunk %d-%d min JSON truncated, repaired (recovered %d facts)",
+                        chunk_start_min, chunk_end_min, repaired_count,
+                    )
 
-                    local_start = item.get("segment_idx_start")
-                    local_end = item.get("segment_idx_end")
-                    ls = int(local_start) if local_start is not None else 0
-                    le = int(local_end) if local_end is not None else ls
-                    ls = max(0, min(ls, len(chunk_indices) - 1))
-                    le = max(ls, min(le, len(chunk_indices) - 1))
-                    global_start = chunk_indices[ls]
-                    global_end = chunk_indices[le]
-
-                    all_facts.append(ExtractedFact(
-                        text=primary[:400],
-                        subsection_id=sid,
-                        flag=apply_heuristics(primary, llm_flag),
-                        cite_ids=[1],
-                        confidence=max(0.0, min(1.0, float(item.get("confidence", 0.7)))),
-                        raw_paraphrase=text_en[:400],
-                        segment_idx_start=global_start,
-                        segment_idx_end=global_end,
-                        text_ru=text_ru[:400],
-                        text_en=text_en[:400],
-                        quote=quote[:600],
-                    ))
-            except (json.JSONDecodeError, KeyError, IndexError) as e:
+            if data is None:
                 chunk_errors.append({
                     "chunk_start_min": chunk_start_min,
                     "chunk_end_min": chunk_end_min,
                     "reason": "invalid_json",
-                    "detail": f"{type(e).__name__}: {str(e)[:160]} | raw[:200]={raw[:200]!r}",
+                    "detail": f"{type(parse_error).__name__}: {str(parse_error)[:160]} | raw[:200]={raw[:200]!r}",
                 })
                 logger.warning(
-                    "extract_facts_from_transcript: chunk %d-%d min returned unparseable JSON (%s)",
-                    chunk_start_min, chunk_end_min, type(e).__name__,
+                    "extract_facts_from_transcript: chunk %d-%d min returned unparseable JSON (%s) — repair failed",
+                    chunk_start_min, chunk_end_min, type(parse_error).__name__,
                 )
+            else:
+                if repaired_count is not None:
+                    chunk_errors.append({
+                        "chunk_start_min": chunk_start_min,
+                        "chunk_end_min": chunk_end_min,
+                        "reason": "truncated_repaired",
+                        "detail": f"max_tokens cutoff: recovered {repaired_count} facts from partial JSON",
+                    })
+                for item in data.get("facts", []):
+                    try:
+                        text_ru = (item.get("text_ru") or "").strip()
+                        text_en = (item.get("text_en") or item.get("text") or "").strip()
+                        quote = (item.get("quote") or "").strip()
+                        sid = item.get("subsection_id") or ""
+                        primary = text_ru or text_en
+                        if not primary or sid not in available_subsections:
+                            continue
+                        llm_flag = item.get("flag", "green")
+                        if llm_flag not in ("green", "red", "grey"):
+                            llm_flag = "green"
+
+                        local_start = item.get("segment_idx_start")
+                        local_end = item.get("segment_idx_end")
+                        ls = int(local_start) if local_start is not None else 0
+                        le = int(local_end) if local_end is not None else ls
+                        ls = max(0, min(ls, len(chunk_indices) - 1))
+                        le = max(ls, min(le, len(chunk_indices) - 1))
+                        global_start = chunk_indices[ls]
+                        global_end = chunk_indices[le]
+
+                        all_facts.append(ExtractedFact(
+                            text=primary[:400],
+                            subsection_id=sid,
+                            flag=apply_heuristics(primary, llm_flag),
+                            cite_ids=[1],
+                            confidence=max(0.0, min(1.0, float(item.get("confidence", 0.7)))),
+                            raw_paraphrase=text_en[:400],
+                            segment_idx_start=global_start,
+                            segment_idx_end=global_end,
+                            text_ru=text_ru[:400],
+                            text_en=text_en[:400],
+                            quote=quote[:600],
+                        ))
+                    except (KeyError, IndexError, ValueError, TypeError):
+                        continue
 
         i = j
         chunk_start_sec = chunk_end_sec

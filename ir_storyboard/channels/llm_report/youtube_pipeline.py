@@ -177,7 +177,7 @@ def run_youtube_preview(
         {"text": s.text, "start": s.start, "end": s.end}
         for s in transcript.segments
     ]
-    chunk_duration_sec = 900.0   # 15-min chunks
+    chunk_duration_sec = 600.0   # 10-min chunks (less LLM output per chunk → less max_tokens truncation)
     raw_facts, chunk_errors = extract_facts_from_transcript(
         segments=segments_dicts,
         available_subsections=_ALL_SUBSECTIONS,
