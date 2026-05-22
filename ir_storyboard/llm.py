@@ -38,7 +38,7 @@ class FactCandidate:
 @dataclass
 class ExtractedFact:
     """Fact produced by extract_facts_from_llm_report."""
-    text: str                          # one-sentence atomic fact, ≤400 chars
+    text: str                          # one-sentence atomic fact, ≤400 chars (primary storage)
     subsection_id: str                 # proposed subsection, e.g. "6.1"
     flag: str                          # green / red / grey
     cite_ids: List[int] = field(default_factory=list)   # references to ResolvedCitation
@@ -49,6 +49,10 @@ class ExtractedFact:
     segment_idx_start: Optional[int] = None   # index into transcript.segments
     segment_idx_end: Optional[int] = None
     layer_warning: bool = False               # True if LLM flagged this as a restricted layer
+    # Bilingual fields (YouTube transcript mode only)
+    text_ru: str = ""                  # Russian brief
+    text_en: str = ""                  # English brief
+    quote: str = ""                    # literal transcript quote
 
 
 @dataclass
@@ -601,47 +605,43 @@ def extract_facts_from_full_document(
 _TRANSCRIPT_CHUNK_SYSTEM = """\
 You are an IR analyst extracting facts from a podcast/interview transcript.
 
-Your task: identify statements made BY THE GUEST (interviewee) that reveal
-meaningful information about the founder, their company, team, vision or background.
+Your task: identify ALL meaningful statements made BY THE GUEST (interviewee) about
+the founder, their company, team, product, vision, background, values, or mission.
+Be generous — extract 10-25 facts per 15-minute chunk. Better to include borderline facts
+than to miss important ones.
 
 Matrix subsections (use ONLY these ids):
 SUBSECTION_LIST_PLACEHOLDER
 
 Rules:
-- SKIP questions asked by the interviewer/host.
-- SKIP filler phrases ("um", "you know", "basically", etc.).
-- SKIP pure opinions without factual content.
-- Each fact = one concise BRIEF sentence (<=120 chars). Do NOT copy raw transcript.
-  Write a compressed factual statement in the SAME language as the interview.
-- flag: green=positive/confirmed fact, red=risk/problem/concern, grey=vague/uncertain.
-- segment_idx_start / segment_idx_end: the [N] indices from the numbered input list
-  of the 1-3 segments that most directly support this fact.
+- SKIP questions asked by the interviewer/host. SKIP pure filler ("um", "uh", "you know").
+- Each fact must have TWO versions:
+  * text_ru: concise factual statement in RUSSIAN (≤200 chars)
+  * text_en: same fact in ENGLISH (≤200 chars)
+  * quote: 1-3 sentences of LITERAL transcript text supporting this fact (verbatim)
+- flag: green=positive/confirmed, red=risk/concern/failure, grey=vague/uncertain.
+- segment_idx_start / segment_idx_end: [N] indices of the 1-3 segments with the quote.
 - confidence: 0.0-1.0.
-- Subsection guidance for podcast interviews:
-  1.1 = childhood, family, origin story
-  1.2 = values, beliefs, what matters to them
-  1.3 = fears, dreams, identity, motivation
-  2.1 = career path, previous jobs, expertise built
-  2.2 = current founder role, why they do this
-  2.3 = co-founder dynamics, team formation
-  3.1 = how community/team was recruited
-  3.3 = investors, partners, backers
-  4.2 = team growth, scaling, transformation
-  7.1 = big vision, mission, what change they want
-  7.2 = tensions, trade-offs, what they sacrifice
+- Subsection guidance:
+  1.1=childhood/family/origin  1.2=values/beliefs  1.3=fears/dreams/identity
+  2.1=career path/expertise    2.2=founder role/motivation  2.3=co-founder dynamics
+  3.1=team recruitment         3.3=investors/partners
+  4.1=team expertise           4.2=team growth/scaling
+  7.1=mission/vision           7.2=tensions/trade-offs
 
 Return ONLY valid JSON, no markdown:
-{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey",
-            "segment_idx_start": N, "segment_idx_end": N, "confidence": 0.8}]}
+{"facts": [{"text_ru": "...", "text_en": "...", "quote": "...", "subsection_id": "X.Y",
+            "flag": "green|red|grey", "segment_idx_start": N, "segment_idx_end": N,
+            "confidence": 0.8}]}
 
-If no relevant guest facts in this chunk, return: {"facts": []}
+If truly no guest content in this chunk, return: {"facts": []}
 """
 
 
 def extract_facts_from_transcript(
     segments: List[dict],
     available_subsections: List[str],
-    chunk_duration_sec: float = 1800.0,
+    chunk_duration_sec: float = 900.0,  # 15-min chunks for better LLM focus
 ) -> List["ExtractedFact"]:
     """Extract facts from a full transcript processed in time-windowed chunks.
 
@@ -701,9 +701,12 @@ def extract_facts_from_transcript(
             try:
                 data = json.loads(raw)
                 for item in data.get("facts", []):
-                    text = (item.get("text") or "").strip()
+                    text_ru = (item.get("text_ru") or "").strip()
+                    text_en = (item.get("text_en") or item.get("text") or "").strip()
+                    quote = (item.get("quote") or "").strip()
                     sid = item.get("subsection_id") or ""
-                    if not text or sid not in available_subsections:
+                    primary = text_ru or text_en
+                    if not primary or sid not in available_subsections:
                         continue
                     llm_flag = item.get("flag", "green")
                     if llm_flag not in ("green", "red", "grey"):
@@ -719,14 +722,17 @@ def extract_facts_from_transcript(
                     global_end = chunk_indices[le]
 
                     all_facts.append(ExtractedFact(
-                        text=text[:400],
+                        text=primary[:400],
                         subsection_id=sid,
-                        flag=apply_heuristics(text, llm_flag),
+                        flag=apply_heuristics(primary, llm_flag),
                         cite_ids=[1],
                         confidence=max(0.0, min(1.0, float(item.get("confidence", 0.7)))),
-                        raw_paraphrase=chunk_segs[ls]["text"][:400],
+                        raw_paraphrase=text_en[:400],
                         segment_idx_start=global_start,
                         segment_idx_end=global_end,
+                        text_ru=text_ru[:400],
+                        text_en=text_en[:400],
+                        quote=quote[:600],
                     ))
             except (json.JSONDecodeError, KeyError, IndexError):
                 pass

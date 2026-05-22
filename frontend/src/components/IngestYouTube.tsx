@@ -412,42 +412,60 @@ interface FactCardProps {
 function FactCard({ fact, dropped, onToggleDrop }: FactCardProps) {
   const flagStyle = FLAG_COLORS[fact.flag] ?? FLAG_COLORS.grey;
   const tSec = Math.floor(fact.snippet_start_sec);
+  const timeStr = `${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, "0")}`;
+  const displayRu = fact.text_ru || fact.text;
+  const displayEn = fact.text_en || fact.raw_paraphrase || "";
+  const displayQuote = fact.quote || fact.evidence_snippet || "";
 
   return (
     <div className={`border rounded-lg p-3 text-sm transition ${
       dropped ? "opacity-40 bg-slate-50" : "bg-white"
-    } ${flagStyle}`}>
+    } border-l-4 ${
+      fact.flag === "green" ? "border-l-emerald-400" :
+      fact.flag === "red" ? "border-l-red-400" : "border-l-slate-300"
+    }`}>
       <div className="flex items-start gap-2">
-        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/60 border shrink-0 mt-0.5">
-          L{fact.subsection_id}
-        </span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 mt-0.5 ${flagStyle}`}>
-          {fact.flag}
-        </span>
-
-        <div className="flex-1 min-w-0">
-          <div className={dropped ? "line-through" : ""}>{fact.text}</div>
-          {fact.evidence_snippet && (
-            <div className="mt-1 text-xs text-ink-mute italic line-clamp-2">
-              "{fact.evidence_snippet}"
-            </div>
-          )}
-          <div className="mt-1 flex items-center gap-2">
-            <a
-              href={fact.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[10px] text-blue-600 hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              ▶ {Math.floor(tSec / 60)}:{String(tSec % 60).padStart(2, "0")}
-            </a>
-            {fact.needs_review && (
-              <span className="text-[10px] text-amber-600">needs review</span>
-            )}
-          </div>
+        {/* Left: badges */}
+        <div className="flex flex-col gap-1 shrink-0 mt-0.5">
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600">
+            {fact.subsection_id}
+          </span>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded border text-center ${flagStyle}`}>
+            {fact.flag}
+          </span>
         </div>
 
+        {/* Center: content */}
+        <div className="flex-1 min-w-0 space-y-1.5">
+          {/* Russian brief */}
+          <div className={`font-medium text-slate-800 ${dropped ? "line-through" : ""}`}>
+            {displayRu}
+          </div>
+          {/* English brief */}
+          {displayEn && displayEn !== displayRu && (
+            <div className="text-xs text-slate-500 italic">
+              {displayEn}
+            </div>
+          )}
+          {/* Literal quote */}
+          {displayQuote && (
+            <div className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2 line-clamp-3">
+              "{displayQuote}"
+            </div>
+          )}
+          {/* Timestamp */}
+          <a
+            href={fact.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            ▶ {timeStr}
+          </a>
+        </div>
+
+        {/* Right: action */}
         <button
           onClick={onToggleDrop}
           className={`text-[10px] px-2 py-0.5 border rounded shrink-0 ${

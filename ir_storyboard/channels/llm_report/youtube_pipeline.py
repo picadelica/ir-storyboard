@@ -178,7 +178,7 @@ def run_youtube_preview(
     raw_facts = extract_facts_from_transcript(
         segments=segments_dicts,
         available_subsections=_ALL_SUBSECTIONS,
-        chunk_duration_sec=1800.0,
+        chunk_duration_sec=900.0,   # 15-min chunks
     )
 
     # Step 6: anchor
@@ -255,6 +255,9 @@ def run_youtube_preview(
 def _anchored_to_dict(af: AnchoredFact) -> dict:
     return {
         "text": af.text,
+        "text_ru": af.text_ru,
+        "text_en": af.text_en,
+        "quote": af.quote,
         "subsection_id": af.subsection_id,
         "flag": af.flag,
         "cite_ids": af.cite_ids,

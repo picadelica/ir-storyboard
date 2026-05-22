@@ -29,6 +29,11 @@ class AnchoredFact:
     snippet_end_sec: float = 0.0
     needs_review: bool = False
 
+    # Bilingual fields (YouTube transcript mode)
+    text_ru: str = ""
+    text_en: str = ""
+    quote: str = ""               # literal transcript quote
+
 
 _MIN_SNIPPET_CHARS = 20
 _MAX_EXPAND = 2   # how many extra segments we try when snippet is too short
@@ -90,6 +95,9 @@ def anchor_facts(
         end_sec = segs[idx_end].end if segs else 0.0
         source_url = f"{canonical_url}&t={int(start_sec)}s"
 
+        # Use LLM-provided quote if available, else fall back to transcript text
+        final_snippet = getattr(fact, "quote", "") or snippet
+
         anchored.append(AnchoredFact(
             text=fact.text,
             subsection_id=fact.subsection_id,
@@ -100,11 +108,14 @@ def anchor_facts(
             segment_idx_start=idx_start,
             segment_idx_end=idx_end,
             layer_warning=fact.layer_warning,
-            evidence_snippet=snippet,
+            evidence_snippet=final_snippet,
             source_url=source_url,
             snippet_start_sec=start_sec,
             snippet_end_sec=end_sec,
             needs_review=needs_review,
+            text_ru=getattr(fact, "text_ru", ""),
+            text_en=getattr(fact, "text_en", ""),
+            quote=getattr(fact, "quote", ""),
         ))
 
     return anchored

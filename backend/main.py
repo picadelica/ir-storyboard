@@ -1268,6 +1268,9 @@ class YouTubePreviewIn(BaseModel):
 
 class YouTubeFactOut(BaseModel):
     text: str
+    text_ru: str = ""
+    text_en: str = ""
+    quote: str = ""
     subsection_id: str
     flag: str
     confidence: float
@@ -1357,6 +1360,9 @@ def _preview_out_from_result(result) -> YouTubePreviewOut:
         facts=[
             YouTubeFactOut(
                 text=f.text,
+                text_ru=f.text_ru,
+                text_en=f.text_en,
+                quote=f.quote,
                 subsection_id=f.subsection_id,
                 flag=f.flag,
                 confidence=f.confidence,

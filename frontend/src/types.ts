@@ -185,6 +185,9 @@ export interface YouTubeVideoMeta {
 
 export interface YouTubeFact {
   text: string;
+  text_ru: string;
+  text_en: string;
+  quote: string;
   subsection_id: string;
   flag: "green" | "red" | "grey";
   confidence: number;
