@@ -37,6 +37,7 @@ class FactCandidate:
     suggested_subsection_id: Optional[str]   # "1.1" … "8.3", or None
     suggested_flag: str                       # green / red / grey
     confidence: float = 0.5
+    rationale: str = ""                       # short LLM-supplied reason for the classification
 
 
 @dataclass
