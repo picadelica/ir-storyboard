@@ -99,12 +99,18 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
   const [rows, setRows] = useState<RowState[]>([]);
 
   const classifyMut = useMutation({
-    mutationFn: () => api.ingestPreview(clientId, {
-      channel,
-      source_url: hit.url,
-      source_title: hit.title,
-      text: customText || hit.snippet,
-    }),
+    mutationFn: async () => {
+      const text = (customText || hit.snippet || "").trim();
+      if (!text) {
+        throw new Error("Нет текста для классификации. Открой 'Paste full text' и вставь текст статьи.");
+      }
+      return api.ingestPreview(clientId, {
+        channel,
+        source_url: hit.url,
+        source_title: hit.title,
+        text,
+      });
+    },
     onSuccess: (data) => {
       setPreview(data);
       setRows(data.candidates.map(c => ({
@@ -112,6 +118,11 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
         flag: c.suggested_flag as Flag,
         sid: c.suggested_subsection_id || "",
       })));
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("classifyMut error:", err);
+      alert(`Classify failed: ${msg}`);
     },
   });
 
@@ -176,9 +187,13 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
           className="text-xs px-2 py-1 border border-ink-line rounded hover:bg-slate-50 text-ink-mute"
         >{showPaste ? "Hide paste" : "Paste full text"}</button>
         <button
-          onClick={() => classifyMut.mutate()}
+          type="button"
+          onClick={() => {
+            console.log("[Research] Classify clicked", { clientId, url: hit.url, hasText: !!(customText || hit.snippet) });
+            classifyMut.mutate();
+          }}
           disabled={classifyMut.isPending}
-          className="text-xs px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 ml-auto"
+          className="text-xs px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 ml-auto cursor-pointer"
         >{classifyMut.isPending ? "Classifying…" : "Classify →"}</button>
       </div>
 
