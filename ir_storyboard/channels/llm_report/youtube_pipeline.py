@@ -297,14 +297,44 @@ def _anchored_to_dict(af: AnchoredFact) -> dict:
 
 # ── Commit ─────────────────────────────────────────────────────────────────────
 
+_VALID_FLAGS = {"green", "red", "grey"}
+
+
+def _apply_edit(base: dict, edit: dict) -> dict:
+    """Return a copy of base with optional override fields applied.
+
+    Editable fields: text_ru, subsection_id, flag. `text` is kept in sync
+    with text_ru so dedup + matrix.add_fact see the new primary text.
+    """
+    out = dict(base)
+    if "text_ru" in edit and edit["text_ru"] is not None:
+        new_ru = str(edit["text_ru"]).strip()
+        if new_ru:
+            out["text_ru"] = new_ru
+            out["text"] = new_ru   # primary text for matrix.add_fact
+    if "subsection_id" in edit and edit["subsection_id"]:
+        out["subsection_id"] = str(edit["subsection_id"])
+    if "flag" in edit and edit["flag"] in _VALID_FLAGS:
+        out["flag"] = edit["flag"]
+    return out
+
+
 def run_youtube_commit(
     preview_id: str,
     accepted_fact_ids: list[int],   # indices into preview.facts list
-    overrides: list[dict],          # [{"fact_idx": int, "force_keep": True}]
+    overrides: list[dict],          # see below
     conn: sqlite3.Connection,
     expert_email: str = "anonymous@example.com",
 ) -> YouTubeCommitResult:
-    """Write accepted facts to matrix. override forces skipped layer-guard facts in."""
+    """Write accepted facts to matrix.
+
+    overrides entries (new format):
+      {"kind": "fact"|"skipped", "idx": int,
+       "force_keep": bool,   # only meaningful for kind=skipped
+       "text_ru": str?, "subsection_id": str?, "flag": str?}
+    Legacy format {"fact_idx": int, "force_keep": True} is also accepted
+    and treated as kind="skipped" with force_keep=True.
+    """
     row = conn.execute(
         "SELECT * FROM ingest_audit WHERE id = ?", (preview_id,)
     ).fetchone()
@@ -317,6 +347,24 @@ def run_youtube_commit(
     video_id = preview_data["video_id"]
     all_facts = preview_data["facts"]
     all_skipped = preview_data.get("skipped", [])
+
+    # Index overrides by (kind, idx)
+    fact_edits: dict[int, dict] = {}
+    skipped_overrides: dict[int, dict] = {}
+    for o in overrides or []:
+        # Legacy shape
+        if "kind" not in o and "fact_idx" in o:
+            if o.get("force_keep"):
+                skipped_overrides[int(o["fact_idx"])] = {"force_keep": True}
+            continue
+        kind = o.get("kind")
+        idx = o.get("idx")
+        if idx is None:
+            continue
+        if kind == "fact":
+            fact_edits[int(idx)] = o
+        elif kind == "skipped" and o.get("force_keep"):
+            skipped_overrides[int(idx)] = o
 
     committed = 0
     skipped_count = 0
@@ -339,10 +387,12 @@ def run_youtube_commit(
     # Accepted facts by index
     accepted_set = set(accepted_fact_ids) if accepted_fact_ids else set(range(len(all_facts)))
 
-    for idx, fdict in enumerate(all_facts):
+    for idx, fdict_orig in enumerate(all_facts):
         if idx not in accepted_set:
             skipped_count += 1
             continue
+
+        fdict = _apply_edit(fdict_orig, fact_edits[idx]) if idx in fact_edits else fdict_orig
 
         if _is_duplicate_in_matrix(conn, client_id, fdict["subsection_id"], fdict["text"]):
             skipped_count += 1
@@ -367,32 +417,32 @@ def run_youtube_commit(
         except Exception:
             skipped_count += 1
 
-    # Handle overrides (force-keep layer-guarded facts)
-    override_indices = {o["fact_idx"] for o in overrides if o.get("force_keep")}
-    for idx in override_indices:
-        if idx < len(all_skipped):
-            sdict = all_skipped[idx]
-            if _is_duplicate_in_matrix(conn, client_id, sdict["subsection_id"], sdict["text"]):
-                skipped_count += 1
-                continue
-            try:
-                fact_id = matrix.add_fact(
-                    conn,
-                    client_id=client_id,
-                    subsection_id=sdict["subsection_id"],
-                    text=sdict["text"],
-                    flag="green",
-                    source_id=source_id,
-                    confidence=0.7,
-                    evidence_snippet=sdict.get("evidence_snippet", ""),
-                )
-                conn.execute(
-                    "UPDATE facts SET ingest_audit_id = ?, source_url = ? WHERE id = ?",
-                    (preview_id, sdict.get("source_url", ""), fact_id),
-                )
-                committed += 1
-            except Exception:
-                skipped_count += 1
+    # Handle skipped overrides (force-keep layer-guarded facts, optionally edited)
+    for idx, override in skipped_overrides.items():
+        if idx >= len(all_skipped):
+            continue
+        sdict = _apply_edit(all_skipped[idx], override)
+        if _is_duplicate_in_matrix(conn, client_id, sdict["subsection_id"], sdict["text"]):
+            skipped_count += 1
+            continue
+        try:
+            fact_id = matrix.add_fact(
+                conn,
+                client_id=client_id,
+                subsection_id=sdict["subsection_id"],
+                text=sdict["text"],
+                flag=sdict.get("flag", "green"),
+                source_id=source_id,
+                confidence=sdict.get("confidence", 0.7),
+                evidence_snippet=sdict.get("evidence_snippet", ""),
+            )
+            conn.execute(
+                "UPDATE facts SET ingest_audit_id = ?, source_url = ? WHERE id = ?",
+                (preview_id, sdict.get("source_url", ""), fact_id),
+            )
+            committed += 1
+        except Exception:
+            skipped_count += 1
 
     # Update audit
     now = datetime.now(timezone.utc).isoformat()

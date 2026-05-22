@@ -1,11 +1,22 @@
 import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
+import type { Layer, YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
 
 interface Props {
   clientId: string;
   onJumpToCell: (sid: string) => void;
+  layers?: Layer[];
+}
+
+export interface FactEdit {
+  text_ru?: string;
+  subsection_id?: string;
+  flag?: string;
+}
+
+function editIsEmpty(e: FactEdit | undefined): boolean {
+  return !e || (!e.text_ru && !e.subsection_id && !e.flag);
 }
 
 const FLAG_COLORS: Record<string, string> = {
@@ -22,15 +33,21 @@ function fmtDuration(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
+export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props) {
   const lsKey = `yt-ingest-${clientId}`;
   const lsSaved = (() => { try { return JSON.parse(localStorage.getItem(lsKey) || "{}"); } catch { return {}; } })();
+
+  const subsectionOptions = (layers ?? []).flatMap(L =>
+    L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${s.name} (${L.name})` }))
+  );
 
   const [screen, setScreen] = useState<"input" | "preview" | "done">(lsSaved.screen || "input");
   const [url, setUrl] = useState(lsSaved.url || "");
   const [preview, setPreview] = useState<YouTubePreviewResult | null>(lsSaved.preview || null);
   const [dropped, setDropped] = useState<Set<number>>(new Set());
   const [overrides, setOverrides] = useState<Set<number>>(new Set());
+  const [factEdits, setFactEdits] = useState<Record<number, FactEdit>>(lsSaved.factEdits || {});
+  const [skippedEdits, setSkippedEdits] = useState<Record<number, FactEdit>>(lsSaved.skippedEdits || {});
   const [expertEmail, setExpertEmail] = useState("");
   const [jobId, setJobId] = useState<string | null>(lsSaved.jobId || null);
   const [jobStatus, setJobStatus] = useState<string>(lsSaved.jobStatus || "");
@@ -69,8 +86,11 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
             setPreview(status.result);
             setDropped(new Set());
             setOverrides(new Set());
+            setFactEdits({});
+            setSkippedEdits({});
             setScreen("preview");
-            saveState({ screen: "preview", preview: status.result, jobStatus: "done" });
+            saveState({ screen: "preview", preview: status.result, jobStatus: "done",
+                       factEdits: {}, skippedEdits: {} });
           } else if (status.status === "error") {
             stopPolling();
             saveState({ jobStatus: "error" });
@@ -96,8 +116,11 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
             setPreview(status.result);
             setDropped(new Set());
             setOverrides(new Set());
+            setFactEdits({});
+            setSkippedEdits({});
             setScreen("preview");
-            saveState({ screen: "preview", preview: status.result, jobStatus: "done" });
+            saveState({ screen: "preview", preview: status.result, jobStatus: "done",
+                       factEdits: {}, skippedEdits: {} });
           } else if (status.status === "error") {
             stopPolling();
             saveState({ jobStatus: "error" });
@@ -113,10 +136,21 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
       const accepted = preview.facts
         .map((_, i) => i)
         .filter((i) => !dropped.has(i));
-      const ov = Array.from(overrides).map((i) => ({
-        fact_idx: i,
-        force_keep: true,
-      }));
+
+      const ov: any[] = [];
+      // Edits for accepted facts
+      for (const i of accepted) {
+        const e = factEdits[i];
+        if (!editIsEmpty(e)) {
+          ov.push({ kind: "fact", idx: i, ...e });
+        }
+      }
+      // Skipped overrides (with optional edit)
+      for (const i of Array.from(overrides)) {
+        const e = skippedEdits[i] || {};
+        ov.push({ kind: "skipped", idx: i, force_keep: true, ...e });
+      }
+
       return api.youtubeCommit(
         clientId,
         preview.preview_id,
@@ -136,6 +170,35 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
   const keptCount = preview
     ? preview.facts.filter((_, i) => !dropped.has(i)).length
     : 0;
+
+  function updateFactEdit(idx: number, patch: FactEdit) {
+    setFactEdits((prev) => {
+      const next = { ...prev };
+      const merged = { ...next[idx], ...patch };
+      // Clean empty values so editIsEmpty returns true again
+      Object.keys(merged).forEach((k) => {
+        const v = (merged as any)[k];
+        if (v === "" || v === undefined || v === null) delete (merged as any)[k];
+      });
+      if (Object.keys(merged).length === 0) delete next[idx]; else next[idx] = merged;
+      saveState({ factEdits: next });
+      return next;
+    });
+  }
+
+  function updateSkippedEdit(idx: number, patch: FactEdit) {
+    setSkippedEdits((prev) => {
+      const next = { ...prev };
+      const merged = { ...next[idx], ...patch };
+      Object.keys(merged).forEach((k) => {
+        const v = (merged as any)[k];
+        if (v === "" || v === undefined || v === null) delete (merged as any)[k];
+      });
+      if (Object.keys(merged).length === 0) delete next[idx]; else next[idx] = merged;
+      saveState({ skippedEdits: next });
+      return next;
+    });
+  }
 
   // ── Input screen ─────────────────────────────────────────────────────────
 
@@ -345,12 +408,15 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
             <FactCard
               key={idx}
               fact={fact}
+              edit={factEdits[idx]}
               dropped={dropped.has(idx)}
+              subsectionOptions={subsectionOptions}
               onToggleDrop={() => setDropped((prev) => {
                 const next = new Set(prev);
                 next.has(idx) ? next.delete(idx) : next.add(idx);
                 return next;
               })}
+              onEdit={(patch) => updateFactEdit(idx, patch)}
             />
           ))}
         </div>
@@ -367,12 +433,15 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
               <SkippedCard
                 key={idx}
                 skipped={s}
+                edit={skippedEdits[idx]}
                 overridden={overrides.has(idx)}
+                subsectionOptions={subsectionOptions}
                 onToggleOverride={() => setOverrides((prev) => {
                   const next = new Set(prev);
                   next.has(idx) ? next.delete(idx) : next.add(idx);
                   return next;
                 })}
+                onEdit={(patch) => updateSkippedEdit(idx, patch)}
               />
             ))}
           </div>
@@ -418,77 +487,212 @@ export default function IngestYouTube({ clientId, onJumpToCell }: Props) {
 
 interface FactCardProps {
   fact: YouTubeFact;
+  edit?: FactEdit;
   dropped: boolean;
+  subsectionOptions: { id: string; label: string }[];
   onToggleDrop: () => void;
+  onEdit: (patch: FactEdit) => void;
 }
 
-function FactCard({ fact, dropped, onToggleDrop }: FactCardProps) {
-  const flagStyle = FLAG_COLORS[fact.flag] ?? FLAG_COLORS.grey;
+function FactCard({ fact, edit, dropped, subsectionOptions, onToggleDrop, onEdit }: FactCardProps) {
+  const [editing, setEditing] = useState(false);
+  const effectiveTextRu = edit?.text_ru ?? (fact.text_ru || fact.text);
+  const effectiveSid = edit?.subsection_id ?? fact.subsection_id;
+  const effectiveFlag = (edit?.flag ?? fact.flag) as string;
+  const flagStyle = FLAG_COLORS[effectiveFlag] ?? FLAG_COLORS.grey;
   const tSec = Math.floor(fact.snippet_start_sec);
   const timeStr = `${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, "0")}`;
-  const displayRu = fact.text_ru || fact.text;
+  const displayRu = effectiveTextRu;
   const displayEn = fact.text_en || "";
   const displayQuote = fact.quote || fact.evidence_snippet || "";
+  const isEdited = !editIsEmpty(edit);
 
   return (
     <div className={`border rounded-lg p-3 text-sm transition ${
       dropped ? "opacity-40 bg-slate-50" : "bg-white"
     } border-l-4 ${
-      fact.flag === "green" ? "border-l-emerald-400" :
-      fact.flag === "red" ? "border-l-red-400" : "border-l-slate-300"
-    }`}>
+      effectiveFlag === "green" ? "border-l-emerald-400" :
+      effectiveFlag === "red" ? "border-l-red-400" : "border-l-slate-300"
+    } ${isEdited ? "ring-1 ring-amber-300" : ""}`}>
       <div className="flex items-start gap-2">
         {/* Left: badges */}
         <div className="flex flex-col gap-1 shrink-0 mt-0.5">
-          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600">
-            {fact.subsection_id}
+          <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded border text-center ${
+            edit?.subsection_id
+              ? "bg-amber-50 border-amber-200 text-amber-700"
+              : "bg-slate-100 border-slate-200 text-slate-600"
+          }`}>
+            {effectiveSid}
           </span>
           <span className={`text-[10px] px-1.5 py-0.5 rounded border text-center ${flagStyle}`}>
-            {fact.flag}
+            {effectiveFlag}
           </span>
         </div>
 
         {/* Center: content */}
         <div className="flex-1 min-w-0 space-y-1.5">
-          {/* Russian brief */}
-          <div className={`font-medium text-slate-800 ${dropped ? "line-through" : ""}`}>
-            {displayRu}
-          </div>
-          {/* English brief */}
-          {displayEn && displayEn !== displayRu && (
-            <div className="text-xs text-slate-500 italic">
-              {displayEn}
-            </div>
+          {!editing ? (
+            <>
+              <div className={`font-medium text-slate-800 ${dropped ? "line-through" : ""}`}>
+                {displayRu}
+                {isEdited && <span className="ml-1 text-[10px] text-amber-600">(edited)</span>}
+              </div>
+              {displayEn && displayEn !== displayRu && (
+                <div className="text-xs text-slate-500 italic">{displayEn}</div>
+              )}
+              {displayQuote && (
+                <div className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2 line-clamp-3">
+                  "{displayQuote}"
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                <a
+                  href={fact.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  ▶ {timeStr}
+                </a>
+                {isEdited && (
+                  <button
+                    onClick={() => onEdit({ text_ru: undefined, subsection_id: undefined, flag: undefined })}
+                    className="text-[10px] text-amber-600 hover:underline"
+                  >
+                    revert edits
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <FactEditForm
+              defaultTextRu={effectiveTextRu}
+              defaultSid={effectiveSid}
+              defaultFlag={effectiveFlag}
+              originalTextRu={fact.text_ru || fact.text}
+              originalSid={fact.subsection_id}
+              originalFlag={fact.flag}
+              subsectionOptions={subsectionOptions}
+              onSave={(patch) => { onEdit(patch); setEditing(false); }}
+              onCancel={() => setEditing(false)}
+              quote={displayQuote}
+              textEn={displayEn}
+            />
           )}
-          {/* Literal quote */}
-          {displayQuote && (
-            <div className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2 line-clamp-3">
-              "{displayQuote}"
-            </div>
-          )}
-          {/* Timestamp */}
-          <a
-            href={fact.source_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:underline"
-            onClick={(e) => e.stopPropagation()}
-          >
-            ▶ {timeStr}
-          </a>
         </div>
 
-        {/* Right: action */}
-        <button
-          onClick={onToggleDrop}
-          className={`text-[10px] px-2 py-0.5 border rounded shrink-0 ${
-            dropped
-              ? "border-emerald-200 text-emerald-600 hover:bg-emerald-50"
-              : "border-red-200 text-red-600 hover:bg-red-50"
-          }`}
+        {/* Right: actions */}
+        <div className="flex flex-col gap-1 shrink-0">
+          <button
+            onClick={() => setEditing((e) => !e)}
+            className="text-[10px] px-2 py-0.5 border border-slate-300 text-slate-600 rounded hover:bg-slate-100"
+          >
+            {editing ? "close" : "edit"}
+          </button>
+          <button
+            onClick={onToggleDrop}
+            className={`text-[10px] px-2 py-0.5 border rounded ${
+              dropped
+                ? "border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                : "border-red-200 text-red-600 hover:bg-red-50"
+            }`}
+          >
+            {dropped ? "restore" : "drop"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── FactEditForm (shared by FactCard and SkippedCard) ─────────────────────────
+
+interface FactEditFormProps {
+  defaultTextRu: string;
+  defaultSid: string;
+  defaultFlag: string;
+  originalTextRu: string;
+  originalSid: string;
+  originalFlag: string;
+  subsectionOptions: { id: string; label: string }[];
+  quote: string;
+  textEn: string;
+  onSave: (patch: FactEdit) => void;
+  onCancel: () => void;
+}
+
+function FactEditForm({
+  defaultTextRu, defaultSid, defaultFlag,
+  originalTextRu, originalSid, originalFlag,
+  subsectionOptions, quote, textEn, onSave, onCancel,
+}: FactEditFormProps) {
+  const [textRu, setTextRu] = useState(defaultTextRu);
+  const [sid, setSid] = useState(defaultSid);
+  const [flag, setFlag] = useState(defaultFlag);
+
+  function handleSave() {
+    onSave({
+      text_ru: textRu.trim() === originalTextRu ? undefined : textRu.trim(),
+      subsection_id: sid === originalSid ? undefined : sid,
+      flag: flag === originalFlag ? undefined : flag,
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      <textarea
+        value={textRu}
+        onChange={(e) => setTextRu(e.target.value)}
+        rows={3}
+        className="w-full text-sm border border-slate-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ink"
+      />
+      {textEn && (
+        <div className="text-xs text-slate-400 italic">EN (read-only): {textEn}</div>
+      )}
+      {quote && (
+        <div className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2 line-clamp-2 italic">
+          "{quote}"
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={sid}
+          onChange={(e) => setSid(e.target.value)}
+          className="text-xs border border-slate-300 rounded px-2 py-1"
         >
-          {dropped ? "restore" : "drop"}
-        </button>
+          {subsectionOptions.length === 0 && <option value={sid}>{sid}</option>}
+          {subsectionOptions.map((o) => (
+            <option key={o.id} value={o.id}>{o.label}</option>
+          ))}
+        </select>
+        <div className="flex gap-1">
+          {(["green", "red", "grey"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFlag(f)}
+              className={`text-[10px] px-2 py-0.5 border rounded ${
+                flag === f ? FLAG_COLORS[f] + " font-medium" : "border-slate-200 text-slate-400"
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex gap-2">
+          <button
+            onClick={onCancel}
+            className="text-[10px] px-2 py-0.5 border border-slate-300 text-slate-600 rounded hover:bg-slate-100"
+          >
+            cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="text-[10px] px-3 py-0.5 bg-ink text-white rounded hover:bg-ink/90"
+          >
+            save
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -498,25 +702,37 @@ function FactCard({ fact, dropped, onToggleDrop }: FactCardProps) {
 
 interface SkippedCardProps {
   skipped: YouTubeSkipped;
+  edit?: FactEdit;
   overridden: boolean;
+  subsectionOptions: { id: string; label: string }[];
   onToggleOverride: () => void;
+  onEdit: (patch: FactEdit) => void;
 }
 
-function SkippedCard({ skipped, overridden, onToggleOverride }: SkippedCardProps) {
+function SkippedCard({ skipped, edit, overridden, subsectionOptions, onToggleOverride, onEdit }: SkippedCardProps) {
+  const [editing, setEditing] = useState(false);
+  const effectiveTextRu = edit?.text_ru ?? (skipped.text_ru || skipped.text);
+  const effectiveSid = edit?.subsection_id ?? skipped.subsection_id;
+  const effectiveFlag = (edit?.flag ?? skipped.flag ?? "green") as string;
   const tSec = Math.floor(skipped.snippet_start_sec ?? 0);
   const timeStr = `${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, "0")}`;
-  const displayRu = skipped.text_ru || skipped.text;
+  const displayRu = effectiveTextRu;
   const displayEn = skipped.text_en || "";
   const displayQuote = skipped.quote || skipped.evidence_snippet || "";
+  const isEdited = !editIsEmpty(edit);
 
   return (
     <div className={`border rounded-lg p-3 text-sm ${
-      overridden ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50 opacity-70"
-    }`}>
+      overridden ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50 opacity-80"
+    } ${isEdited ? "ring-1 ring-amber-300" : ""}`}>
       <div className="flex items-start gap-2">
         <div className="flex flex-col gap-1 shrink-0 mt-0.5">
-          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/60 border text-slate-500 text-center">
-            {skipped.subsection_id}
+          <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded border text-center ${
+            edit?.subsection_id
+              ? "bg-amber-50 border-amber-200 text-amber-700"
+              : "bg-white/60 border-slate-200 text-slate-500"
+          }`}>
+            {effectiveSid}
           </span>
           <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 text-center">
             ⚠ skipped
@@ -524,41 +740,80 @@ function SkippedCard({ skipped, overridden, onToggleOverride }: SkippedCardProps
         </div>
 
         <div className="flex-1 min-w-0 space-y-1.5">
-          <div className="font-medium text-slate-700">{displayRu}</div>
-          {displayEn && displayEn !== displayRu && (
-            <div className="text-xs text-slate-500 italic">{displayEn}</div>
-          )}
-          <div className="text-[10px] text-slate-400">{skipped.reason}</div>
-          {displayQuote && (
-            <div className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2 line-clamp-3 italic">
-              "{displayQuote}"
-            </div>
-          )}
-          {skipped.source_url && (
-            <a
-              href={skipped.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              ▶ {timeStr}
-            </a>
+          {!editing ? (
+            <>
+              <div className="font-medium text-slate-700">
+                {displayRu}
+                {isEdited && <span className="ml-1 text-[10px] text-amber-600">(edited)</span>}
+              </div>
+              {displayEn && displayEn !== displayRu && (
+                <div className="text-xs text-slate-500 italic">{displayEn}</div>
+              )}
+              <div className="text-[10px] text-slate-400">{skipped.reason}</div>
+              {displayQuote && (
+                <div className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2 line-clamp-3 italic">
+                  "{displayQuote}"
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                {skipped.source_url && (
+                  <a
+                    href={skipped.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    ▶ {timeStr}
+                  </a>
+                )}
+                {isEdited && (
+                  <button
+                    onClick={() => onEdit({ text_ru: undefined, subsection_id: undefined, flag: undefined })}
+                    className="text-[10px] text-amber-600 hover:underline"
+                  >
+                    revert edits
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <FactEditForm
+              defaultTextRu={effectiveTextRu}
+              defaultSid={effectiveSid}
+              defaultFlag={effectiveFlag}
+              originalTextRu={skipped.text_ru || skipped.text}
+              originalSid={skipped.subsection_id}
+              originalFlag={skipped.flag || "green"}
+              subsectionOptions={subsectionOptions}
+              onSave={(patch) => { onEdit(patch); setEditing(false); }}
+              onCancel={() => setEditing(false)}
+              quote={displayQuote}
+              textEn={displayEn}
+            />
           )}
         </div>
 
-        {skipped.override_allowed && (
+        <div className="flex flex-col gap-1 shrink-0">
           <button
-            onClick={onToggleOverride}
-            className={`text-[10px] px-2 py-0.5 border rounded shrink-0 ${
-              overridden
-                ? "border-amber-400 text-amber-700 bg-amber-100"
-                : "border-slate-300 text-slate-500 hover:border-amber-300 hover:text-amber-600"
-            }`}
+            onClick={() => setEditing((e) => !e)}
+            className="text-[10px] px-2 py-0.5 border border-slate-300 text-slate-600 rounded hover:bg-slate-100"
           >
-            {overridden ? "undo override" : "override & keep"}
+            {editing ? "close" : "edit"}
           </button>
-        )}
+          {skipped.override_allowed && (
+            <button
+              onClick={onToggleOverride}
+              className={`text-[10px] px-2 py-0.5 border rounded ${
+                overridden
+                  ? "border-amber-400 text-amber-700 bg-amber-100"
+                  : "border-slate-300 text-slate-500 hover:border-amber-300 hover:text-amber-600"
+              }`}
+            >
+              {overridden ? "undo" : "keep"}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

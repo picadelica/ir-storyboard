@@ -103,7 +103,7 @@ function ClientPage() {
             <IngestLLMReport clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
           {activeTab === "youtube" && (
-            <IngestYouTube clientId={clientId!} onJumpToCell={onJumpToCell} />
+            <IngestYouTube clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
           )}
         </div>
       </main>
