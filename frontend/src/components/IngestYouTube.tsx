@@ -414,7 +414,7 @@ function FactCard({ fact, dropped, onToggleDrop }: FactCardProps) {
   const tSec = Math.floor(fact.snippet_start_sec);
   const timeStr = `${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, "0")}`;
   const displayRu = fact.text_ru || fact.text;
-  const displayEn = fact.text_en || fact.raw_paraphrase || "";
+  const displayEn = fact.text_en || "";
   const displayQuote = fact.quote || fact.evidence_snippet || "";
 
   return (
