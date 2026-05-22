@@ -48,7 +48,7 @@ def split_audio(
     Env overrides: MAX_CHUNK_SEC, CHUNK_OVERLAP_SEC.
     """
     if max_chunk_sec is None:
-        max_chunk_sec = int(os.environ.get("MAX_CHUNK_SEC", "1800"))
+        max_chunk_sec = int(os.environ.get("MAX_CHUNK_SEC", "1200"))
     if overlap_sec is None:
         overlap_sec = int(os.environ.get("CHUNK_OVERLAP_SEC", "5"))
 

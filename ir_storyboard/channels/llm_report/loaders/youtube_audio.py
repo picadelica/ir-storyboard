@@ -36,10 +36,11 @@ def fetch_audio(video_id: str, cache_dir: Path) -> Path:
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "opus",
-                "preferredquality": "64",
+                "preferredquality": "32",
             }
         ],
-        "postprocessor_args": ["-ac", "1", "-ar", "16000"],
+        # 32kbps mono 16kHz: sufficient for speech, ~14MB/hour — stays under OpenAI 25MB chunk limit
+        "postprocessor_args": ["-ac", "1", "-ar", "16000", "-b:a", "32k"],
         "quiet": True,
         "no_warnings": True,
         "ratelimit": 1_000_000,       # 1 MB/s — polite
