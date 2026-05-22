@@ -770,7 +770,7 @@ class IngestPreviewIn(BaseModel):
     text: str
 
 
-class IngestPreviewOut(BaseModel):
+class ResearchPreviewOut(BaseModel):
     channel: str
     source_url: str
     source_title: str
@@ -870,14 +870,14 @@ def research_client(client_id: str, conn=Depends(get_conn)):
     return ResearchResult(hits=hits, queries_used=[q for q, _ in queries])
 
 
-@app.post("/api/clients/{client_id}/ingest/preview", response_model=IngestPreviewOut)
+@app.post("/api/clients/{client_id}/ingest/preview", response_model=ResearchPreviewOut)
 def ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(get_conn)):
     # split by double newline or keep as single chunk
     paras = [p.strip() for p in body.text.split("\n\n") if p.strip()]
     if not paras:
         paras = [body.text.strip()] if body.text.strip() else []
     candidates = classify_facts_batch(paras)
-    return IngestPreviewOut(
+    return ResearchPreviewOut(
         channel=body.channel,
         source_url=body.source_url,
         source_title=body.source_title,
