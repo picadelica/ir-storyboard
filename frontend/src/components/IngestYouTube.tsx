@@ -54,6 +54,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   const [jobStatus, setJobStatus] = useState<string>(lsSaved.jobStatus || "");
   const [reopenLoading, setReopenLoading] = useState<string | null>(null);
   const [reopenError, setReopenError] = useState<string>("");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qc = useQueryClient();
 
@@ -90,6 +91,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             setReadOnly(false);
             setDropped(new Set());
             setOverrides(new Set());
+            setSelected(new Set());
             setFactEdits({});
             setSkippedEdits({});
             setScreen("preview");
@@ -121,6 +123,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             setReadOnly(false);
             setDropped(new Set());
             setOverrides(new Set());
+            setSelected(new Set());
             setFactEdits({});
             setSkippedEdits({});
             setScreen("preview");
@@ -200,6 +203,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
       setReadOnly(true);
       setDropped(new Set());
       setOverrides(new Set());
+      setSelected(new Set());
       setFactEdits({});
       setSkippedEdits({});
       setScreen("preview");
@@ -220,6 +224,80 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
       });
       if (Object.keys(merged).length === 0) delete next[idx]; else next[idx] = merged;
       saveState({ skippedEdits: next });
+      return next;
+    });
+  }
+
+  function toggleSelect(idx: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(idx) ? next.delete(idx) : next.add(idx);
+      return next;
+    });
+  }
+
+  function bulkDrop() {
+    setDropped((prev) => {
+      const next = new Set(prev);
+      selected.forEach((i) => next.add(i));
+      return next;
+    });
+  }
+
+  function bulkRestore() {
+    setDropped((prev) => {
+      const next = new Set(prev);
+      selected.forEach((i) => next.delete(i));
+      return next;
+    });
+  }
+
+  function bulkSetFlag(flag: "green" | "red" | "grey") {
+    if (!preview) return;
+    setFactEdits((prev) => {
+      const next = { ...prev };
+      selected.forEach((idx) => {
+        const original = preview.facts[idx];
+        if (!original) return;
+        const cur = next[idx] || {};
+        const newEdit: FactEdit = { ...cur };
+        if (flag === original.flag) {
+          delete newEdit.flag;
+        } else {
+          newEdit.flag = flag;
+        }
+        if (Object.keys(newEdit).length === 0) {
+          delete next[idx];
+        } else {
+          next[idx] = newEdit;
+        }
+      });
+      saveState({ factEdits: next });
+      return next;
+    });
+  }
+
+  function bulkMoveTo(sid: string) {
+    if (!preview || !sid) return;
+    setFactEdits((prev) => {
+      const next = { ...prev };
+      selected.forEach((idx) => {
+        const original = preview.facts[idx];
+        if (!original) return;
+        const cur = next[idx] || {};
+        const newEdit: FactEdit = { ...cur };
+        if (sid === original.subsection_id) {
+          delete newEdit.subsection_id;
+        } else {
+          newEdit.subsection_id = sid;
+        }
+        if (Object.keys(newEdit).length === 0) {
+          delete next[idx];
+        } else {
+          next[idx] = newEdit;
+        }
+      });
+      saveState({ factEdits: next });
       return next;
     });
   }
@@ -564,9 +642,86 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
 
       {/* Facts */}
       <div>
-        <div className="text-xs font-medium uppercase text-ink-mute tracking-wide mb-2">
-          Facts ({preview.facts.length})
+        <div className="flex items-baseline justify-between mb-2">
+          <div className="text-xs font-medium uppercase text-ink-mute tracking-wide">
+            Facts ({preview.facts.length})
+          </div>
+          {!readOnly && (
+            <div className="flex items-center gap-2 text-[10px]">
+              <button
+                onClick={() => setSelected(new Set(preview.facts.map((_, i) => i)))}
+                className="text-ink-mute hover:text-ink"
+              >
+                select all
+              </button>
+              <span className="text-slate-300">·</span>
+              <button
+                onClick={() => setSelected(new Set())}
+                className="text-ink-mute hover:text-ink"
+                disabled={selected.size === 0}
+              >
+                clear
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Bulk-actions toolbar */}
+        {!readOnly && selected.size > 0 && (
+          <div className="sticky top-0 z-10 mb-3 bg-amber-50 border border-amber-300 rounded-lg p-3 flex flex-wrap items-center gap-2 text-xs shadow-sm">
+            <span className="font-medium text-amber-900">
+              {selected.size} selected
+            </span>
+            <div className="h-4 w-px bg-amber-300" />
+            <button
+              onClick={bulkDrop}
+              className="px-2 py-1 border border-red-300 text-red-700 rounded hover:bg-red-50"
+            >
+              drop
+            </button>
+            <button
+              onClick={bulkRestore}
+              className="px-2 py-1 border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-50"
+            >
+              restore
+            </button>
+            <div className="h-4 w-px bg-amber-300" />
+            <span className="text-amber-900">flag →</span>
+            {(["green", "red", "grey"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => bulkSetFlag(f)}
+                className={`px-2 py-1 border rounded ${FLAG_COLORS[f]}`}
+              >
+                {f}
+              </button>
+            ))}
+            <div className="h-4 w-px bg-amber-300" />
+            <span className="text-amber-900">move →</span>
+            <select
+              onChange={(e) => {
+                if (e.target.value) {
+                  bulkMoveTo(e.target.value);
+                  e.target.value = "";
+                }
+              }}
+              defaultValue=""
+              className="text-xs border border-amber-300 rounded px-2 py-1 bg-white"
+            >
+              <option value="" disabled>subsection…</option>
+              {subsectionOptions.map((o) => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="ml-auto text-[10px] text-amber-900 hover:text-amber-700"
+            >
+              ✕ clear
+            </button>
+          </div>
+        )}
+
         <div className="space-y-2">
           {preview.facts.map((fact, idx) => (
             <FactCard
@@ -575,6 +730,8 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
               edit={factEdits[idx]}
               dropped={dropped.has(idx)}
               readOnly={readOnly}
+              selected={selected.has(idx)}
+              onToggleSelect={() => toggleSelect(idx)}
               subsectionOptions={subsectionOptions}
               onToggleDrop={() => setDropped((prev) => {
                 const next = new Set(prev);
@@ -658,12 +815,14 @@ interface FactCardProps {
   edit?: FactEdit;
   dropped: boolean;
   readOnly?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
   subsectionOptions: { id: string; label: string }[];
   onToggleDrop: () => void;
   onEdit: (patch: FactEdit) => void;
 }
 
-function FactCard({ fact, edit, dropped, readOnly, subsectionOptions, onToggleDrop, onEdit }: FactCardProps) {
+function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, subsectionOptions, onToggleDrop, onEdit }: FactCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (fact.text_ru || fact.text);
   const effectiveSid = edit?.subsection_id ?? fact.subsection_id;
@@ -682,8 +841,18 @@ function FactCard({ fact, edit, dropped, readOnly, subsectionOptions, onToggleDr
     } border-l-4 ${
       effectiveFlag === "green" ? "border-l-emerald-400" :
       effectiveFlag === "red" ? "border-l-red-400" : "border-l-slate-300"
-    } ${isEdited ? "ring-1 ring-amber-300" : ""}`}>
+    } ${isEdited ? "ring-1 ring-amber-300" : ""} ${selected ? "ring-2 ring-amber-400" : ""}`}>
       <div className="flex items-start gap-2">
+        {/* Selection checkbox (hidden in readonly) */}
+        {!readOnly && onToggleSelect && (
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={onToggleSelect}
+            className="mt-1 shrink-0 cursor-pointer"
+            aria-label="Select fact for bulk action"
+          />
+        )}
         {/* Left: badges */}
         <div className="flex flex-col gap-1 shrink-0 mt-0.5">
           <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded border text-center ${
