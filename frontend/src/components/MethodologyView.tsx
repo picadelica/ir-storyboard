@@ -1,28 +1,42 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Client, MethodologyCell, TonePreset } from "../types";
+import type {
+  Client, ClientMethodologyCell, MethodologyCell, TonePreset,
+} from "../types";
 
 interface Props {
   clientId: string;
 }
 
+type Mode = "global" | "client";
+
 export default function MethodologyView({ clientId }: Props) {
   const qc = useQueryClient();
-  const cells = useQuery({ queryKey: ["methodology"], queryFn: api.methodology });
+  const [mode, setMode] = useState<Mode>("global");
+
   const presets = useQuery({ queryKey: ["tone-presets"], queryFn: api.tonePresets });
   const client = useQuery<Client>({
     queryKey: ["client", clientId],
     queryFn: () => api.getClient(clientId),
   });
+  const globalCells = useQuery({
+    queryKey: ["methodology"],
+    queryFn: api.methodology,
+  });
+  const clientCells = useQuery({
+    queryKey: ["client-methodology", clientId],
+    queryFn: () => api.clientMethodology(clientId),
+  });
 
   return (
-    <div className="p-5 max-w-4xl space-y-8">
+    <div className="p-5 max-w-4xl space-y-6">
       <div>
         <h2 className="text-lg font-semibold">Methodology</h2>
         <div className="text-xs text-ink-mute mt-0.5">
-          Описания ячеек и тон формулировок подмешиваются в каждый LLM-промпт.
-          Описания глобальные (общие для всех клиентов); тон — per-client.
+          Описание ячейки = что в принципе сюда относится (общее для всех клиентов).{" "}
+          Приписка «For this client» = что особенно важно для конкретной компании
+          (добавляется к описанию в prompt). Тон = регистр формулировок (per-client).
         </div>
       </div>
 
@@ -38,37 +52,72 @@ export default function MethodologyView({ clientId }: Props) {
         }}
       />
 
-      <CellsSection
-        cells={cells.data ?? []}
-        isLoading={cells.isLoading}
-        onSave={async (sid, description) => {
-          await api.updateMethodology(sid, description);
-          qc.invalidateQueries({ queryKey: ["methodology"] });
-        }}
-      />
+      {/* Mode switcher */}
+      <div className="flex items-center gap-1 border-b border-ink-line">
+        <ModeTab active={mode === "global"} onClick={() => setMode("global")}
+                 label="Global descriptions" hint="общие для всех клиентов" />
+        <ModeTab active={mode === "client"} onClick={() => setMode("client")}
+                 label={`For ${client.data?.name ?? "this client"}`}
+                 hint="добавляется к global для этого клиента" />
+      </div>
+
+      {mode === "global" && (
+        <GlobalCellsSection
+          cells={globalCells.data ?? []}
+          isLoading={globalCells.isLoading}
+          onSave={async (sid, description) => {
+            await api.updateMethodology(sid, description);
+            qc.invalidateQueries({ queryKey: ["methodology"] });
+            qc.invalidateQueries({ queryKey: ["client-methodology", clientId] });
+          }}
+        />
+      )}
+
+      {mode === "client" && (
+        <ClientCellsSection
+          cells={clientCells.data ?? []}
+          isLoading={clientCells.isLoading}
+          onSave={async (sid, note) => {
+            await api.updateClientMethodology(clientId, sid, note);
+            qc.invalidateQueries({ queryKey: ["client-methodology", clientId] });
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function ModeTab({ active, onClick, label, hint }: {
+  active: boolean; onClick: () => void; label: string; hint: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 text-sm border-b-2 transition ${
+        active ? "border-ink text-ink font-medium" : "border-transparent text-ink-mute hover:text-ink"
+      }`}
+    >
+      {label}
+      <span className="ml-2 text-[10px] text-ink-mute font-normal">— {hint}</span>
+    </button>
   );
 }
 
 // ── Tone preset selector ──────────────────────────────────────────────────────
 
-interface TonePresetSectionProps {
+function TonePresetSection({ client, presets, isLoading, onSave }: {
   client?: Client;
   presets: TonePreset[];
   isLoading: boolean;
   onSave: (preset_id: string) => Promise<void>;
-}
-
-function TonePresetSection({ client, presets, isLoading, onSave }: TonePresetSectionProps) {
+}) {
   const current = client?.tone_preset || "business";
   const [picked, setPicked] = useState<string | null>(null);
   const effective = picked ?? current;
   const dirty = picked != null && picked !== current;
 
   const saveMut = useMutation({
-    mutationFn: async () => {
-      if (picked) await onSave(picked);
-    },
+    mutationFn: async () => { if (picked) await onSave(picked); },
     onSuccess: () => setPicked(null),
   });
 
@@ -76,7 +125,7 @@ function TonePresetSection({ client, presets, isLoading, onSave }: TonePresetSec
     <section className="space-y-3">
       <div className="flex items-baseline justify-between">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-mute">
-          Tone preset (per-client)
+          Tone preset · per-client
         </h3>
         {dirty && (
           <button
@@ -89,9 +138,6 @@ function TonePresetSection({ client, presets, isLoading, onSave }: TonePresetSec
         )}
       </div>
       {isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
-      {!isLoading && presets.length === 0 && (
-        <div className="text-sm text-ink-mute">No presets available.</div>
-      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {presets.map((p) => {
           const isOn = effective === p.id;
@@ -107,9 +153,11 @@ function TonePresetSection({ client, presets, isLoading, onSave }: TonePresetSec
             >
               <div className="flex items-baseline justify-between gap-2">
                 <div className="text-sm font-semibold">{p.label}</div>
-                {isOn && <span className="text-[10px] text-ink-mute">
-                  {picked === p.id && dirty ? "selected" : "current"}
-                </span>}
+                {isOn && (
+                  <span className="text-[10px] text-ink-mute">
+                    {picked === p.id && dirty ? "selected" : "current"}
+                  </span>
+                )}
               </div>
               <div className="text-xs text-ink-mute mt-1">{p.description}</div>
               <div className="text-xs text-slate-600 italic mt-2 border-l-2 border-slate-200 pl-2">
@@ -126,17 +174,66 @@ function TonePresetSection({ client, presets, isLoading, onSave }: TonePresetSec
   );
 }
 
-// ── Cells (24 subsections) ───────────────────────────────────────────────────
+// ── Global cells (shared across all clients) ─────────────────────────────────
 
-interface CellsSectionProps {
+function GlobalCellsSection({ cells, isLoading, onSave }: {
   cells: MethodologyCell[];
   isLoading: boolean;
   onSave: (sid: string, description: string) => Promise<void>;
+}) {
+  return (
+    <CellsByLayer
+      cells={cells}
+      isLoading={isLoading}
+      bannerColor="slate"
+      bannerText="Эти описания общие для ВСЕХ клиентов. Меняй здесь только методологическую константу."
+      getCurrentValue={(c) => c.description}
+      onSave={onSave}
+      placeholder="Что в принципе попадает в эту ячейку? Что НЕ попадает? (общее для всех клиентов)"
+    />
+  );
 }
 
-function CellsSection({ cells, isLoading, onSave }: CellsSectionProps) {
-  // Group by layer
-  const grouped = new Map<number, { layerName: string; cells: MethodologyCell[] }>();
+// ── Client-specific notes (additive on top of global) ────────────────────────
+
+function ClientCellsSection({ cells, isLoading, onSave }: {
+  cells: ClientMethodologyCell[];
+  isLoading: boolean;
+  onSave: (sid: string, note: string) => Promise<void>;
+}) {
+  return (
+    <CellsByLayer
+      cells={cells}
+      isLoading={isLoading}
+      bannerColor="amber"
+      bannerText="Эти приписки относятся только к этому клиенту. Они добавляются к глобальному описанию в prompt как «For this client:» строка."
+      getCurrentValue={(c) => (c as ClientMethodologyCell).client_note}
+      getGlobal={(c) => (c as ClientMethodologyCell).description}
+      onSave={onSave}
+      placeholder="Что особенно важно в этой ячейке для этого клиента? Имена, числа, фокус. (опционально, может быть пусто)"
+    />
+  );
+}
+
+// ── Shared layered list ──────────────────────────────────────────────────────
+
+function CellsByLayer({
+  cells, isLoading, bannerColor, bannerText, getCurrentValue, getGlobal,
+  onSave, placeholder,
+}: {
+  cells: (MethodologyCell | ClientMethodologyCell)[];
+  isLoading: boolean;
+  bannerColor: "slate" | "amber";
+  bannerText: string;
+  getCurrentValue: (c: MethodologyCell | ClientMethodologyCell) => string;
+  getGlobal?: (c: MethodologyCell | ClientMethodologyCell) => string;
+  onSave: (sid: string, value: string) => Promise<void>;
+  placeholder: string;
+}) {
+  const grouped = new Map<number, {
+    layerName: string;
+    cells: (MethodologyCell | ClientMethodologyCell)[];
+  }>();
   for (const c of cells) {
     const g = grouped.get(c.layer_id) ?? { layerName: c.layer_name, cells: [] };
     g.cells.push(c);
@@ -144,15 +241,14 @@ function CellsSection({ cells, isLoading, onSave }: CellsSectionProps) {
   }
   const layerIds = Array.from(grouped.keys()).sort((a, b) => a - b);
 
+  const bannerCls = bannerColor === "amber"
+    ? "bg-amber-50 border-amber-300 text-amber-900"
+    : "bg-slate-50 border-slate-300 text-slate-700";
+
   return (
-    <section className="space-y-6">
-      <div className="flex items-baseline justify-between">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-mute">
-          Cell descriptions ({cells.length})
-        </h3>
-        <div className="text-[10px] text-ink-mute">
-          Описания глобальные для всех клиентов
-        </div>
+    <section className="space-y-4">
+      <div className={`text-xs rounded-lg border px-3 py-2 ${bannerCls}`}>
+        {bannerText}
       </div>
       {isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
       {layerIds.map((lid) => {
@@ -164,7 +260,14 @@ function CellsSection({ cells, isLoading, onSave }: CellsSectionProps) {
             </div>
             <div className="space-y-2">
               {g.cells.map((c) => (
-                <CellRow key={c.subsection_id} cell={c} onSave={onSave} />
+                <CellRow
+                  key={c.subsection_id}
+                  cell={c}
+                  currentValue={getCurrentValue(c)}
+                  globalText={getGlobal?.(c)}
+                  onSave={onSave}
+                  placeholder={placeholder}
+                />
               ))}
             </div>
           </div>
@@ -174,14 +277,17 @@ function CellsSection({ cells, isLoading, onSave }: CellsSectionProps) {
   );
 }
 
-interface CellRowProps {
-  cell: MethodologyCell;
-  onSave: (sid: string, description: string) => Promise<void>;
-}
-
-function CellRow({ cell, onSave }: CellRowProps) {
-  const [draft, setDraft] = useState(cell.description);
-  const dirty = draft.trim() !== cell.description.trim();
+function CellRow({
+  cell, currentValue, globalText, onSave, placeholder,
+}: {
+  cell: MethodologyCell | ClientMethodologyCell;
+  currentValue: string;
+  globalText?: string;
+  onSave: (sid: string, value: string) => Promise<void>;
+  placeholder: string;
+}) {
+  const [draft, setDraft] = useState(currentValue);
+  const dirty = draft.trim() !== currentValue.trim();
   const saveMut = useMutation({
     mutationFn: () => onSave(cell.subsection_id, draft.trim()),
   });
@@ -195,11 +301,21 @@ function CellRow({ cell, onSave }: CellRowProps) {
         <span className="text-sm font-medium">{cell.subsection_name}</span>
         {dirty && <span className="text-[10px] text-amber-600 ml-auto">unsaved</span>}
       </div>
+      {globalText !== undefined && globalText.trim() && (
+        <details className="mb-2 text-xs">
+          <summary className="cursor-pointer text-ink-mute hover:text-ink">
+            global description (inherited)
+          </summary>
+          <div className="mt-1 text-slate-600 border-l-2 border-slate-200 pl-2 whitespace-pre-wrap">
+            {globalText}
+          </div>
+        </details>
+      )}
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         rows={3}
-        placeholder="Что именно искать в этой ячейке? Что НЕ относится? Примеры формулировок…"
+        placeholder={placeholder}
         className="w-full text-sm border border-slate-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ink resize-y"
       />
       <div className="mt-2 flex items-center gap-2">
@@ -216,7 +332,7 @@ function CellRow({ cell, onSave }: CellRowProps) {
         </button>
         {dirty && (
           <button
-            onClick={() => setDraft(cell.description)}
+            onClick={() => setDraft(currentValue)}
             className="text-xs px-3 py-1 border border-slate-300 text-slate-600 rounded hover:bg-slate-100"
           >
             Revert

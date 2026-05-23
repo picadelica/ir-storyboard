@@ -143,6 +143,7 @@ def preview_llm_report(
         available_subsections=_AVAILABLE_SUBSECTIONS,
         citation_index=citation_index,
         subsection_descriptions=matrix.get_subsection_descriptions(conn),
+        client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
         tone_instruction=get_tone_instruction(tone_preset_id),
     )
 

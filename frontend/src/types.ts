@@ -39,6 +39,10 @@ export interface MethodologyCell {
   description: string;
 }
 
+export interface ClientMethodologyCell extends MethodologyCell {
+  client_note: string;
+}
+
 export interface TonePreset {
   id: string;
   label: string;

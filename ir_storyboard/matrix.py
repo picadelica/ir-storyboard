@@ -100,6 +100,37 @@ def set_client_tone_preset(conn: sqlite3.Connection,
     conn.commit()
 
 
+def get_client_subsection_notes(conn: sqlite3.Connection,
+                                  client_id: str) -> Dict[str, str]:
+    """Return {sid: per-client note} for this client (only non-empty rows)."""
+    rows = conn.execute(
+        "SELECT subsection_id, note FROM client_subsection_notes WHERE client_id = ?",
+        (client_id,),
+    ).fetchall()
+    return {r["subsection_id"]: r["note"] for r in rows if (r["note"] or "").strip()}
+
+
+def set_client_subsection_note(conn: sqlite3.Connection,
+                                client_id: str, subsection_id: str,
+                                note: str) -> None:
+    """Upsert per-client note. Empty string deletes the row."""
+    if not (note or "").strip():
+        conn.execute(
+            "DELETE FROM client_subsection_notes WHERE client_id = ? AND subsection_id = ?",
+            (client_id, subsection_id),
+        )
+    else:
+        conn.execute(
+            """INSERT INTO client_subsection_notes (client_id, subsection_id, note)
+                VALUES (?, ?, ?)
+                ON CONFLICT(client_id, subsection_id) DO UPDATE
+                    SET note = excluded.note,
+                        updated_at = CURRENT_TIMESTAMP""",
+            (client_id, subsection_id, note.strip()),
+        )
+    conn.commit()
+
+
 def count_client_facts(conn: sqlite3.Connection, client_id: str) -> int:
     row = conn.execute(
         """SELECT COUNT(*) FROM facts f

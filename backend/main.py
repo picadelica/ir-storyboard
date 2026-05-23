@@ -413,6 +413,61 @@ def list_tone_presets():
     ]
 
 
+class ClientMethodologyCellOut(BaseModel):
+    subsection_id: str
+    subsection_name: str
+    layer_id: int
+    layer_name: str
+    sort_order: int
+    description: str          # global description (read-only here; edit in /methodology)
+    client_note: str          # per-client additive note
+
+
+class ClientMethodologyUpdateIn(BaseModel):
+    note: str
+
+
+@app.get("/api/clients/{client_id}/methodology",
+         response_model=List[ClientMethodologyCellOut])
+def list_client_methodology(client_id: str, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    notes = matrix.get_client_subsection_notes(conn, client_id)
+    rows = conn.execute(
+        """SELECT s.id AS subsection_id, s.name AS subsection_name,
+                  s.sort_order, COALESCE(s.description, '') AS description,
+                  l.id AS layer_id, l.name AS layer_name
+             FROM subsections s JOIN layers l ON l.id = s.layer_id
+             ORDER BY l.id, s.sort_order, s.id"""
+    ).fetchall()
+    return [
+        ClientMethodologyCellOut(
+            **dict(r),
+            client_note=notes.get(r["subsection_id"], ""),
+        )
+        for r in rows
+    ]
+
+
+@app.patch("/api/clients/{client_id}/methodology/{subsection_id}",
+           response_model=ClientMethodologyCellOut)
+def update_client_methodology(client_id: str, subsection_id: str,
+                                body: ClientMethodologyUpdateIn,
+                                conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    matrix.set_client_subsection_note(conn, client_id, subsection_id, body.note)
+    row = conn.execute(
+        """SELECT s.id AS subsection_id, s.name AS subsection_name,
+                  s.sort_order, COALESCE(s.description, '') AS description,
+                  l.id AS layer_id, l.name AS layer_name
+             FROM subsections s JOIN layers l ON l.id = s.layer_id
+             WHERE s.id = ?""",
+        (subsection_id,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, f"Unknown subsection_id: {subsection_id}")
+    return ClientMethodologyCellOut(**dict(row), client_note=body.note.strip())
+
+
 @app.post("/api/clients", response_model=ClientOut)
 def upsert_client(c: ClientOut, conn=Depends(get_conn)):
     matrix.upsert_client(

@@ -432,13 +432,17 @@ If no usable facts in the section, return: {"facts": []}
 
 def _build_subsection_list(available_subsections: List[str],
                             descriptions: Optional[dict] = None,
+                            client_notes: Optional[dict] = None,
                             separator: str = "  ") -> str:
     """Build the SUBSECTION_LIST text injected into extractor prompts.
 
-    If descriptions are provided, each cell gets an extra indented
-    "Methodology note:" line for the LLM to use when matching facts.
+    descriptions: global "Methodology note:" — what each cell is about (constant
+    across clients).
+    client_notes: optional per-client additive "For this client:" appendix —
+    things specific to the current company.
     """
     descriptions = descriptions or {}
+    client_notes = client_notes or {}
     lines: List[str] = []
     for layer in LAYERS:
         for sub in layer.subsections:
@@ -447,10 +451,18 @@ def _build_subsection_list(available_subsections: List[str],
             lines.append(f"{sub.id}{separator}{sub.name}{separator}({layer.name})")
             note = (descriptions.get(sub.id) or "").strip()
             if note:
-                # Indent the note so the LLM sees it belongs to the previous line.
+                first = True
                 for line in note.splitlines():
-                    lines.append(f"    Methodology note: {line}" if line == note.splitlines()[0]
-                                 else f"      {line}")
+                    prefix = "    Methodology note: " if first else "      "
+                    lines.append(prefix + line)
+                    first = False
+            client_note = (client_notes.get(sub.id) or "").strip()
+            if client_note:
+                first = True
+                for line in client_note.splitlines():
+                    prefix = "    For this client: " if first else "      "
+                    lines.append(prefix + line)
+                    first = False
     return "\n".join(lines)
 
 
@@ -460,6 +472,7 @@ def extract_facts_from_llm_report(
     available_subsections: List[str],
     citation_index: "dict[int, ResolvedCitation]",
     subsection_descriptions: Optional[dict] = None,
+    client_subsection_notes: Optional[dict] = None,
     tone_instruction: str = "",
 ) -> List["ExtractedFact"]:
     """Extract atomic facts from one report section using LLM.
@@ -472,7 +485,8 @@ def extract_facts_from_llm_report(
         return []
 
     subsection_list = _build_subsection_list(
-        available_subsections, subsection_descriptions, separator=" — ",
+        available_subsections, subsection_descriptions,
+        client_subsection_notes, separator=" — ",
     )
 
     cite_ref = "\n".join(
@@ -573,6 +587,7 @@ def extract_facts_from_full_document(
     available_subsections: List[str],
     citation_index: "dict[int, ResolvedCitation]",
     subsection_descriptions: Optional[dict] = None,
+    client_subsection_notes: Optional[dict] = None,
     tone_instruction: str = "",
 ) -> List["ExtractedFact"]:
     """Single LLM call for the ENTIRE document — much faster than per-section calls.
@@ -585,7 +600,9 @@ def extract_facts_from_full_document(
     if not sections:
         return []
 
-    subsection_list = _build_subsection_list(available_subsections, subsection_descriptions)
+    subsection_list = _build_subsection_list(
+        available_subsections, subsection_descriptions, client_subsection_notes,
+    )
 
     cite_ref = "\n".join(
         f"[{cid}] {c.title or c.canonical_url}"
@@ -728,6 +745,7 @@ def extract_facts_from_transcript(
     available_subsections: List[str],
     chunk_duration_sec: float = 600.0,  # 10-min chunks (smaller output → less truncation)
     subsection_descriptions: Optional[dict] = None,
+    client_subsection_notes: Optional[dict] = None,
     tone_instruction: str = "",
 ) -> Tuple[List["ExtractedFact"], List[dict]]:
     """Extract facts from a full transcript processed in time-windowed chunks.
@@ -744,7 +762,9 @@ def extract_facts_from_transcript(
     if not segments:
         return [], []
 
-    subsection_list = _build_subsection_list(available_subsections, subsection_descriptions)
+    subsection_list = _build_subsection_list(
+        available_subsections, subsection_descriptions, client_subsection_notes,
+    )
     system_prompt = _TRANSCRIPT_CHUNK_SYSTEM.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
     if tone_instruction:
         system_prompt = (

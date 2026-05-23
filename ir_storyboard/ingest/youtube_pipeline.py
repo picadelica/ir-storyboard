@@ -185,6 +185,7 @@ def run_youtube_preview(
         available_subsections=_ALL_SUBSECTIONS,
         chunk_duration_sec=chunk_duration_sec,
         subsection_descriptions=matrix.get_subsection_descriptions(conn),
+        client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
         tone_instruction=get_tone_instruction(tone_preset_id),
     )
 

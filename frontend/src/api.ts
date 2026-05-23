@@ -1,7 +1,7 @@
 import type {
   Artifact, ArtifactSummary, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
-  Layer, MethodologyCell, TonePreset,
+  ClientMethodologyCell, Layer, MethodologyCell, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem,
@@ -203,4 +203,14 @@ export const api = {
     }),
 
   tonePresets: (): Promise<TonePreset[]> => call<TonePreset[]>("/tone-presets"),
+
+  clientMethodology: (clientId: string): Promise<ClientMethodologyCell[]> =>
+    call<ClientMethodologyCell[]>(`/clients/${clientId}/methodology`),
+
+  updateClientMethodology: (clientId: string, subsectionId: string, note: string):
+    Promise<ClientMethodologyCell> =>
+    call<ClientMethodologyCell>(`/clients/${clientId}/methodology/${subsectionId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ note }),
+    }),
 };
