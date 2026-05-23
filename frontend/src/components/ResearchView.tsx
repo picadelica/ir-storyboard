@@ -1,9 +1,27 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { FactCandidateOut, Flag, IngestPreviewOut, SearchHit } from "../types";
 
 interface Props { clientId: string }
+
+const YOUTUBE_HOST_RE = /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\b/i;
+const TWITTER_HOST_RE = /^(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\b/i;
+
+function isYouTubeUrl(url: string): boolean {
+  return YOUTUBE_HOST_RE.test(url.trim());
+}
+
+function isTwitterUrl(url: string): boolean {
+  return TWITTER_HOST_RE.test(url.trim());
+}
+
+/** Pull the first YouTube URL out of a snippet/title (for tweets that quote a video). */
+function extractYouTubeUrl(text: string): string | null {
+  const m = text.match(/https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/[^\s)]+|youtu\.be\/[^\s)]+)/i);
+  return m ? m[0] : null;
+}
 
 type Channel = "online_research" | "online_interview" | "archival" | "offline_interview";
 
@@ -90,10 +108,22 @@ interface SourceCardProps {
 
 function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const [preview, setPreview] = useState<IngestPreviewOut | null>(null);
   const [customText, setCustomText] = useState("");
   const [showPaste, setShowPaste] = useState(false);
   const [channel, setChannel] = useState<Channel>(hit.suggested_channel as Channel || "online_research");
+
+  const directYouTubeUrl = isYouTubeUrl(hit.url) ? hit.url : null;
+  const embeddedYouTubeUrl = !directYouTubeUrl && (isTwitterUrl(hit.url) || hit.snippet)
+    ? extractYouTubeUrl(`${hit.title}\n${hit.snippet}`)
+    : null;
+  const youtubeUrl = directYouTubeUrl || embeddedYouTubeUrl;
+
+  function processViaYouTube() {
+    if (!youtubeUrl) return;
+    nav(`/clients/${clientId}/youtube?url=${encodeURIComponent(youtubeUrl)}`);
+  }
 
   type RowState = { checked: boolean; flag: Flag; sid: string };
   const [rows, setRows] = useState<RowState[]>([]);
@@ -171,31 +201,54 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
         <p className="text-xs text-ink-mute leading-snug line-clamp-3">{hit.snippet}</p>
       </div>
 
-      {/* Controls */}
-      <div className="px-3 pb-3 flex items-center gap-2 flex-wrap">
-        <select
-          value={channel}
-          onChange={e => setChannel(e.target.value as Channel)}
-          className="text-xs border border-ink-line rounded px-1.5 py-1"
-        >
-          <option value="online_research">online_research</option>
-          <option value="online_interview">online_interview</option>
-          <option value="archival">archival</option>
-        </select>
-        <button
-          onClick={() => setShowPaste(p => !p)}
-          className="text-xs px-2 py-1 border border-ink-line rounded hover:bg-slate-50 text-ink-mute"
-        >{showPaste ? "Hide paste" : "Paste full text"}</button>
-        <button
-          type="button"
-          onClick={() => {
-            console.log("[Research] Classify clicked", { clientId, url: hit.url, hasText: !!(customText || hit.snippet) });
-            classifyMut.mutate();
-          }}
-          disabled={classifyMut.isPending}
-          className="text-xs px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 ml-auto cursor-pointer"
-        >{classifyMut.isPending ? "Classifying…" : "Classify →"}</button>
-      </div>
+      {/* YouTube redirect banner */}
+      {youtubeUrl ? (
+        <div className="mx-3 mb-3 border border-pink-300 bg-pink-50 rounded p-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <span className="text-pink-600 text-base shrink-0">🎥</span>
+            <div className="text-xs text-pink-900 leading-snug flex-1">
+              {directYouTubeUrl ? (
+                <>Это YouTube-ссылка — текстовая классификация даст плохой результат.
+                  Лучше обработать через <b>YouTube Ingest</b>: будет полный транскрипт
+                  с таймкодами, факты с цитатами.</>
+              ) : (
+                <>В этом твите/посте есть ссылка на YouTube
+                  (<code className="bg-pink-100 px-1 rounded">{youtubeUrl}</code>).
+                  Рекомендуем обработать видео через <b>YouTube Ingest</b>.</>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={processViaYouTube}
+            className="w-full text-xs px-3 py-1.5 bg-pink-600 text-white rounded hover:bg-pink-700"
+          >
+            Process via YouTube ingest →
+          </button>
+        </div>
+      ) : (
+        <div className="px-3 pb-3 flex items-center gap-2 flex-wrap">
+          <select
+            value={channel}
+            onChange={e => setChannel(e.target.value as Channel)}
+            className="text-xs border border-ink-line rounded px-1.5 py-1"
+          >
+            <option value="online_research">online_research</option>
+            <option value="online_interview">online_interview</option>
+            <option value="archival">archival</option>
+          </select>
+          <button
+            onClick={() => setShowPaste(p => !p)}
+            className="text-xs px-2 py-1 border border-ink-line rounded hover:bg-slate-50 text-ink-mute"
+          >{showPaste ? "Hide paste" : "Paste full text"}</button>
+          <button
+            type="button"
+            onClick={() => classifyMut.mutate()}
+            disabled={classifyMut.isPending}
+            className="text-xs px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 ml-auto cursor-pointer"
+          >{classifyMut.isPending ? "Extracting…" : "Extract facts →"}</button>
+        </div>
+      )}
 
       {showPaste && (
         <div className="px-3 pb-3">

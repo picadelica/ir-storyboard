@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import type { Layer, YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
 
@@ -55,6 +56,22 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   const [reopenLoading, setReopenLoading] = useState<string | null>(null);
   const [reopenError, setReopenError] = useState<string>("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+
+  // Pick up ?url= query param from Research-tab redirect — prefill input
+  // and switch back to input screen if currently in preview/history view.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const incoming = searchParams.get("url");
+    if (!incoming) return;
+    setUrl(incoming);
+    setScreen("input");
+    saveState({ url: incoming, screen: "input" });
+    // strip the param so a refresh doesn't keep re-prefilling
+    const next = new URLSearchParams(searchParams);
+    next.delete("url");
+    setSearchParams(next, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qc = useQueryClient();
 
