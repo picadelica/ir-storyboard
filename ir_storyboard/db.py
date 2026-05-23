@@ -35,6 +35,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "clients", "founder_handle", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "clients", "aliases", "TEXT DEFAULT '[]'")
     _add_column_if_missing(conn, "clients", "notes", "TEXT DEFAULT ''")
+    # methodology: per-client narrative tone preset used by LLM extractors
+    _add_column_if_missing(conn, "clients", "tone_preset", "TEXT NOT NULL DEFAULT 'business'")
     # task-2: provenance fields
     _add_column_if_missing(conn, "facts", "evidence_snippet", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "sources", "accessed_at", "TIMESTAMP")

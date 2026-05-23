@@ -21,6 +21,7 @@ from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from .. import matrix, db as _db
 from ..llm import ExtractedFact, extract_facts_from_llm_report, extract_facts_from_full_document
 from ..models import LAYERS
+from ..prompts import get_tone_instruction
 from .citations import ResolvedCitation, extract_citations
 from .classifiers.section_to_layer import suggest_subsection, SKIP_SECTION_HINTS
 from .snippet_resolver import ResolvedFact, resolve_snippets
@@ -136,10 +137,13 @@ def preview_llm_report(
         stats["sections_processed"] += 1
 
     # Single LLM call for the entire document (avoids per-section timeout issues)
+    tone_preset_id = matrix.get_client_tone_preset(conn, client_id)
     all_extracted_facts: list[ExtractedFact] = extract_facts_from_full_document(
         sections=content_sections,
         available_subsections=_AVAILABLE_SUBSECTIONS,
         citation_index=citation_index,
+        subsection_descriptions=matrix.get_subsection_descriptions(conn),
+        tone_instruction=get_tone_instruction(tone_preset_id),
     )
 
     resolved_facts = resolve_snippets(all_extracted_facts, citation_index, mode="paraphrase")

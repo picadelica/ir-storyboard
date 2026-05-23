@@ -15,6 +15,7 @@ from typing import Optional
 
 from .. import matrix
 from ..llm import extract_facts_from_transcript
+from ..prompts import get_tone_instruction
 from .loaders.youtube_url import normalize_url, fetch_metadata, YouTubeVideoMeta
 from .loaders.transcriber import get_transcriber, get_or_transcribe
 from .snippet_anchor import anchor_facts, AnchoredFact
@@ -178,10 +179,13 @@ def run_youtube_preview(
         for s in transcript.segments
     ]
     chunk_duration_sec = 600.0   # 10-min chunks (less LLM output per chunk → less max_tokens truncation)
+    tone_preset_id = matrix.get_client_tone_preset(conn, client_id)
     raw_facts, chunk_errors = extract_facts_from_transcript(
         segments=segments_dicts,
         available_subsections=_ALL_SUBSECTIONS,
         chunk_duration_sec=chunk_duration_sec,
+        subsection_descriptions=matrix.get_subsection_descriptions(conn),
+        tone_instruction=get_tone_instruction(tone_preset_id),
     )
 
     # Surface chunk-level failures so user can see "X of Y chunks failed"

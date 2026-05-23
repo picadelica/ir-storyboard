@@ -430,11 +430,37 @@ If no usable facts in the section, return: {"facts": []}
 """
 
 
+def _build_subsection_list(available_subsections: List[str],
+                            descriptions: Optional[dict] = None,
+                            separator: str = "  ") -> str:
+    """Build the SUBSECTION_LIST text injected into extractor prompts.
+
+    If descriptions are provided, each cell gets an extra indented
+    "Methodology note:" line for the LLM to use when matching facts.
+    """
+    descriptions = descriptions or {}
+    lines: List[str] = []
+    for layer in LAYERS:
+        for sub in layer.subsections:
+            if sub.id not in available_subsections:
+                continue
+            lines.append(f"{sub.id}{separator}{sub.name}{separator}({layer.name})")
+            note = (descriptions.get(sub.id) or "").strip()
+            if note:
+                # Indent the note so the LLM sees it belongs to the previous line.
+                for line in note.splitlines():
+                    lines.append(f"    Methodology note: {line}" if line == note.splitlines()[0]
+                                 else f"      {line}")
+    return "\n".join(lines)
+
+
 def extract_facts_from_llm_report(
     section_heading: str,
     section_paragraphs: List[str],
     available_subsections: List[str],
     citation_index: "dict[int, ResolvedCitation]",
+    subsection_descriptions: Optional[dict] = None,
+    tone_instruction: str = "",
 ) -> List["ExtractedFact"]:
     """Extract atomic facts from one report section using LLM.
 
@@ -445,11 +471,8 @@ def extract_facts_from_llm_report(
     if not section_paragraphs:
         return []
 
-    subsection_list = "\n".join(
-        f"{sub.id} — {sub.name} ({layer.name})"
-        for layer in LAYERS
-        for sub in layer.subsections
-        if sub.id in available_subsections
+    subsection_list = _build_subsection_list(
+        available_subsections, subsection_descriptions, separator=" — ",
     )
 
     cite_ref = "\n".join(
@@ -464,6 +487,13 @@ def extract_facts_from_llm_report(
     )
 
     system_prompt = _EXTRACT_SYSTEM_TMPL.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+    if tone_instruction:
+        system_prompt = (
+            "TONE INSTRUCTION (applies to every fact you emit):\n"
+            + tone_instruction.strip()
+            + "\n\n"
+            + system_prompt
+        )
 
     raw = generate(system_prompt, user_content, max_tokens=4096)
 
@@ -542,6 +572,8 @@ def extract_facts_from_full_document(
     sections: "list[tuple[str, list[str]]]",   # [(heading, paragraphs), ...]
     available_subsections: List[str],
     citation_index: "dict[int, ResolvedCitation]",
+    subsection_descriptions: Optional[dict] = None,
+    tone_instruction: str = "",
 ) -> List["ExtractedFact"]:
     """Single LLM call for the ENTIRE document — much faster than per-section calls.
 
@@ -553,12 +585,7 @@ def extract_facts_from_full_document(
     if not sections:
         return []
 
-    subsection_list = "\n".join(
-        f"{sub.id}  {sub.name}  ({layer.name})"
-        for layer in LAYERS
-        for sub in layer.subsections
-        if sub.id in available_subsections
-    )
+    subsection_list = _build_subsection_list(available_subsections, subsection_descriptions)
 
     cite_ref = "\n".join(
         f"[{cid}] {c.title or c.canonical_url}"
@@ -579,6 +606,13 @@ def extract_facts_from_full_document(
     system_prompt = _BATCH_EXTRACT_SYSTEM_TMPL.replace(
         "SUBSECTION_LIST_PLACEHOLDER", subsection_list
     )
+    if tone_instruction:
+        system_prompt = (
+            "TONE INSTRUCTION (applies to every fact you emit):\n"
+            + tone_instruction.strip()
+            + "\n\n"
+            + system_prompt
+        )
 
     raw = generate(system_prompt, user_content, max_tokens=8192)
 
@@ -693,10 +727,14 @@ def extract_facts_from_transcript(
     segments: List[dict],
     available_subsections: List[str],
     chunk_duration_sec: float = 600.0,  # 10-min chunks (smaller output → less truncation)
+    subsection_descriptions: Optional[dict] = None,
+    tone_instruction: str = "",
 ) -> Tuple[List["ExtractedFact"], List[dict]]:
     """Extract facts from a full transcript processed in time-windowed chunks.
 
     segments: list of {text, start, end} in global video time.
+    subsection_descriptions: optional {sid: methodology note} to enrich the prompt.
+    tone_instruction: optional one-paragraph instruction shaping how facts are phrased.
     Returns (facts, chunk_errors). chunk_errors entries:
         {"chunk_start_min": int, "chunk_end_min": int, "reason": str, "detail": str}
     Reasons: "empty_llm_response" (LLM returned ""), "invalid_json" (parse failed).
@@ -706,13 +744,15 @@ def extract_facts_from_transcript(
     if not segments:
         return [], []
 
-    subsection_list = "\n".join(
-        f"{sub.id}  {sub.name}  ({layer.name})"
-        for layer in LAYERS
-        for sub in layer.subsections
-        if sub.id in available_subsections
-    )
+    subsection_list = _build_subsection_list(available_subsections, subsection_descriptions)
     system_prompt = _TRANSCRIPT_CHUNK_SYSTEM.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+    if tone_instruction:
+        system_prompt = (
+            "TONE INSTRUCTION (applies to every fact you emit):\n"
+            + tone_instruction.strip()
+            + "\n\n"
+            + system_prompt
+        )
 
     all_facts: List["ExtractedFact"] = []
     chunk_errors: List[dict] = []

@@ -65,6 +65,7 @@ class ClientOut(BaseModel):
     founder_handle: Optional[str] = None
     aliases: Optional[List[str]] = None
     notes: Optional[str] = None
+    tone_preset: Optional[str] = None
 
 
 class SeedFactIn(BaseModel):
@@ -352,6 +353,66 @@ def get_client(client_id: str, conn=Depends(get_conn)):
     return _row_to_client(row)
 
 
+class MethodologyCellOut(BaseModel):
+    subsection_id: str
+    subsection_name: str
+    layer_id: int
+    layer_name: str
+    sort_order: int
+    description: str
+
+
+class MethodologyUpdateIn(BaseModel):
+    description: str
+
+
+class TonePresetOut(BaseModel):
+    id: str
+    label: str
+    description: str
+    sample: str
+
+
+@app.get("/api/methodology", response_model=List[MethodologyCellOut])
+def list_methodology(conn=Depends(get_conn)):
+    rows = conn.execute(
+        """SELECT s.id AS subsection_id, s.name AS subsection_name,
+                  s.sort_order, COALESCE(s.description, '') AS description,
+                  l.id AS layer_id, l.name AS layer_name
+             FROM subsections s
+             JOIN layers l ON l.id = s.layer_id
+             ORDER BY l.id, s.sort_order, s.id"""
+    ).fetchall()
+    return [MethodologyCellOut(**dict(r)) for r in rows]
+
+
+@app.patch("/api/methodology/{subsection_id}", response_model=MethodologyCellOut)
+def update_methodology(subsection_id: str, body: MethodologyUpdateIn,
+                        conn=Depends(get_conn)):
+    try:
+        matrix.update_subsection_description(conn, subsection_id, body.description)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    row = conn.execute(
+        """SELECT s.id AS subsection_id, s.name AS subsection_name,
+                  s.sort_order, COALESCE(s.description, '') AS description,
+                  l.id AS layer_id, l.name AS layer_name
+             FROM subsections s JOIN layers l ON l.id = s.layer_id
+             WHERE s.id = ?""",
+        (subsection_id,),
+    ).fetchone()
+    return MethodologyCellOut(**dict(row))
+
+
+@app.get("/api/tone-presets", response_model=List[TonePresetOut])
+def list_tone_presets():
+    from ir_storyboard.prompts import TONE_PRESETS
+    return [
+        TonePresetOut(id=p.id, label=p.label, description=p.description, sample=p.sample)
+        for p in TONE_PRESETS
+    ]
+
+
 @app.post("/api/clients", response_model=ClientOut)
 def upsert_client(c: ClientOut, conn=Depends(get_conn)):
     matrix.upsert_client(
@@ -359,9 +420,11 @@ def upsert_client(c: ClientOut, conn=Depends(get_conn)):
         sector=c.sector or "", one_liner=c.one_liner or "",
         founder_name=c.founder_name or "", founder_handle=c.founder_handle or "",
         aliases=c.aliases or [], notes=c.notes or "",
+        tone_preset=c.tone_preset,
     )
     matrix.ensure_full_grid(conn, c.id)
-    return c
+    row = conn.execute("SELECT * FROM clients WHERE id=?", (c.id,)).fetchone()
+    return _row_to_client(row) if row else c
 
 
 def _do_import_seed(conn, client_id: str, seed: ClientSeedIn) -> SeedImportResult:

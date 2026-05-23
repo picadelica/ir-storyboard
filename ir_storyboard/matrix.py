@@ -39,17 +39,64 @@ def seed_layers(conn: sqlite3.Connection) -> None:
 def upsert_client(conn: sqlite3.Connection, client_id: str, name: str,
                   sector: str = "", one_liner: str = "",
                   founder_name: str = "", founder_handle: str = "",
-                  aliases: Optional[List[str]] = None, notes: str = "") -> None:
+                  aliases: Optional[List[str]] = None, notes: str = "",
+                  tone_preset: Optional[str] = None) -> None:
     conn.execute(
-        """INSERT INTO clients (id, name, sector, one_liner, founder_name, founder_handle, aliases, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """INSERT INTO clients (id, name, sector, one_liner, founder_name, founder_handle,
+                                aliases, notes, tone_preset)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'business'))
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, sector=excluded.sector, one_liner=excluded.one_liner,
                 founder_name=excluded.founder_name, founder_handle=excluded.founder_handle,
-                aliases=excluded.aliases, notes=excluded.notes""",
+                aliases=excluded.aliases, notes=excluded.notes,
+                tone_preset=COALESCE(excluded.tone_preset, clients.tone_preset)""",
         (client_id, name, sector, one_liner,
-         founder_name, founder_handle, json.dumps(aliases or []), notes),
+         founder_name, founder_handle, json.dumps(aliases or []), notes, tone_preset),
     )
+    conn.commit()
+
+
+# ---------- methodology (per-subsection description + per-client tone) ----------
+
+def get_subsection_descriptions(conn: sqlite3.Connection) -> Dict[str, str]:
+    """Return {subsection_id: description} for all 24 cells."""
+    rows = conn.execute(
+        "SELECT id, COALESCE(description, '') AS description FROM subsections"
+    ).fetchall()
+    return {r["id"]: r["description"] for r in rows}
+
+
+def update_subsection_description(conn: sqlite3.Connection,
+                                  subsection_id: str,
+                                  description: str) -> None:
+    """Overwrite the description for one subsection."""
+    cur = conn.execute(
+        "UPDATE subsections SET description = ? WHERE id = ?",
+        (description, subsection_id),
+    )
+    if cur.rowcount == 0:
+        raise ValueError(f"Unknown subsection_id: {subsection_id}")
+    conn.commit()
+
+
+def get_client_tone_preset(conn: sqlite3.Connection, client_id: str) -> str:
+    """Return the client's tone preset id, defaulting to 'business' if missing."""
+    row = conn.execute(
+        "SELECT tone_preset FROM clients WHERE id = ?", (client_id,)
+    ).fetchone()
+    if not row:
+        return "business"
+    return (row["tone_preset"] or "business").strip() or "business"
+
+
+def set_client_tone_preset(conn: sqlite3.Connection,
+                            client_id: str, preset_id: str) -> None:
+    cur = conn.execute(
+        "UPDATE clients SET tone_preset = ? WHERE id = ?",
+        (preset_id, client_id),
+    )
+    if cur.rowcount == 0:
+        raise ValueError(f"Unknown client_id: {client_id}")
     conn.commit()
 
 
