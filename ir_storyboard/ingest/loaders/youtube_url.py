@@ -17,6 +17,8 @@ class YouTubeVideoMeta:
     upload_date: str        # 'YYYY-MM-DD'
     description: str
     language: Optional[str]
+    view_count: Optional[int] = None
+    like_count: Optional[int] = None
 
 
 _YOUTUBE_HOSTS = {
@@ -145,6 +147,8 @@ def fetch_metadata(canonical_url: str) -> YouTubeVideoMeta:
         channel_url=info.get("uploader_url") or info.get("channel_url") or "",
         duration_sec=int(info.get("duration") or 0),
         upload_date=upload_date,
-        description=(info.get("description") or "")[:2000],
+        description=(info.get("description") or "")[:4000],
         language=info.get("language"),
+        view_count=info.get("view_count"),
+        like_count=info.get("like_count"),
     )

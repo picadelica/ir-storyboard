@@ -1424,6 +1424,9 @@ class YouTubeMetaOut(BaseModel):
     duration_sec: int
     upload_date: str
     language: Optional[str]
+    view_count: Optional[int] = None
+    like_count: Optional[int] = None
+    description: str = ""
 
 
 class YouTubePreviewOut(BaseModel):
@@ -1436,6 +1439,8 @@ class YouTubePreviewOut(BaseModel):
     notes: List[str]
     stats: Dict[str, Any]
     confirmed_at: Optional[str] = None
+    video_brief: str = ""
+    cell_briefs: Dict[str, str] = {}
 
 
 class YouTubeCommitIn(BaseModel):
@@ -1482,6 +1487,9 @@ def _preview_out_from_result(result) -> YouTubePreviewOut:
             duration_sec=result.meta.duration_sec,
             upload_date=result.meta.upload_date,
             language=result.meta.language,
+            view_count=getattr(result.meta, "view_count", None),
+            like_count=getattr(result.meta, "like_count", None),
+            description=getattr(result.meta, "description", "") or "",
         ),
         facts=[
             YouTubeFactOut(
@@ -1523,6 +1531,8 @@ def _preview_out_from_result(result) -> YouTubePreviewOut:
         transcribe_cost_usd=result.transcribe_cost_usd,
         notes=result.notes,
         stats=result.stats,
+        video_brief=getattr(result, "video_brief", "") or "",
+        cell_briefs=getattr(result, "cell_briefs", {}) or {},
     )
 
 
@@ -1622,6 +1632,9 @@ def youtube_preview_by_id(client_id: str, preview_id: str, conn=Depends(get_conn
             duration_sec=int(meta_dict.get("duration_sec") or 0),
             upload_date=meta_dict.get("upload_date") or "",
             language=meta_dict.get("language"),
+            view_count=meta_dict.get("view_count"),
+            like_count=meta_dict.get("like_count"),
+            description=meta_dict.get("description") or "",
         ),
         facts=[
             YouTubeFactOut(
@@ -1664,6 +1677,8 @@ def youtube_preview_by_id(client_id: str, preview_id: str, conn=Depends(get_conn
         notes=data.get("notes", []) or [],
         stats=data.get("stats", {}) or {},
         confirmed_at=row["confirmed_at"],
+        video_brief=data.get("video_brief", "") or "",
+        cell_briefs=data.get("cell_briefs", {}) or {},
     )
 
 

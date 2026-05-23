@@ -202,6 +202,9 @@ export interface YouTubeVideoMeta {
   duration_sec: number;
   upload_date: string;
   language: string | null;
+  view_count?: number | null;
+  like_count?: number | null;
+  description?: string;
 }
 
 export interface YouTubeFact {
@@ -246,6 +249,8 @@ export interface YouTubePreviewResult {
   notes: string[];
   stats: Record<string, number>;
   confirmed_at?: string | null;
+  video_brief?: string;
+  cell_briefs?: Record<string, string>;
 }
 
 export interface YouTubeCommitOut {

@@ -598,9 +598,14 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
 
       {/* Video meta */}
       <div className="bg-slate-50 border border-ink-line rounded-lg p-4 space-y-1 text-sm">
-        <div className="font-medium truncate">{preview.meta.title}</div>
+        <div className="font-medium">{preview.meta.title}</div>
         <div className="text-xs text-ink-mute">
           {preview.meta.channel_name} · {fmtDuration(preview.meta.duration_sec)}
+          {preview.meta.view_count != null &&
+            ` · ${preview.meta.view_count.toLocaleString()} views`}
+          {preview.meta.like_count != null &&
+            ` · ${preview.meta.like_count.toLocaleString()} likes`}
+          {preview.meta.upload_date && ` · ${preview.meta.upload_date}`}
           {preview.from_cache && " · transcript from cache"}
           {preview.transcribe_cost_usd != null &&
             ` · ~$${preview.transcribe_cost_usd.toFixed(2)} (OpenAI Whisper)`}
@@ -614,6 +619,53 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
           {preview.meta.canonical_url}
         </a>
       </div>
+
+      {/* Orientation brief — paragraph + per-cell coverage */}
+      {(preview.video_brief || (preview.cell_briefs && Object.keys(preview.cell_briefs).length > 0)) && (
+        <div className="border border-ink-line rounded-lg p-4 space-y-3 bg-white">
+          {preview.video_brief && (
+            <div>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-ink-mute mb-1">
+                Brief
+              </div>
+              <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
+                {preview.video_brief}
+              </div>
+            </div>
+          )}
+          {preview.cell_briefs && Object.keys(preview.cell_briefs).length > 0 && (
+            <div>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-ink-mute mb-1">
+                Coverage ({Object.keys(preview.cell_briefs).length} cells)
+              </div>
+              <ul className="space-y-1">
+                {Object.entries(preview.cell_briefs)
+                  .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+                  .map(([sid, brief]) => (
+                    <li key={sid} className="text-sm flex gap-2">
+                      <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600 shrink-0 mt-0.5">
+                        {sid}
+                      </span>
+                      <span className="text-slate-700">{brief}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Original video description (collapsed) */}
+      {preview.meta.description && preview.meta.description.trim() && (
+        <details className="text-xs text-ink-mute">
+          <summary className="cursor-pointer hover:text-ink">
+            Original video description ({preview.meta.description.length} chars)
+          </summary>
+          <div className="mt-2 text-slate-600 whitespace-pre-wrap border-l-2 border-slate-200 pl-3">
+            {preview.meta.description}
+          </div>
+        </details>
+      )}
 
       {/* Chunk-failure warning: facts may be missing from those time windows */}
       {(preview.stats.chunks_failed ?? 0) > 0 && (

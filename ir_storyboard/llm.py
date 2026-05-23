@@ -923,3 +923,109 @@ def extract_facts_from_transcript(
             break
 
     return all_facts, chunk_errors
+
+
+# ─────────────────── YouTube preview summary ─────────────────────────────────
+
+_PREVIEW_SUMMARY_SYSTEM = """\
+You produce a short orientation brief for an IR analyst about to triage facts
+extracted from a YouTube interview. You see the video's metadata (title,
+description, channel, view count, length, upload date) and the facts the
+extractor pulled, grouped by matrix subsection.
+
+Return ONLY valid JSON in this exact shape (no markdown fences):
+{
+  "video_brief": "<3-6 sentences: who interviews whom, what was the angle, main themes, why this video is worth processing for the IR matrix. Plain prose, no bullet list.>",
+  "cell_briefs": {
+    "1.1": "<one sentence in the same language as the facts — what aspect of this cell the video covered, e.g. 'Рассказал о детстве в Москве и переезде в Тель-Авив'. Not a quote. No 'this video covers...' filler. Start with a verb.>",
+    "2.2": "...",
+    ...
+  }
+}
+
+Rules:
+- `cell_briefs` has ONE entry per subsection_id that actually appears in the facts list. Skip cells with no facts.
+- Each cell brief: ONE sentence, <= 25 words, summarizing what the founder/interview revealed for that cell. Plain prose, no bullets.
+- Use the language of the facts (Russian if facts are in Russian).
+- Stay strictly within what the metadata + facts say. No invented detail.
+- Do not duplicate the title verbatim in video_brief; paraphrase + add the angle.
+"""
+
+
+def summarize_youtube_preview(
+    meta: dict,                           # title/description/channel_name/duration_sec/upload_date/view_count/like_count
+    facts_by_sid: "dict[str, list[str]]",  # {subsection_id: [fact text, ...]} — only filled cells
+    subsection_names: "dict[str, str]",   # {sid: "Origin & Childhood"}
+    tone_instruction: str = "",
+) -> "dict":
+    """One LLM call that returns {'video_brief': str, 'cell_briefs': {sid: str}}.
+
+    Returns empty defaults on any failure (LLM unavailable, parse error, etc).
+    Caller is responsible for surfacing them; absence is non-fatal for preview.
+    """
+    if not facts_by_sid and not (meta.get("title") or meta.get("description")):
+        return {"video_brief": "", "cell_briefs": {}}
+
+    # Build a compact representation of facts grouped by cell
+    cells_block_lines: List[str] = []
+    for sid in sorted(facts_by_sid.keys()):
+        facts = facts_by_sid[sid]
+        if not facts:
+            continue
+        name = subsection_names.get(sid, "")
+        cells_block_lines.append(f"\n[{sid}] {name} — {len(facts)} fact(s):")
+        for f in facts[:25]:   # cap per-cell to avoid bloat
+            cells_block_lines.append(f"  - {f[:300]}")
+        if len(facts) > 25:
+            cells_block_lines.append(f"  ... and {len(facts) - 25} more")
+    cells_block = "\n".join(cells_block_lines) or "(no facts extracted)"
+
+    duration_min = (meta.get("duration_sec") or 0) // 60
+    stats_line = []
+    if meta.get("view_count") is not None:
+        stats_line.append(f"{meta['view_count']:,} views")
+    if meta.get("like_count") is not None:
+        stats_line.append(f"{meta['like_count']:,} likes")
+    if duration_min:
+        stats_line.append(f"{duration_min} min long")
+    if meta.get("upload_date"):
+        stats_line.append(f"uploaded {meta['upload_date']}")
+
+    user_content = (
+        f"VIDEO TITLE: {meta.get('title', '')}\n"
+        f"CHANNEL: {meta.get('channel_name', '')}\n"
+        f"STATS: {', '.join(stats_line) if stats_line else '(no stats)'}\n\n"
+        f"DESCRIPTION:\n{(meta.get('description') or '(no description)')[:3000]}\n\n"
+        f"FACTS BY CELL:{cells_block}"
+    )
+
+    system_prompt = _PREVIEW_SUMMARY_SYSTEM
+    if tone_instruction:
+        system_prompt = (
+            "TONE INSTRUCTION (applies to every line you write):\n"
+            + tone_instruction.strip()
+            + "\n\n"
+            + system_prompt
+        )
+
+    raw = generate(system_prompt, user_content, max_tokens=2000)
+    if not raw:
+        return {"video_brief": "", "cell_briefs": {}}
+
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"video_brief": "", "cell_briefs": {}}
+
+    video_brief = (data.get("video_brief") or "").strip()
+    cell_briefs_raw = data.get("cell_briefs") or {}
+    cell_briefs: dict = {}
+    if isinstance(cell_briefs_raw, dict):
+        for sid, brief in cell_briefs_raw.items():
+            if isinstance(brief, str) and brief.strip() and sid in facts_by_sid:
+                cell_briefs[str(sid)] = brief.strip()
+
+    return {"video_brief": video_brief, "cell_briefs": cell_briefs}

@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .. import matrix
-from ..llm import extract_facts_from_transcript
+from ..llm import extract_facts_from_transcript, summarize_youtube_preview
+from ..models import subsection_by_id
 from ..prompts import get_tone_instruction
 from .loaders.youtube_url import normalize_url, fetch_metadata, YouTubeVideoMeta
 from .loaders.transcriber import get_transcriber, get_or_transcribe
@@ -32,6 +33,8 @@ class YouTubePreviewResult:
     stats: dict[str, int]
     from_cache: bool
     transcribe_cost_usd: Optional[float]
+    video_brief: str = ""
+    cell_briefs: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -219,6 +222,33 @@ def run_youtube_preview(
     stats["facts_emitted"] = len(deduped) + len(skipped)
     stats["greys"] = sum(1 for f in deduped if f.flag == "grey")
 
+    # Step 9: orientation brief (one extra LLM call, non-fatal on failure)
+    facts_by_sid: dict[str, list[str]] = {}
+    for af in deduped:
+        facts_by_sid.setdefault(af.subsection_id, []).append(af.text)
+    subsection_names: dict[str, str] = {}
+    for sid in facts_by_sid:
+        try:
+            subsection_names[sid] = subsection_by_id(sid).name
+        except KeyError:
+            subsection_names[sid] = sid
+    summary = summarize_youtube_preview(
+        meta={
+            "title": meta.title,
+            "channel_name": meta.channel_name,
+            "description": meta.description,
+            "duration_sec": meta.duration_sec,
+            "upload_date": meta.upload_date,
+            "view_count": meta.view_count,
+            "like_count": meta.like_count,
+        },
+        facts_by_sid=facts_by_sid,
+        subsection_names=subsection_names,
+        tone_instruction=get_tone_instruction(tone_preset_id),
+    )
+    video_brief = summary.get("video_brief", "")
+    cell_briefs = summary.get("cell_briefs", {})
+
     # Write preview to audit (status=preview, no confirmed_at yet)
     preview_json = json.dumps({
         "preview_id": preview_id,
@@ -232,7 +262,12 @@ def run_youtube_preview(
             "duration_sec": meta.duration_sec,
             "upload_date": meta.upload_date,
             "language": meta.language,
+            "view_count": meta.view_count,
+            "like_count": meta.like_count,
+            "description": meta.description,
         },
+        "video_brief": video_brief,
+        "cell_briefs": cell_briefs,
         "from_cache": from_cache,
         "transcribe_cost_usd": transcribe_cost_usd,
         "facts": [_anchored_to_dict(f) for f in deduped],
@@ -287,6 +322,8 @@ def run_youtube_preview(
         stats=stats,
         from_cache=from_cache,
         transcribe_cost_usd=transcribe_cost_usd,
+        video_brief=video_brief,
+        cell_briefs=cell_briefs,
     )
 
 
