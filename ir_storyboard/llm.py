@@ -143,9 +143,17 @@ def stub_summarize(text: str, max_chars: int = 280) -> str:
     return s
 
 
-def stub_generate(system: str, user: str, max_tokens: int = 1024) -> str:
+def stub_generate(system: str, user: str, max_tokens: int = 1024,
+                  model: Optional[str] = None) -> str:
     """Stub — returns empty string; callers fall back to template rendering."""
     return ""
+
+
+def get_fallback_model() -> Optional[str]:
+    """Return the configured fallback model name, or None if same as primary."""
+    primary = os.environ.get("LLM_GENERATE_MODEL", "claude-haiku-4-5")
+    fallback = os.environ.get("LLM_GENERATE_MODEL_FALLBACK", "claude-sonnet-4-6")
+    return fallback if fallback and fallback != primary else None
 
 
 # ─────────────────── public callables (start as stubs) ─────────────────────
@@ -153,7 +161,7 @@ def stub_generate(system: str, user: str, max_tokens: int = 1024) -> str:
 classify_fact: Callable[[str], FactCandidate] = stub_classify
 web_search: Callable[[str, int], List[SearchHit]] = stub_web_search
 summarize: Callable[[str, int], str] = stub_summarize
-generate: Callable[[str, str, int], str] = stub_generate
+generate: Callable[..., str] = stub_generate
 
 
 def classify_facts_batch(texts: List[str]) -> List[FactCandidate]:
@@ -275,13 +283,15 @@ def _try_init_anthropic() -> None:
 
     _GENERATE_MODEL = os.environ.get("LLM_GENERATE_MODEL", "claude-haiku-4-5")
 
-    def _generate_real(system: str, user: str, max_tokens: int = 1024) -> str:
+    def _generate_real(system: str, user: str, max_tokens: int = 1024,
+                       model: Optional[str] = None) -> str:
+        use_model = model or _GENERATE_MODEL
         backoffs = [2.0, 5.0, 10.0]
         last_exc: Optional[BaseException] = None
         for attempt, delay in enumerate(backoffs, start=1):
             try:
                 resp = _client.messages.create(
-                    model=_GENERATE_MODEL,
+                    model=use_model,
                     max_tokens=max_tokens,
                     system=system,
                     messages=[{"role": "user", "content": user}],
@@ -290,17 +300,20 @@ def _try_init_anthropic() -> None:
             except anthropic.APIError as e:
                 last_exc = e
                 logger.warning(
-                    "generate(): Anthropic APIError on attempt %d/%d (%s): %s — retrying in %.1fs",
-                    attempt, len(backoffs), type(e).__name__, e, delay,
+                    "generate(model=%s): Anthropic APIError on attempt %d/%d (%s): %s — retrying in %.1fs",
+                    use_model, attempt, len(backoffs), type(e).__name__, e, delay,
                 )
                 if attempt < len(backoffs):
                     time.sleep(delay)
             except Exception as e:
-                logger.error("generate(): non-retryable error (%s): %s", type(e).__name__, e)
+                logger.error(
+                    "generate(model=%s): non-retryable error (%s): %s",
+                    use_model, type(e).__name__, e,
+                )
                 return ""
         logger.error(
-            "generate(): exhausted %d retries, giving up. Last error: %s",
-            len(backoffs), last_exc,
+            "generate(model=%s): exhausted %d retries, giving up. Last error: %s",
+            use_model, len(backoffs), last_exc,
         )
         return ""
 
@@ -734,52 +747,71 @@ def extract_facts_from_transcript(
             + "\n".join(lines)
         )
 
-        raw = generate(system_prompt, user_content, max_tokens=16000)
         chunk_start_min = int(chunk_start_sec // 60)
         chunk_end_min = int(chunk_end_sec // 60)
-        if not raw:
+        fallback_model = get_fallback_model()
+
+        def _attempt(model: Optional[str]):
+            """Returns (data, raw, parse_error, repaired_count). data is None on failure."""
+            r = generate(system_prompt, user_content, max_tokens=16000, model=model)
+            if not r:
+                return None, "", None, None
+            r = r.strip()
+            if r.startswith("```"):
+                r = r.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            try:
+                return json.loads(r), r, None, None
+            except json.JSONDecodeError as ex:
+                rep = _repair_truncated_facts_json(r)
+                if rep is not None:
+                    return rep, r, ex, len(rep.get("facts", []))
+                return None, r, ex, None
+
+        data, raw, parse_error, repaired_count = _attempt(None)
+        used_fallback = False
+        if data is None and fallback_model:
+            logger.warning(
+                "extract_facts_from_transcript: chunk %d-%d min failed on primary, retrying with fallback model %s",
+                chunk_start_min, chunk_end_min, fallback_model,
+            )
+            data2, raw2, parse_error2, repaired_count2 = _attempt(fallback_model)
+            if data2 is not None:
+                data, raw, parse_error, repaired_count = data2, raw2, parse_error2, repaired_count2
+                used_fallback = True
+
+        if not raw and data is None:
             chunk_errors.append({
                 "chunk_start_min": chunk_start_min,
                 "chunk_end_min": chunk_end_min,
                 "reason": "empty_llm_response",
-                "detail": "LLM returned empty string (rate-limit, overloaded, or network error)",
+                "detail": "LLM returned empty string (rate-limit, overloaded, or network error)"
+                          + (f"; fallback {fallback_model} also empty" if fallback_model else ""),
             })
             logger.warning(
                 "extract_facts_from_transcript: chunk %d-%d min produced no LLM output",
                 chunk_start_min, chunk_end_min,
             )
         else:
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            data = None
-            parse_error: Optional[Exception] = None
-            repaired_count: Optional[int] = None
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError as e:
-                parse_error = e
-                repaired = _repair_truncated_facts_json(raw)
-                if repaired is not None:
-                    data = repaired
-                    repaired_count = len(data.get("facts", []))
-                    logger.warning(
-                        "extract_facts_from_transcript: chunk %d-%d min JSON truncated, repaired (recovered %d facts)",
-                        chunk_start_min, chunk_end_min, repaired_count,
-                    )
-
             if data is None:
                 chunk_errors.append({
                     "chunk_start_min": chunk_start_min,
                     "chunk_end_min": chunk_end_min,
                     "reason": "invalid_json",
-                    "detail": f"{type(parse_error).__name__}: {str(parse_error)[:160]} | raw[:200]={raw[:200]!r}",
+                    "detail": f"{type(parse_error).__name__}: {str(parse_error)[:160]} | raw[:200]={raw[:200]!r}"
+                              + (f"; fallback {fallback_model} also failed" if fallback_model else ""),
                 })
                 logger.warning(
                     "extract_facts_from_transcript: chunk %d-%d min returned unparseable JSON (%s) — repair failed",
                     chunk_start_min, chunk_end_min, type(parse_error).__name__,
                 )
             else:
+                if used_fallback:
+                    chunk_errors.append({
+                        "chunk_start_min": chunk_start_min,
+                        "chunk_end_min": chunk_end_min,
+                        "reason": "fallback_used",
+                        "detail": f"primary model failed; recovered via fallback model {fallback_model}",
+                    })
                 if repaired_count is not None:
                     chunk_errors.append({
                         "chunk_start_min": chunk_start_min,
