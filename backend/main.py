@@ -992,15 +992,12 @@ def research_client(client_id: str, conn=Depends(get_conn)):
 def research_ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(get_conn)):
     """Atomic-fact extraction from a single Research source (article, transcript, etc).
 
-    Reuses extract_facts_from_full_document (same extractor as LLM Report ingest)
-    so the output is a list of one-sentence atomic facts — not paragraph-level
-    classifications. Honors per-client tone preset and methodology notes.
-    L1 (1.1/1.2/1.3) is excluded — those layers can only be filled by
-    offline_interview.
+    Uses the dedicated extract_facts_from_research_text — broader prompt than
+    LLM-Report (no [N] citation requirement, generous extraction). Honors
+    per-client tone preset and methodology notes. L1 is interview-only and is
+    excluded for non-interview channels.
     """
-    from ir_storyboard.ingest.classifiers.flag_heuristics import apply_heuristics
-    from ir_storyboard.ingest.citations import ResolvedCitation
-    from ir_storyboard.llm import extract_facts_from_full_document
+    from ir_storyboard.llm import extract_facts_from_research_text
     from ir_storyboard.prompts import get_tone_instruction
 
     _check_client(client_id, conn)
@@ -1012,37 +1009,17 @@ def research_ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(
             source_title=body.source_title, candidates=[],
         )
 
-    # Build one section from the pasted text (split by double newlines into
-    # paragraphs so the model sees structure if it exists)
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    if not paragraphs:
-        paragraphs = [text]
-    heading = body.source_title or "Source"
-    sections = [(heading, paragraphs)]
-
-    # Stub single-citation index — Research has one source URL
-    citation = ResolvedCitation(
-        cite_id=1,
-        canonical_url=body.source_url or "",
-        title=body.source_title or "",
-        publisher="",
-        channel=body.channel if body.channel in (
-            "online_research", "online_interview", "archival", "offline_interview",
-        ) else "online_research",
-        classification_reason="Research single-source",
-    )
-
-    # Subsections this channel may fill: L1 is interview-only, exclude it
+    # Subsections this channel may fill: L1 is interview-only.
     available_subsections = [
         sub.id for layer in LAYERS for sub in layer.subsections
-        if layer.id >= 2 or body.channel == "offline_interview"
+        if layer.id >= 2 or body.channel in ("offline_interview", "online_interview")
     ]
 
     tone_preset_id = matrix.get_client_tone_preset(conn, client_id)
-    facts = extract_facts_from_full_document(
-        sections=sections,
+    facts = extract_facts_from_research_text(
+        text=text,
+        source_title=body.source_title or "",
         available_subsections=available_subsections,
-        citation_index={1: citation},
         subsection_descriptions=matrix.get_subsection_descriptions(conn),
         client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
         tone_instruction=get_tone_instruction(tone_preset_id),
@@ -1052,22 +1029,20 @@ def research_ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(
     candidates: List[FactCandidateOut] = []
     for f in facts:
         sid = f.subsection_id
-        sub_name, layer_id, layer_name = "", None, ""
-        if sid:
-            try:
-                sub = subsection_by_id(sid)
-                sub_name = sub.name
-                layer_id = int(sid.split(".")[0])
-                layer_name = layer_by_id(layer_id).name
-            except KeyError:
-                continue
+        try:
+            sub = subsection_by_id(sid)
+            sub_name = sub.name
+            layer_id = int(sid.split(".")[0])
+            layer_name = layer_by_id(layer_id).name
+        except KeyError:
+            continue
         candidates.append(FactCandidateOut(
             text=f.text,
             suggested_subsection_id=sid,
             suggested_subsection_name=sub_name,
             suggested_layer_id=layer_id,
             suggested_layer_name=layer_name,
-            suggested_flag=apply_heuristics(f.text, f.flag),
+            suggested_flag=f.flag,
             confidence=f.confidence,
             rationale=(f.raw_paraphrase or "")[:160],
         ))

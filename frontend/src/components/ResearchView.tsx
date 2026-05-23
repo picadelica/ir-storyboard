@@ -122,6 +122,26 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
 
   function processViaYouTube() {
     if (!youtubeUrl) return;
+    // Belt-and-suspenders: write the URL into the YouTube tab's localStorage
+    // BEFORE navigating, so the URL is picked up even if the query-param
+    // useEffect path fails (e.g. if the component was already mounted with
+    // stale state from a previous session).
+    try {
+      const lsKey = `yt-ingest-${clientId}`;
+      const prev = JSON.parse(localStorage.getItem(lsKey) || "{}");
+      // Wipe any in-flight job so the prefill takes effect cleanly.
+      const next = {
+        ...prev,
+        url: youtubeUrl,
+        screen: "input",
+        jobId: null,
+        jobStatus: "",
+        preview: null,
+        factEdits: {},
+        skippedEdits: {},
+      };
+      localStorage.setItem(lsKey, JSON.stringify(next));
+    } catch {/* localStorage may be disabled — fallback to URL param below */}
     nav(`/clients/${clientId}/youtube?url=${encodeURIComponent(youtubeUrl)}`);
   }
 

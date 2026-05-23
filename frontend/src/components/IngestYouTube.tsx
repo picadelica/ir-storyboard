@@ -65,7 +65,20 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
     if (!incoming) return;
     setUrl(incoming);
     setScreen("input");
-    saveState({ url: incoming, screen: "input" });
+    setPreview(null);
+    setReadOnly(false);
+    setJobId(null);
+    setJobStatus("");
+    setDropped(new Set());
+    setOverrides(new Set());
+    setSelected(new Set());
+    setFactEdits({});
+    setSkippedEdits({});
+    saveState({
+      url: incoming, screen: "input",
+      jobId: null, jobStatus: "", preview: null,
+      factEdits: {}, skippedEdits: {},
+    });
     // strip the param so a refresh doesn't keep re-prefilling
     const next = new URLSearchParams(searchParams);
     next.delete("url");

@@ -1029,3 +1029,133 @@ def summarize_youtube_preview(
                 cell_briefs[str(sid)] = brief.strip()
 
     return {"video_brief": video_brief, "cell_briefs": cell_briefs}
+
+
+# ─────────────────── Research single-source extractor ──────────────────────
+
+_RESEARCH_EXTRACT_SYSTEM = """\
+You are a fact extractor for an IR narrative matrix (ir-storyboard).
+
+Source: ONE web article, interview write-up, press release, blog post,
+podcast transcript, or similar short-form text about a company / founder.
+
+Matrix subsections (use ONLY these ids, exactly as written):
+SUBSECTION_LIST_PLACEHOLDER
+
+YOUR TASK: extract ALL atomic facts in the source that fit one of those
+subsections. Be GENEROUS — a typical article yields 15-50 atomic facts.
+Better to surface a borderline fact than to miss an important one.
+
+Rules:
+- One fact = ONE atomic claim, <=300 characters. Split bundled claims:
+  "Mark is the CEO and previously worked at Google" → TWO facts.
+- Stay STRICTLY within what the source says. No interpretation, no
+  invention, no industry-knowledge fill-ins.
+- Pick the best-fit subsection_id from the list. If genuinely uncertain,
+  skip the fact — do NOT guess.
+- flag:
+  * green = confirmed positive / neutral fact (raise, hire, milestone,
+    plan, product feature, biographical fact).
+  * red = risk / concern / failure / controversy / regulatory issue /
+    explicit doubt voiced by the source.
+  * grey = explicit gap / "did not disclose" / "unclear" / hedged claim.
+- raw_paraphrase: copy the supporting sentence(s) near-verbatim (<=300 chars).
+- confidence: 0.0-1.0. Use 0.85+ for direct quotes/clear claims, 0.5-0.7
+  for paraphrased context, <0.5 for inferred statements.
+
+Output ONLY valid JSON (no markdown fences, no commentary):
+{"facts": [
+  {"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey",
+   "confidence": 0.85, "raw_paraphrase": "..."}
+]}
+
+If the source truly contains no usable facts (extremely rare for a real
+article), return {"facts": []}.
+"""
+
+
+def extract_facts_from_research_text(
+    text: str,
+    source_title: str = "",
+    available_subsections: Optional[List[str]] = None,
+    subsection_descriptions: Optional[dict] = None,
+    client_subsection_notes: Optional[dict] = None,
+    tone_instruction: str = "",
+) -> List["ExtractedFact"]:
+    """Atomic-fact extractor tuned for a single Research source (article, etc).
+
+    Unlike extract_facts_from_full_document this prompt:
+      - does not require [N] citation markers (web articles don't have them);
+      - encourages broad extraction (15-50 facts per article);
+      - does not auto-skip L1 (caller controls via available_subsections).
+
+    Returns [] silently on any LLM/parse failure — Research tab surfaces
+    "0 facts" to the user, which is the meaningful signal.
+    """
+    from .ingest.classifiers.flag_heuristics import apply_heuristics
+
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    if available_subsections is None:
+        available_subsections = [
+            sub.id for layer in LAYERS for sub in layer.subsections
+        ]
+
+    subsection_list = _build_subsection_list(
+        available_subsections, subsection_descriptions, client_subsection_notes,
+    )
+    system_prompt = _RESEARCH_EXTRACT_SYSTEM.replace(
+        "SUBSECTION_LIST_PLACEHOLDER", subsection_list,
+    )
+    if tone_instruction:
+        system_prompt = (
+            "TONE INSTRUCTION (applies to every fact you emit):\n"
+            + tone_instruction.strip()
+            + "\n\n"
+            + system_prompt
+        )
+
+    header = f"TITLE: {source_title}\n\n" if source_title else ""
+    # Cap to ~16K chars to stay within context with sizable subsection list
+    user_content = f"{header}ARTICLE:\n{text[:16000]}"
+
+    raw = generate(system_prompt, user_content, max_tokens=8192)
+    if not raw:
+        return []
+
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Try repair (max_tokens cutoff case)
+        repaired = _repair_truncated_facts_json(raw)
+        if repaired is None:
+            return []
+        data = repaired
+
+    results: List[ExtractedFact] = []
+    for item in data.get("facts", []) or []:
+        try:
+            fact_text = (item.get("text") or "").strip()
+            sid = item.get("subsection_id") or ""
+            if not fact_text or sid not in available_subsections:
+                continue
+            llm_flag = item.get("flag", "green")
+            if llm_flag not in ("green", "red", "grey"):
+                llm_flag = "green"
+            results.append(ExtractedFact(
+                text=fact_text[:400],
+                subsection_id=sid,
+                flag=apply_heuristics(fact_text, llm_flag),
+                cite_ids=[],
+                confidence=max(0.0, min(1.0, float(item.get("confidence", 0.6)))),
+                raw_paraphrase=(item.get("raw_paraphrase") or fact_text)[:400],
+            ))
+        except (ValueError, TypeError, AttributeError):
+            continue
+
+    return results
