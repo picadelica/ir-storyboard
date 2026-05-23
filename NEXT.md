@@ -8,15 +8,15 @@
 
 ---
 
-**Последнее обновление:** 2026-05-23 (вторая часть сессии)
+**Последнее обновление:** 2026-05-23 (третья часть)
 **Ветка:** `feat/v2`
 **Working tree:** clean (untracked: `12.jpeg` — не относится к проекту)
-**HEAD:** `82670a1 feat: bulk-actions in YouTube preview`
+**HEAD:** `34d69a8 feat(frontend): Methodology tab`
 
 ## Что в фокусе
 
-Сессия 2026-05-23 закрыла 4 пункта (#4 history tab + три из открытых
-вопросов: bulk-actions, sonnet fallback, hygiene refactor).
+Сессия 2026-05-23 закрыла 5 пунктов: history tab + reopen, refactor,
+sonnet fallback, bulk-actions, **Methodology layer** (новое).
 
 1. **History tab + Reopen flow** (`c8aace3`). Backend: `preview_json` теперь
    хранит полный meta + новый endpoint `GET .../ingest/youtube/preview-by-id/{pid}`
@@ -42,20 +42,38 @@
    sticky-тулбар (drop / restore / set flag / move to subsection) для
    быстрого разбора больших previews (100+ фактов). Selection чистится на
    screen transitions.
+5. **Methodology layer** (`d83431d` + `34d69a8`). LLM раньше видел только
+   название ячейки ("1.1 Origin & Childhood") — мог промахиваться, путать
+   слои. Добавили две expert-редактируемые ручки:
+   - **Per-subsection description** (глобально, одна на всех клиентов) —
+     editable в новой вкладке Methodology, инжектится в prompt как
+     "Methodology note:" под каждой ячейкой в списке.
+   - **Per-client tone preset** (4 пресета: academic / business / narrative /
+     punchy в `prompts.py`) — выбирается на той же вкладке, инжектится в
+     prompt как "TONE INSTRUCTION" перед основным system prompt.
+   Передаются во все 3 экстрактора (transcript / per-section / full-doc)
+   из обоих оркестраторов (YouTube + LLM Report). Эндпоинты:
+   `GET/PATCH /api/methodology`, `GET /api/tone-presets`, `tone_preset`
+   в `ClientOut`. Schema: `clients.tone_preset` (idempotent ALTER),
+   `subsections.description` (уже существовал).
 
 ## Открытые вопросы
 
 - **Filter/sort в preview** (по layer / по flag / по timestamp / по edited/
-  dropped) — 173 факта в одном списке — много. Остался единственный
-  невыполненный пункт из исходного backlog.
+  dropped) — 173 факта в одном списке — много.
+- **Cycles + Methodology** — `cycles/weekly|event|quarterly` пока не
+  читают `tone_preset` / `descriptions` (только extractor'ы). Нужно?
+- **Per-ingest override тона** — сейчас только per-client. Может
+  пригодиться когда один клиент делает разные интервью с разным регистром.
 - **Embedding-dedup / speaker diarization / параллелизация chunks** — v2.
 
 ## Следующие разумные шаги (если пользователь скажет «продолжаем»)
 
-1. **Filter/sort + поиск** в preview — последний пункт из исходного списка.
-2. **Backfill тестов**: добавить unit-тесты для sonnet fallback /
-   preview-by-id endpoint — сейчас на этих фичах нет тестов.
-3. **Embedding-dedup** — v2.
+1. **Filter/sort + поиск** в preview.
+2. **Tone в cycles** — пропихнуть `tone_preset` в `cycles/*.py` `generate(...)`
+   вызовы, чтобы weekly/event/quarterly артефакты тоже звучали единообразно.
+3. **Backfill тестов**: sonnet fallback / preview-by-id / methodology
+   endpoints / `_build_subsection_list` — на новых фичах тестов нет.
 
 ## Как обновлять этот файл
 
