@@ -15,6 +15,7 @@ import WorkView from "./components/WorkView";
 import ResearchView from "./components/ResearchView";
 import IngestLLMReport from "./components/IngestLLMReport";
 import IngestYouTube from "./components/IngestYouTube";
+import MethodologyView from "./components/MethodologyView";
 
 export default function App() {
   return (
@@ -105,6 +106,9 @@ function ClientPage() {
           {activeTab === "youtube" && (
             <IngestYouTube clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
           )}
+          {activeTab === "methodology" && (
+            <MethodologyView clientId={clientId!} />
+          )}
         </div>
       </main>
 
@@ -136,15 +140,16 @@ function ClientPage() {
 
 function Tabs({ clientId, activeTab }: { clientId: string; activeTab: string }) {
   const tabs = [
-    { id: "matrix",    label: "Matrix" },
-    { id: "ingest",    label: "Ingest" },
-    { id: "youtube",   label: "YouTube" },
-    { id: "research",  label: "Research" },
-    { id: "work",      label: "Work" },
-    { id: "punch",     label: "Punch-list" },
-    { id: "interview", label: "Interview Qs" },
-    { id: "scorecard", label: "Scorecard" },
-    { id: "artifacts", label: "Artifacts" },
+    { id: "matrix",      label: "Matrix" },
+    { id: "ingest",      label: "Ingest" },
+    { id: "youtube",     label: "YouTube" },
+    { id: "research",    label: "Research" },
+    { id: "work",        label: "Work" },
+    { id: "punch",       label: "Punch-list" },
+    { id: "interview",   label: "Interview Qs" },
+    { id: "scorecard",   label: "Scorecard" },
+    { id: "artifacts",   label: "Artifacts" },
+    { id: "methodology", label: "Methodology" },
   ];
   return (
     <div className="flex items-center gap-0 border-b border-ink-line bg-white px-4">

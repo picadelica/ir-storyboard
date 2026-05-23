@@ -1,7 +1,7 @@
 import type {
   Artifact, ArtifactSummary, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
-  Layer,
+  Layer, MethodologyCell, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem,
@@ -192,4 +192,15 @@ export const api = {
 
   youtubePreviewById: (clientId: string, previewId: string): Promise<YouTubePreviewResult> =>
     call<YouTubePreviewResult>(`/clients/${clientId}/ingest/youtube/preview-by-id/${previewId}`),
+
+  // ── Methodology ─────────────────────────────────────────────────────────────
+  methodology: (): Promise<MethodologyCell[]> => call<MethodologyCell[]>("/methodology"),
+
+  updateMethodology: (subsectionId: string, description: string): Promise<MethodologyCell> =>
+    call<MethodologyCell>(`/methodology/${subsectionId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ description }),
+    }),
+
+  tonePresets: (): Promise<TonePreset[]> => call<TonePreset[]>("/tone-presets"),
 };

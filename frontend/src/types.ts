@@ -27,6 +27,23 @@ export interface Client {
   founder_handle?: string;
   aliases?: string[];
   notes?: string;
+  tone_preset?: string;
+}
+
+export interface MethodologyCell {
+  subsection_id: string;
+  subsection_name: string;
+  layer_id: number;
+  layer_name: string;
+  sort_order: number;
+  description: string;
+}
+
+export interface TonePreset {
+  id: string;
+  label: string;
+  description: string;
+  sample: string;
 }
 
 export interface SeedImportResult {
