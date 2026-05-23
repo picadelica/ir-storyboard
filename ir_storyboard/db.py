@@ -37,6 +37,19 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "clients", "notes", "TEXT DEFAULT ''")
     # methodology: per-client narrative tone preset used by LLM extractors
     _add_column_if_missing(conn, "clients", "tone_preset", "TEXT NOT NULL DEFAULT 'business'")
+    # methodology: backfill empty subsection descriptions from models.LAYERS
+    # (only fills NULL/'' rows — expert edits are preserved)
+    _backfill_subsection_descriptions(conn)
+    # methodology: per-client additive note on top of the global description
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS client_subsection_notes (
+            client_id      TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            subsection_id  TEXT NOT NULL REFERENCES subsections(id) ON DELETE CASCADE,
+            note           TEXT NOT NULL DEFAULT '',
+            updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (client_id, subsection_id)
+        )
+    """)
     # task-2: provenance fields
     _add_column_if_missing(conn, "facts", "evidence_snippet", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "sources", "accessed_at", "TIMESTAMP")
@@ -133,6 +146,26 @@ def _migrate_audit_add_youtube(conn: sqlite3.Connection) -> None:
 
         DROP TABLE _ingest_audit_old;
     """)
+
+
+def _backfill_subsection_descriptions(conn: sqlite3.Connection) -> None:
+    """Populate empty subsections.description from models.LAYERS defaults.
+
+    Idempotent: only updates rows where description IS NULL or empty.
+    Expert-edited descriptions are never overwritten.
+    """
+    from .models import LAYERS
+    for layer in LAYERS:
+        for sub in layer.subsections:
+            if not (sub.description or "").strip():
+                continue
+            conn.execute(
+                """UPDATE subsections
+                      SET description = ?
+                    WHERE id = ?
+                      AND (description IS NULL OR description = '')""",
+                (sub.description, sub.id),
+            )
 
 
 def _migrate_collapse_1_4(conn: sqlite3.Connection) -> None:
