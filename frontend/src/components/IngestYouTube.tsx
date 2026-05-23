@@ -41,9 +41,10 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
     L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${s.name} (${L.name})` }))
   );
 
-  const [screen, setScreen] = useState<"input" | "preview" | "done">(lsSaved.screen || "input");
+  const [screen, setScreen] = useState<"input" | "history" | "preview" | "done">(lsSaved.screen || "input");
   const [url, setUrl] = useState(lsSaved.url || "");
   const [preview, setPreview] = useState<YouTubePreviewResult | null>(lsSaved.preview || null);
+  const [readOnly, setReadOnly] = useState(false);
   const [dropped, setDropped] = useState<Set<number>>(new Set());
   const [overrides, setOverrides] = useState<Set<number>>(new Set());
   const [factEdits, setFactEdits] = useState<Record<number, FactEdit>>(lsSaved.factEdits || {});
@@ -51,6 +52,8 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   const [expertEmail, setExpertEmail] = useState("");
   const [jobId, setJobId] = useState<string | null>(lsSaved.jobId || null);
   const [jobStatus, setJobStatus] = useState<string>(lsSaved.jobStatus || "");
+  const [reopenLoading, setReopenLoading] = useState<string | null>(null);
+  const [reopenError, setReopenError] = useState<string>("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qc = useQueryClient();
 
@@ -84,6 +87,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
           if (status.status === "done" && status.result) {
             stopPolling();
             setPreview(status.result);
+            setReadOnly(false);
             setDropped(new Set());
             setOverrides(new Set());
             setFactEdits({});
@@ -114,6 +118,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
           if (status.status === "done" && status.result) {
             stopPolling();
             setPreview(status.result);
+            setReadOnly(false);
             setDropped(new Set());
             setOverrides(new Set());
             setFactEdits({});
@@ -186,6 +191,25 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
     });
   }
 
+  async function reopenPreview(previewId: string) {
+    setReopenLoading(previewId);
+    setReopenError("");
+    try {
+      const result = await api.youtubePreviewById(clientId, previewId);
+      setPreview(result);
+      setReadOnly(true);
+      setDropped(new Set());
+      setOverrides(new Set());
+      setFactEdits({});
+      setSkippedEdits({});
+      setScreen("preview");
+    } catch (e) {
+      setReopenError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReopenLoading(null);
+    }
+  }
+
   function updateSkippedEdit(idx: number, patch: FactEdit) {
     setSkippedEdits((prev) => {
       const next = { ...prev };
@@ -208,9 +232,12 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold">Ingest YouTube Interview</h2>
           {history.data && history.data.length > 0 && (
-            <span className="text-xs text-ink-mute">
-              {history.data.length} previous ingest{history.data.length !== 1 ? "s" : ""}
-            </span>
+            <button
+              onClick={() => setScreen("history")}
+              className="text-xs text-ink-mute hover:text-ink underline-offset-2 hover:underline"
+            >
+              History ({history.data.length}) →
+            </button>
           )}
         </div>
 
@@ -256,23 +283,34 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         </div>
 
 
-        {/* History table */}
+        {/* History teaser: last 5, full list lives on History screen */}
         {history.data && history.data.length > 0 && (
           <div>
-            <div className="text-xs font-medium text-ink-mute mb-2 uppercase tracking-wide">
-              Previous ingests
+            <div className="flex items-baseline justify-between mb-2">
+              <div className="text-xs font-medium text-ink-mute uppercase tracking-wide">
+                Recent ingests
+              </div>
+              {history.data.length > 5 && (
+                <button
+                  onClick={() => setScreen("history")}
+                  className="text-[10px] text-ink-mute hover:text-ink"
+                >
+                  View all {history.data.length} →
+                </button>
+              )}
             </div>
             <table className="w-full text-xs">
               <thead className="text-[10px] text-ink-mute uppercase">
                 <tr>
                   <th className="text-left py-1 pr-3">Date</th>
                   <th className="text-left py-1 pr-3">Video</th>
-                  <th className="text-right py-1 pr-3">Facts</th>
-                  <th className="text-right py-1">Warnings</th>
+                  <th className="text-right py-1 pr-3">Emitted</th>
+                  <th className="text-right py-1 pr-3">Committed</th>
+                  <th className="text-right py-1"></th>
                 </tr>
               </thead>
               <tbody>
-                {history.data.map((row) => (
+                {history.data.slice(0, 5).map((row) => (
                   <tr key={row.id} className="border-t border-ink-line">
                     <td className="py-1.5 pr-3 font-mono">
                       {new Date(row.parsed_at).toLocaleDateString()}
@@ -280,13 +318,110 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                     <td className="py-1.5 pr-3 truncate max-w-[140px]">
                       {row.video_id ?? "—"}
                     </td>
-                    <td className="py-1.5 pr-3 text-right">{row.facts_committed}</td>
-                    <td className="py-1.5 text-right">{row.channel_warnings}</td>
+                    <td className="py-1.5 pr-3 text-right">{row.facts_emitted}</td>
+                    <td className="py-1.5 pr-3 text-right">
+                      {row.confirmed_at ? row.facts_committed : <span className="text-amber-600">pending</span>}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      <button
+                        onClick={() => reopenPreview(row.id)}
+                        disabled={reopenLoading === row.id}
+                        className="text-[10px] text-blue-600 hover:underline disabled:text-slate-400"
+                      >
+                        {reopenLoading === row.id ? "loading…" : "reopen"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {reopenError && <div className="text-xs text-red-600 mt-2">{reopenError}</div>}
           </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── History screen ─────────────────────────────────────────────────────────
+
+  if (screen === "history") {
+    const rows = history.data ?? [];
+    return (
+      <div className="p-5 max-w-5xl space-y-4">
+        <div className="flex items-baseline justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">YouTube Ingest History</h2>
+            <div className="text-xs text-ink-mute mt-0.5">
+              {rows.length} past ingest{rows.length !== 1 ? "s" : ""} for this client
+            </div>
+          </div>
+          <button
+            onClick={() => { setScreen("input"); setReopenError(""); }}
+            className="text-xs text-ink-mute hover:text-ink"
+          >
+            ← Back to input
+          </button>
+        </div>
+        {history.isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
+        {rows.length === 0 && !history.isLoading && (
+          <div className="text-sm text-ink-mute">No ingests yet.</div>
+        )}
+        {rows.length > 0 && (
+          <table className="w-full text-xs">
+            <thead className="text-[10px] text-ink-mute uppercase">
+              <tr className="border-b border-ink-line">
+                <th className="text-left py-2 pr-3">Date</th>
+                <th className="text-left py-2 pr-3">Video</th>
+                <th className="text-left py-2 pr-3">Transcriber</th>
+                <th className="text-right py-2 pr-3">Cost</th>
+                <th className="text-right py-2 pr-3">Emitted</th>
+                <th className="text-right py-2 pr-3">Committed</th>
+                <th className="text-right py-2 pr-3">Warnings</th>
+                <th className="text-left py-2 pr-3">Expert</th>
+                <th className="text-right py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id} className="border-b border-ink-line hover:bg-slate-50">
+                  <td className="py-2 pr-3 font-mono whitespace-nowrap">
+                    {new Date(row.parsed_at).toLocaleString()}
+                  </td>
+                  <td className="py-2 pr-3 truncate max-w-[160px]">
+                    {row.video_id ?? "—"}
+                  </td>
+                  <td className="py-2 pr-3 text-ink-mute">{row.transcriber ?? "—"}</td>
+                  <td className="py-2 pr-3 text-right text-ink-mute">
+                    {row.transcribe_cost_usd != null ? `$${row.transcribe_cost_usd.toFixed(2)}` : "—"}
+                  </td>
+                  <td className="py-2 pr-3 text-right">{row.facts_emitted}</td>
+                  <td className="py-2 pr-3 text-right">
+                    {row.confirmed_at ? (
+                      <span className="text-emerald-700">{row.facts_committed}</span>
+                    ) : (
+                      <span className="text-amber-600">pending</span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3 text-right">{row.channel_warnings}</td>
+                  <td className="py-2 pr-3 text-ink-mute truncate max-w-[160px]">
+                    {row.expert_email || "—"}
+                  </td>
+                  <td className="py-2 text-right">
+                    <button
+                      onClick={() => reopenPreview(row.id)}
+                      disabled={reopenLoading === row.id}
+                      className="text-[11px] text-blue-600 hover:underline disabled:text-slate-400"
+                    >
+                      {reopenLoading === row.id ? "loading…" : "reopen"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {reopenError && (
+          <div className="text-xs text-red-600 bg-red-50 rounded p-2">{reopenError}</div>
         )}
       </div>
     );
@@ -317,6 +452,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
               clearState();
               setScreen("input");
               setPreview(null);
+              setReadOnly(false);
               setUrl("");
               setJobId(null);
               setJobStatus("");
@@ -341,18 +477,46 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
     <div className="p-5 max-w-4xl space-y-6">
       <div className="flex items-baseline justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Preview</h2>
+          <h2 className="text-lg font-semibold">
+            {readOnly ? "Past Preview (review-only)" : "Preview"}
+          </h2>
           <div className="text-xs text-ink-mute mt-0.5">
             {preview.facts.length} facts · {preview.skipped.length} skipped by LayerGuard
           </div>
         </div>
         <button
-          onClick={() => { setScreen("input"); previewMut.reset(); }}
+          onClick={() => {
+            if (readOnly) {
+              setReadOnly(false);
+              setPreview(null);
+              setScreen("history");
+            } else {
+              setScreen("input");
+              previewMut.reset();
+            }
+          }}
           className="text-xs text-ink-mute hover:text-ink"
         >
           ← Back
         </button>
       </div>
+
+      {readOnly && (
+        <div className="bg-slate-100 border border-slate-300 rounded-lg p-3 text-sm text-slate-700">
+          {preview.confirmed_at ? (
+            <>
+              <span className="font-medium">Committed</span> on{" "}
+              {new Date(preview.confirmed_at).toLocaleString()} —
+              read-only review. Edits and re-commit disabled.
+            </>
+          ) : (
+            <>
+              <span className="font-medium">Uncommitted preview</span> from history — read-only review.
+              To re-ingest this video, return to input and paste the URL again.
+            </>
+          )}
+        </div>
+      )}
 
       {/* Video meta */}
       <div className="bg-slate-50 border border-ink-line rounded-lg p-4 space-y-1 text-sm">
@@ -410,6 +574,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
               fact={fact}
               edit={factEdits[idx]}
               dropped={dropped.has(idx)}
+              readOnly={readOnly}
               subsectionOptions={subsectionOptions}
               onToggleDrop={() => setDropped((prev) => {
                 const next = new Set(prev);
@@ -435,6 +600,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                 skipped={s}
                 edit={skippedEdits[idx]}
                 overridden={overrides.has(idx)}
+                readOnly={readOnly}
                 subsectionOptions={subsectionOptions}
                 onToggleOverride={() => setOverrides((prev) => {
                   const next = new Set(prev);
@@ -448,7 +614,8 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         </div>
       )}
 
-      {/* Commit bar */}
+      {/* Commit bar — hidden in read-only review mode */}
+      {!readOnly && (
       <div className="sticky bottom-0 bg-white border-t border-ink-line pt-4 pb-2 space-y-3">
         <div className="flex items-center gap-3">
           <input
@@ -479,6 +646,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
           <div className="text-xs text-red-600">{String(commitMut.error)}</div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -489,12 +657,13 @@ interface FactCardProps {
   fact: YouTubeFact;
   edit?: FactEdit;
   dropped: boolean;
+  readOnly?: boolean;
   subsectionOptions: { id: string; label: string }[];
   onToggleDrop: () => void;
   onEdit: (patch: FactEdit) => void;
 }
 
-function FactCard({ fact, edit, dropped, subsectionOptions, onToggleDrop, onEdit }: FactCardProps) {
+function FactCard({ fact, edit, dropped, readOnly, subsectionOptions, onToggleDrop, onEdit }: FactCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (fact.text_ru || fact.text);
   const effectiveSid = edit?.subsection_id ?? fact.subsection_id;
@@ -582,25 +751,27 @@ function FactCard({ fact, edit, dropped, subsectionOptions, onToggleDrop, onEdit
           )}
         </div>
 
-        {/* Right: actions */}
-        <div className="flex flex-col gap-1 shrink-0">
-          <button
-            onClick={() => setEditing((e) => !e)}
-            className="text-[10px] px-2 py-0.5 border border-slate-300 text-slate-600 rounded hover:bg-slate-100"
-          >
-            {editing ? "close" : "edit"}
-          </button>
-          <button
-            onClick={onToggleDrop}
-            className={`text-[10px] px-2 py-0.5 border rounded ${
-              dropped
-                ? "border-emerald-200 text-emerald-600 hover:bg-emerald-50"
-                : "border-red-200 text-red-600 hover:bg-red-50"
-            }`}
-          >
-            {dropped ? "restore" : "drop"}
-          </button>
-        </div>
+        {/* Right: actions (hidden in read-only review) */}
+        {!readOnly && (
+          <div className="flex flex-col gap-1 shrink-0">
+            <button
+              onClick={() => setEditing((e) => !e)}
+              className="text-[10px] px-2 py-0.5 border border-slate-300 text-slate-600 rounded hover:bg-slate-100"
+            >
+              {editing ? "close" : "edit"}
+            </button>
+            <button
+              onClick={onToggleDrop}
+              className={`text-[10px] px-2 py-0.5 border rounded ${
+                dropped
+                  ? "border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                  : "border-red-200 text-red-600 hover:bg-red-50"
+              }`}
+            >
+              {dropped ? "restore" : "drop"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -704,12 +875,13 @@ interface SkippedCardProps {
   skipped: YouTubeSkipped;
   edit?: FactEdit;
   overridden: boolean;
+  readOnly?: boolean;
   subsectionOptions: { id: string; label: string }[];
   onToggleOverride: () => void;
   onEdit: (patch: FactEdit) => void;
 }
 
-function SkippedCard({ skipped, edit, overridden, subsectionOptions, onToggleOverride, onEdit }: SkippedCardProps) {
+function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOptions, onToggleOverride, onEdit }: SkippedCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (skipped.text_ru || skipped.text);
   const effectiveSid = edit?.subsection_id ?? skipped.subsection_id;
@@ -794,26 +966,28 @@ function SkippedCard({ skipped, edit, overridden, subsectionOptions, onToggleOve
           )}
         </div>
 
-        <div className="flex flex-col gap-1 shrink-0">
-          <button
-            onClick={() => setEditing((e) => !e)}
-            className="text-[10px] px-2 py-0.5 border border-slate-300 text-slate-600 rounded hover:bg-slate-100"
-          >
-            {editing ? "close" : "edit"}
-          </button>
-          {skipped.override_allowed && (
+        {!readOnly && (
+          <div className="flex flex-col gap-1 shrink-0">
             <button
-              onClick={onToggleOverride}
-              className={`text-[10px] px-2 py-0.5 border rounded ${
-                overridden
-                  ? "border-amber-400 text-amber-700 bg-amber-100"
-                  : "border-slate-300 text-slate-500 hover:border-amber-300 hover:text-amber-600"
-              }`}
+              onClick={() => setEditing((e) => !e)}
+              className="text-[10px] px-2 py-0.5 border border-slate-300 text-slate-600 rounded hover:bg-slate-100"
             >
-              {overridden ? "undo" : "keep"}
+              {editing ? "close" : "edit"}
             </button>
-          )}
-        </div>
+            {skipped.override_allowed && (
+              <button
+                onClick={onToggleOverride}
+                className={`text-[10px] px-2 py-0.5 border rounded ${
+                  overridden
+                    ? "border-amber-400 text-amber-700 bg-amber-100"
+                    : "border-slate-300 text-slate-500 hover:border-amber-300 hover:text-amber-600"
+                }`}
+              >
+                {overridden ? "undo" : "keep"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

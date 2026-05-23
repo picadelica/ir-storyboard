@@ -224,6 +224,7 @@ export interface YouTubePreviewResult {
   transcribe_cost_usd: number | null;
   notes: string[];
   stats: Record<string, number>;
+  confirmed_at?: string | null;
 }
 
 export interface YouTubeCommitOut {

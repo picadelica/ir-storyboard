@@ -1317,6 +1317,7 @@ class YouTubePreviewOut(BaseModel):
     transcribe_cost_usd: Optional[float]
     notes: List[str]
     stats: Dict[str, Any]
+    confirmed_at: Optional[str] = None
 
 
 class YouTubeCommitIn(BaseModel):
@@ -1469,6 +1470,83 @@ def youtube_commit(client_id: str, body: YouTubeCommitIn, conn=Depends(get_conn)
         raise HTTPException(400, str(e))
 
     return YouTubeCommitOut(committed=result.committed, skipped=result.skipped)
+
+
+@app.get(
+    "/api/clients/{client_id}/ingest/youtube/preview-by-id/{preview_id}",
+    response_model=YouTubePreviewOut,
+    summary="Load a previously stored YouTube preview by id (for history reopen)",
+)
+def youtube_preview_by_id(client_id: str, preview_id: str, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    from ir_storyboard.channels.llm_report.youtube_pipeline import _ensure_audit_table_youtube
+    import json as _json
+    _ensure_audit_table_youtube(conn)
+    row = conn.execute(
+        """SELECT preview_json, confirmed_at FROM ingest_audit
+            WHERE id = ? AND client_id = ? AND ingest_kind = 'youtube'""",
+        (preview_id, client_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, f"Preview {preview_id} not found")
+    try:
+        data = _json.loads(row["preview_json"] or "{}")
+    except _json.JSONDecodeError:
+        raise HTTPException(500, "Stored preview_json is corrupt")
+    meta_dict = data.get("meta") or {}
+    return YouTubePreviewOut(
+        preview_id=preview_id,
+        meta=YouTubeMetaOut(
+            video_id=meta_dict.get("video_id") or data.get("video_id") or "",
+            canonical_url=meta_dict.get("canonical_url") or data.get("canonical_url") or "",
+            title=meta_dict.get("title") or "",
+            channel_name=meta_dict.get("channel_name") or "",
+            duration_sec=int(meta_dict.get("duration_sec") or 0),
+            upload_date=meta_dict.get("upload_date") or "",
+            language=meta_dict.get("language"),
+        ),
+        facts=[
+            YouTubeFactOut(
+                text=f.get("text", ""),
+                text_ru=f.get("text_ru", ""),
+                text_en=f.get("text_en", ""),
+                quote=f.get("quote", ""),
+                subsection_id=f.get("subsection_id", ""),
+                flag=f.get("flag", "green"),
+                confidence=float(f.get("confidence", 0.8)),
+                evidence_snippet=f.get("evidence_snippet", ""),
+                source_url=f.get("source_url", ""),
+                snippet_start_sec=float(f.get("snippet_start_sec", 0.0)),
+                snippet_end_sec=float(f.get("snippet_end_sec", 0.0)),
+                needs_review=bool(f.get("needs_review", False)),
+                layer_warning=bool(f.get("layer_warning", False)),
+            )
+            for f in data.get("facts", [])
+        ],
+        skipped=[
+            YouTubeSkippedOut(
+                text=s.get("text", ""),
+                text_ru=s.get("text_ru", ""),
+                text_en=s.get("text_en", ""),
+                quote=s.get("quote", ""),
+                subsection_id=s.get("subsection_id", ""),
+                flag=s.get("flag", "green"),
+                confidence=float(s.get("confidence", 0.5)),
+                reason=s.get("reason", ""),
+                source_url=s.get("source_url", ""),
+                evidence_snippet=s.get("evidence_snippet", ""),
+                snippet_start_sec=float(s.get("snippet_start_sec", 0.0)),
+                snippet_end_sec=float(s.get("snippet_end_sec", 0.0)),
+                override_allowed=bool(s.get("override_allowed", True)),
+            )
+            for s in data.get("skipped", [])
+        ],
+        from_cache=bool(data.get("from_cache", True)),
+        transcribe_cost_usd=data.get("transcribe_cost_usd"),
+        notes=data.get("notes", []) or [],
+        stats=data.get("stats", {}) or {},
+        confirmed_at=row["confirmed_at"],
+    )
 
 
 @app.get(

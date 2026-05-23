@@ -189,4 +189,7 @@ export const api = {
 
   youtubeHistory: (clientId: string): Promise<YouTubeHistoryRow[]> =>
     call<YouTubeHistoryRow[]>(`/clients/${clientId}/ingest/youtube/history`),
+
+  youtubePreviewById: (clientId: string, previewId: string): Promise<YouTubePreviewResult> =>
+    call<YouTubePreviewResult>(`/clients/${clientId}/ingest/youtube/preview-by-id/${previewId}`),
 };
