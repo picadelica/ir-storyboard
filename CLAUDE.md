@@ -60,24 +60,24 @@ ir_storyboard/          ← ядро (чистый Python пакет, без Fas
 ├── llm.py              ← LLM-слой (Anthropic) + stub-фоллбек
 ├── db.py               ← SQLite + идемпотентные миграции
 ├── seed.py             ← пилотные данные Accumulator
-├── channels/           ← 4 канала + llm_report (оркестратор)
-│   ├── base.py
+├── channels/           ← 4 канонических канала (offline_interview /
+│   ├── base.py             online_interview / archival / online_research)
 │   ├── offline_interview.py
 │   ├── online_interview.py
 │   ├── online_research.py
-│   ├── archival.py
-│   └── llm_report/     ← LLM Report Ingest + YouTube Ingest pipeline
-│       ├── ir.py              ← LLMReportIR, RawCitation (+ forced_channel)
-│       ├── citations.py       ← extract_citations (respects forced_channel)
-│       ├── transcript_to_ir.py ← Transcript → LLMReportIR adapter
-│       ├── youtube_pipeline.py ← run_youtube_preview / run_youtube_commit
-│       ├── snippet_anchor.py  ← AnchoredFact + timestamp URL + literal snippet
-│       ├── layer_guard.py     ← LayerGuard: blocks L5/L6/L8 for online_interview
-│       └── loaders/
-│           ├── youtube_url.py    ← URL normalization + yt-dlp metadata
-│           ├── youtube_audio.py  ← fetch_audio (yt-dlp → opus 16kHz mono)
-│           ├── audio_chunker.py  ← split_audio (ffmpeg, ≤3600s + overlap)
-│           └── transcriber.py    ← Transcriber protocol + faster-whisper / OpenAI / Deepgram
+│   └── archival.py
+├── ingest/             ← оркестраторы поверх каналов (LLM Report + YouTube)
+│   ├── ir.py              ← LLMReportIR, RawCitation (+ forced_channel)
+│   ├── citations.py       ← extract_citations (respects forced_channel)
+│   ├── transcript_to_ir.py ← Transcript → LLMReportIR adapter
+│   ├── youtube_pipeline.py ← run_youtube_preview / run_youtube_commit
+│   ├── snippet_anchor.py  ← AnchoredFact + timestamp URL + literal snippet
+│   ├── layer_guard.py     ← LayerGuard: blocks L5/L6/L8 for online_interview
+│   └── loaders/
+│       ├── youtube_url.py    ← URL normalization + yt-dlp metadata
+│       ├── youtube_audio.py  ← fetch_audio (yt-dlp → opus 16kHz mono)
+│       ├── audio_chunker.py  ← split_audio (ffmpeg, ≤3600s + overlap)
+│       └── transcriber.py    ← Transcriber protocol + faster-whisper / OpenAI / Deepgram
 ├── cycles/             ← weekly / event / quarterly
 ├── outputs.py          ← punch-list, interview qs, scorecard, NotebookLM bundle
 ├── workitems.py        ← Process Layer (fill_gap / interview / adjacent / cross_ref)

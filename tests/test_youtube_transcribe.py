@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
-from ir_storyboard.channels.llm_report.loaders.transcriber import (
+from ir_storyboard.ingest.loaders.transcriber import (
     TranscriptSegment,
     Transcript,
     dedup_overlap_segments,
@@ -61,8 +61,8 @@ def test_get_or_transcribe_cache_hit_same_transcriber(tmp_path):
     mock_transcriber = MagicMock()
     mock_transcriber.name = "local-faster-whisper:large-v3-turbo"
 
-    with patch("ir_storyboard.channels.llm_report.loaders.transcriber.fetch_audio") as fa, \
-         patch("ir_storyboard.channels.llm_report.loaders.transcriber.split_audio") as sa:
+    with patch("ir_storyboard.ingest.loaders.transcriber.fetch_audio") as fa, \
+         patch("ir_storyboard.ingest.loaders.transcriber.split_audio") as sa:
         result = get_or_transcribe("test123", meta, mock_transcriber, conn, cache_dir=tmp_path)
 
     fa.assert_not_called()
@@ -88,11 +88,11 @@ def test_get_or_transcribe_cache_miss_single_chunk(tmp_path):
     fake_audio = tmp_path / "test123.opus"
     fake_audio.touch()
 
-    from ir_storyboard.channels.llm_report.loaders.audio_chunker import AudioChunk
+    from ir_storyboard.ingest.loaders.audio_chunker import AudioChunk
     fake_chunk = AudioChunk(path=fake_audio, chunk_start_sec=0.0, chunk_end_sec=1800.0)
 
-    with patch("ir_storyboard.channels.llm_report.loaders.transcriber.fetch_audio", return_value=fake_audio), \
-         patch("ir_storyboard.channels.llm_report.loaders.transcriber.split_audio", return_value=[fake_chunk]):
+    with patch("ir_storyboard.ingest.loaders.transcriber.fetch_audio", return_value=fake_audio), \
+         patch("ir_storyboard.ingest.loaders.transcriber.split_audio", return_value=[fake_chunk]):
         result = get_or_transcribe("test123", meta, mock_transcriber, conn, cache_dir=tmp_path)
 
     assert len(result.segments) == 2
@@ -129,14 +129,14 @@ def test_get_or_transcribe_multi_chunk_offsets_timestamps(tmp_path):
     chunk2 = tmp_path / "chunk1.opus"
     chunk2.touch()
 
-    from ir_storyboard.channels.llm_report.loaders.audio_chunker import AudioChunk
+    from ir_storyboard.ingest.loaders.audio_chunker import AudioChunk
     chunks = [
         AudioChunk(path=chunk1, chunk_start_sec=0.0, chunk_end_sec=3600.0),
         AudioChunk(path=chunk2, chunk_start_sec=3600.0, chunk_end_sec=7200.0),
     ]
 
-    with patch("ir_storyboard.channels.llm_report.loaders.transcriber.fetch_audio", return_value=fake_audio), \
-         patch("ir_storyboard.channels.llm_report.loaders.transcriber.split_audio", return_value=chunks):
+    with patch("ir_storyboard.ingest.loaders.transcriber.fetch_audio", return_value=fake_audio), \
+         patch("ir_storyboard.ingest.loaders.transcriber.split_audio", return_value=chunks):
         result = get_or_transcribe("long123", meta, mock_transcriber, conn, cache_dir=tmp_path)
 
     starts = [s.start for s in result.segments]
@@ -184,11 +184,11 @@ def test_cache_invalidates_on_transcriber_change(tmp_path):
 
     fake_audio = tmp_path / "test123.opus"
     fake_audio.touch()
-    from ir_storyboard.channels.llm_report.loaders.audio_chunker import AudioChunk
+    from ir_storyboard.ingest.loaders.audio_chunker import AudioChunk
     fake_chunk = AudioChunk(path=fake_audio, chunk_start_sec=0.0, chunk_end_sec=1800.0)
 
-    with patch("ir_storyboard.channels.llm_report.loaders.transcriber.fetch_audio", return_value=fake_audio), \
-         patch("ir_storyboard.channels.llm_report.loaders.transcriber.split_audio", return_value=[fake_chunk]):
+    with patch("ir_storyboard.ingest.loaders.transcriber.fetch_audio", return_value=fake_audio), \
+         patch("ir_storyboard.ingest.loaders.transcriber.split_audio", return_value=[fake_chunk]):
         result = get_or_transcribe("test123", meta, new_transcriber, conn, cache_dir=tmp_path)
 
     new_transcriber.transcribe.assert_called_once()

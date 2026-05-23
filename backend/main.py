@@ -871,7 +871,7 @@ def research_client(client_id: str, conn=Depends(get_conn)):
 
 
 @app.post("/api/clients/{client_id}/ingest/preview", response_model=ResearchPreviewOut)
-def ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(get_conn)):
+def research_ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(get_conn)):
     # split by double newline or keep as single chunk
     paras = [p.strip() for p in body.text.split("\n\n") if p.strip()]
     if not paras:
@@ -886,7 +886,7 @@ def ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(get_conn)
 
 
 @app.post("/api/clients/{client_id}/ingest/confirm", response_model=IngestConfirmOut)
-def ingest_confirm(client_id: str, body: IngestConfirmIn, conn=Depends(get_conn)):
+def research_ingest_confirm(client_id: str, body: IngestConfirmIn, conn=Depends(get_conn)):
     written: List[int] = []
     skipped = 0
     for f in body.facts:
@@ -1023,13 +1023,13 @@ _ARTIFACTS_DIR = ROOT / "data" / "llm_reports"
         "Returns extracted sources and facts for expert review."
     ),
 )
-def ingest_preview(
+def llm_report_ingest_preview(
     client_id: str,
     file: UploadFile = File(...),
     agent_hint: Optional[str] = Form(None),
 ):
     """Preview endpoint opens its own DB connection to avoid SQLite thread issues."""
-    from ir_storyboard.channels.llm_report.pipeline import preview_llm_report
+    from ir_storyboard.ingest.pipeline import preview_llm_report
     import tempfile, shutil
 
     suffix = Path(file.filename or "upload.docx").suffix.lower()
@@ -1081,16 +1081,16 @@ def ingest_preview(
         "writes sources and facts to the matrix. Idempotent — safe to call twice."
     ),
 )
-def ingest_commit(
+def llm_report_ingest_commit(
     client_id: str,
     body: IngestCommitIn,
     conn=Depends(get_conn),
 ):
-    from ir_storyboard.channels.llm_report.pipeline import (
+    from ir_storyboard.ingest.pipeline import (
         commit_llm_report, IngestPreview,
     )
-    from ir_storyboard.channels.llm_report.citations import ResolvedCitation
-    from ir_storyboard.channels.llm_report.snippet_resolver import ResolvedFact
+    from ir_storyboard.ingest.citations import ResolvedCitation
+    from ir_storyboard.ingest.snippet_resolver import ResolvedFact
 
     client = conn.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
     if not client:
@@ -1165,7 +1165,7 @@ def ingest_commit(
     response_model=List[IngestAuditOut],
     summary="List past LLM Report Ingest runs for a client",
 )
-def ingest_history(
+def llm_report_ingest_history(
     client_id: str,
     limit: int = Query(20, ge=1, le=200),
     conn=Depends(get_conn),
@@ -1248,7 +1248,7 @@ def _yt_job_run(job_id: str, client_id: str, url: str, db_path: str) -> None:
     from ir_storyboard import db as _db
     conn = _db.connect(_db.DEFAULT_DB_PATH if not db_path else _db.Path(db_path))
     _db.init_schema(conn)
-    from ir_storyboard.channels.llm_report.youtube_pipeline import run_youtube_preview
+    from ir_storyboard.ingest.youtube_pipeline import run_youtube_preview
     try:
         result = run_youtube_preview(client_id, url, conn)
         with _yt_jobs_lock:
@@ -1457,7 +1457,7 @@ def youtube_preview_status(client_id: str, job_id: str, conn=Depends(get_conn)):
 )
 def youtube_commit(client_id: str, body: YouTubeCommitIn, conn=Depends(get_conn)):
     _check_client(client_id, conn)
-    from ir_storyboard.channels.llm_report.youtube_pipeline import run_youtube_commit
+    from ir_storyboard.ingest.youtube_pipeline import run_youtube_commit
     try:
         result = run_youtube_commit(
             preview_id=body.preview_id,
@@ -1479,7 +1479,7 @@ def youtube_commit(client_id: str, body: YouTubeCommitIn, conn=Depends(get_conn)
 )
 def youtube_preview_by_id(client_id: str, preview_id: str, conn=Depends(get_conn)):
     _check_client(client_id, conn)
-    from ir_storyboard.channels.llm_report.youtube_pipeline import _ensure_audit_table_youtube
+    from ir_storyboard.ingest.youtube_pipeline import _ensure_audit_table_youtube
     import json as _json
     _ensure_audit_table_youtube(conn)
     row = conn.execute(
@@ -1560,7 +1560,7 @@ def youtube_history(
     conn=Depends(get_conn),
 ):
     _check_client(client_id, conn)
-    from ir_storyboard.channels.llm_report.youtube_pipeline import _ensure_audit_table_youtube
+    from ir_storyboard.ingest.youtube_pipeline import _ensure_audit_table_youtube
     _ensure_audit_table_youtube(conn)
     rows = conn.execute(
         """SELECT id, client_id, video_id, transcriber, transcribe_cost_usd,

@@ -25,7 +25,7 @@ CLIENT_ID = "libermans-gonka"
 
 def run_pipeline(tmp_db_path: Path):
     from ir_storyboard import db as _db, matrix
-    from ir_storyboard.channels.llm_report.pipeline import (
+    from ir_storyboard.ingest.pipeline import (
         preview_llm_report, commit_llm_report,
     )
 

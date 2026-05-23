@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 from .models import LAYERS, SubsectionSpec
 
 if TYPE_CHECKING:
-    from .channels.llm_report.citations import ResolvedCitation
+    from .ingest.citations import ResolvedCitation
 
 
 # ─────────────────────────── data types ────────────────────────────────────
@@ -427,7 +427,7 @@ def extract_facts_from_llm_report(
 
     Falls back to empty list if no API key configured (prototype mode).
     """
-    from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
+    from .ingest.classifiers.flag_heuristics import apply_heuristics
 
     if not section_paragraphs:
         return []
@@ -498,8 +498,8 @@ def _stub_extract(
     available_subsections: List[str],
 ) -> List["ExtractedFact"]:
     """Deterministic stub when no LLM key is configured."""
-    from .channels.llm_report.classifiers.section_to_layer import suggest_subsection
-    from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
+    from .ingest.classifiers.section_to_layer import suggest_subsection
+    from .ingest.classifiers.flag_heuristics import apply_heuristics
 
     sid = suggest_subsection(heading)
     # If heading not in synonym map, use first available subsection as fallback
@@ -535,7 +535,7 @@ def extract_facts_from_full_document(
     sections: list of (heading, paragraphs) tuples (meta/conclusions already filtered out).
     Falls back to per-section stub if no LLM key.
     """
-    from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
+    from .ingest.classifiers.flag_heuristics import apply_heuristics
 
     if not sections:
         return []
@@ -571,7 +571,7 @@ def extract_facts_from_full_document(
 
     if not raw:
         # Stub fallback: process each section individually
-        from .channels.llm_report.classifiers.section_to_layer import suggest_subsection
+        from .ingest.classifiers.section_to_layer import suggest_subsection
         results = []
         for heading, paragraphs in sections:
             results.extend(_stub_extract(heading, paragraphs, available_subsections))
@@ -587,7 +587,7 @@ def extract_facts_from_full_document(
         data = json.loads(raw)
         facts_data = data.get("facts", [])
     except (json.JSONDecodeError, AttributeError, KeyError):
-        from .channels.llm_report.classifiers.section_to_layer import suggest_subsection
+        from .ingest.classifiers.section_to_layer import suggest_subsection
         results = []
         for heading, paragraphs in sections:
             results.extend(_stub_extract(heading, paragraphs, available_subsections))
@@ -688,7 +688,7 @@ def extract_facts_from_transcript(
         {"chunk_start_min": int, "chunk_end_min": int, "reason": str, "detail": str}
     Reasons: "empty_llm_response" (LLM returned ""), "invalid_json" (parse failed).
     """
-    from .channels.llm_report.classifiers.flag_heuristics import apply_heuristics
+    from .ingest.classifiers.flag_heuristics import apply_heuristics
 
     if not segments:
         return [], []

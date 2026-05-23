@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
-from ... import matrix
-from ...llm import extract_facts_from_transcript
+from .. import matrix
+from ..llm import extract_facts_from_transcript
 from .loaders.youtube_url import normalize_url, fetch_metadata, YouTubeVideoMeta
 from .loaders.transcriber import get_transcriber, get_or_transcribe
 from .snippet_anchor import anchor_facts, AnchoredFact

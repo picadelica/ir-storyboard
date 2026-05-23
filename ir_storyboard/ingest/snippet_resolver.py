@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
-from ...llm import ExtractedFact
+from ..llm import ExtractedFact
 
 if TYPE_CHECKING:
     from .citations import ResolvedCitation

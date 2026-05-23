@@ -87,7 +87,7 @@ def _client_sources(conn: sqlite3.Connection, client_id: str) -> list[dict]:
 @pytest.mark.skipif(not EXPECTED_YAML.exists(), reason="expected YAML fixture not found")
 def test_e2e_gonka_matches_expected_yaml(db_conn):
     """Full pipeline: docx → preview → commit → verify against golden YAML."""
-    from ir_storyboard.channels.llm_report.pipeline import (
+    from ir_storyboard.ingest.pipeline import (
         preview_llm_report,
         commit_llm_report,
     )
@@ -175,7 +175,7 @@ def test_e2e_gonka_matches_expected_yaml(db_conn):
 @pytest.mark.skipif(not GONKA_DOCX.exists(), reason="gonka docx fixture not found")
 def test_e2e_double_ingest_is_idempotent(db_conn):
     """Second ingest of the same file produces 0 new facts."""
-    from ir_storyboard.channels.llm_report.pipeline import (
+    from ir_storyboard.ingest.pipeline import (
         preview_llm_report,
         commit_llm_report,
     )
@@ -196,7 +196,7 @@ def test_e2e_double_ingest_is_idempotent(db_conn):
 @pytest.mark.skipif(not GONKA_DOCX.exists(), reason="gonka docx fixture not found")
 def test_e2e_audit_row_completeness(db_conn):
     """Audit row contains all required fields after commit."""
-    from ir_storyboard.channels.llm_report.pipeline import (
+    from ir_storyboard.ingest.pipeline import (
         preview_llm_report,
         commit_llm_report,
     )

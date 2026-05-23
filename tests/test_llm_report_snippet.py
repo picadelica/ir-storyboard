@@ -5,8 +5,8 @@ import os
 from unittest.mock import patch
 
 from ir_storyboard.llm import ExtractedFact
-from ir_storyboard.channels.llm_report.snippet_resolver import resolve_snippets, ResolvedFact
-from ir_storyboard.channels.llm_report.citations import ResolvedCitation
+from ir_storyboard.ingest.snippet_resolver import resolve_snippets, ResolvedFact
+from ir_storyboard.ingest.citations import ResolvedCitation
 
 
 def _make_fact(text="Gonka raised $50M from Bitfury.", paraphrase="", flag="green",
@@ -110,7 +110,7 @@ def test_fetch_mode_offline_with_mock():
     ]
     citation_index = {1: _make_citation(1, "https://businesswire.com/gonka")}
 
-    from ir_storyboard.channels.llm_report import snippet_resolver as sr_module
+    from ir_storyboard.ingest import snippet_resolver as sr_module
 
     with patch.object(sr_module, "_fetch_text", return_value=fake_html), \
          patch.dict(os.environ, {"LLM_REPORT_RESOLVE_FETCH": "1"}):

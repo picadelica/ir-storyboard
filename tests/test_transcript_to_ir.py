@@ -3,10 +3,10 @@ import json
 import pytest
 from unittest.mock import MagicMock
 
-from ir_storyboard.channels.llm_report.loaders.transcriber import TranscriptSegment, Transcript
-from ir_storyboard.channels.llm_report.transcript_to_ir import transcript_to_ir
-from ir_storyboard.channels.llm_report.citations import extract_citations
-from ir_storyboard.channels.llm_report.ir import RawCitation, LLMReportIR, RawSection
+from ir_storyboard.ingest.loaders.transcriber import TranscriptSegment, Transcript
+from ir_storyboard.ingest.transcript_to_ir import transcript_to_ir
+from ir_storyboard.ingest.citations import extract_citations
+from ir_storyboard.ingest.ir import RawCitation, LLMReportIR, RawSection
 
 
 def _make_meta(url="https://www.youtube.com/watch?v=abc123"):

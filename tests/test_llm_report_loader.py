@@ -14,7 +14,7 @@ GONKA_DOCX = FIXTURES / "gonka_chatgpt_deep_research.docx"
 
 @pytest.mark.skipif(not GONKA_DOCX.exists(), reason="gonka fixture not found")
 def test_docx_loader_on_gonka_fixture():
-    from ir_storyboard.channels.llm_report.loaders.docx_loader import load
+    from ir_storyboard.ingest.loaders.docx_loader import load
 
     ir = load(GONKA_DOCX)
 
@@ -39,7 +39,7 @@ def test_docx_loader_on_gonka_fixture():
 
 
 def test_md_loader_basic_smoke(tmp_path):
-    from ir_storyboard.channels.llm_report.loaders.md_loader import load
+    from ir_storyboard.ingest.loaders.md_loader import load
 
     md_content = textwrap.dedent("""\
         # Overview
@@ -76,7 +76,7 @@ def test_md_loader_basic_smoke(tmp_path):
 
 
 def test_md_loader_skips_conclusions(tmp_path):
-    from ir_storyboard.channels.llm_report.loaders.md_loader import load
+    from ir_storyboard.ingest.loaders.md_loader import load
 
     md_content = textwrap.dedent("""\
         # Technology
@@ -102,7 +102,7 @@ def test_md_loader_skips_conclusions(tmp_path):
 
 
 def test_md_loader_open_questions(tmp_path):
-    from ir_storyboard.channels.llm_report.loaders.md_loader import load
+    from ir_storyboard.ingest.loaders.md_loader import load
 
     md_content = textwrap.dedent("""\
         # Technology

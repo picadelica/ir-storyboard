@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from ir_storyboard import db as _db, matrix
-from ir_storyboard.channels.llm_report.pipeline import (
+from ir_storyboard.ingest.pipeline import (
     preview_llm_report,
     commit_llm_report,
     _normalize_fact_text,
@@ -128,9 +128,9 @@ def test_double_commit_is_idempotent(tmp_path):
 def test_commit_with_drop_edit(tmp_path):
     """Expert drops one fact → it should not be committed."""
     from ir_storyboard import llm as llm_module
-    from ir_storyboard.channels.llm_report.snippet_resolver import ResolvedFact
-    from ir_storyboard.channels.llm_report.citations import ResolvedCitation
-    from ir_storyboard.channels.llm_report.pipeline import IngestPreview
+    from ir_storyboard.ingest.snippet_resolver import ResolvedFact
+    from ir_storyboard.ingest.citations import ResolvedCitation
+    from ir_storyboard.ingest.pipeline import IngestPreview
 
     conn = _fresh_conn(tmp_path)
     _seed_client(conn, "test-client")
@@ -171,9 +171,9 @@ def test_commit_with_drop_edit(tmp_path):
 
 def test_edit_action_changes_subsection(tmp_path):
     """Expert changes subsection via edit → committed with new subsection_id."""
-    from ir_storyboard.channels.llm_report.snippet_resolver import ResolvedFact
-    from ir_storyboard.channels.llm_report.citations import ResolvedCitation
-    from ir_storyboard.channels.llm_report.pipeline import IngestPreview
+    from ir_storyboard.ingest.snippet_resolver import ResolvedFact
+    from ir_storyboard.ingest.citations import ResolvedCitation
+    from ir_storyboard.ingest.pipeline import IngestPreview
 
     conn = _fresh_conn(tmp_path)
     _seed_client(conn, "test-client2")

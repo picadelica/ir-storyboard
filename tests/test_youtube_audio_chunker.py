@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 import pytest
 
-from ir_storyboard.channels.llm_report.loaders.audio_chunker import (
+from ir_storyboard.ingest.loaders.audio_chunker import (
     split_audio,
     AudioChunk,
     _probe_duration,
@@ -14,7 +14,7 @@ from ir_storyboard.channels.llm_report.loaders.audio_chunker import (
 def _mock_probe(duration_sec: float):
     """Patch _probe_duration to return a fixed value."""
     return patch(
-        "ir_storyboard.channels.llm_report.loaders.audio_chunker._probe_duration",
+        "ir_storyboard.ingest.loaders.audio_chunker._probe_duration",
         return_value=float(duration_sec),
     )
 

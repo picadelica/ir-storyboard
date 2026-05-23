@@ -1,6 +1,6 @@
 """Tests for layer_guard.py."""
-from ir_storyboard.channels.llm_report.layer_guard import guard_layers, ALLOWED_LAYERS_BY_CHANNEL
-from ir_storyboard.channels.llm_report.snippet_anchor import AnchoredFact
+from ir_storyboard.ingest.layer_guard import guard_layers, ALLOWED_LAYERS_BY_CHANNEL
+from ir_storyboard.ingest.snippet_anchor import AnchoredFact
 
 
 def _make_anchored(subsection_id, flag="green"):

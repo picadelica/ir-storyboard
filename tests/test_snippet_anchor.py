@@ -2,8 +2,8 @@
 import pytest
 from unittest.mock import MagicMock
 
-from ir_storyboard.channels.llm_report.snippet_anchor import anchor_facts, AnchoredFact
-from ir_storyboard.channels.llm_report.loaders.transcriber import TranscriptSegment, Transcript
+from ir_storyboard.ingest.snippet_anchor import anchor_facts, AnchoredFact
+from ir_storyboard.ingest.loaders.transcriber import TranscriptSegment, Transcript
 from ir_storyboard.llm import ExtractedFact
 
 

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from ir_storyboard.channels.llm_report.ir import LLMReportIR, RawCitation, RawSection
-from ir_storyboard.channels.llm_report.citations import extract_citations, _normalize_url
-from ir_storyboard.channels.llm_report.classifiers.source_channel import classify_url
+from ir_storyboard.ingest.ir import LLMReportIR, RawCitation, RawSection
+from ir_storyboard.ingest.citations import extract_citations, _normalize_url
+from ir_storyboard.ingest.classifiers.source_channel import classify_url
 
 FIXTURES = Path(__file__).parent / "fixtures" / "llm_report"
 GONKA_DOCX = FIXTURES / "gonka_chatgpt_deep_research.docx"
@@ -175,7 +175,7 @@ def test_extract_deterministic():
 @pytest.mark.skipif(not GONKA_DOCX.exists(), reason="gonka fixture not found")
 def test_extract_gonka_citations():
     """On the real fixture, we expect 7 unique canonical URLs."""
-    from ir_storyboard.channels.llm_report.loaders.docx_loader import load
+    from ir_storyboard.ingest.loaders.docx_loader import load
 
     ir = load(GONKA_DOCX)
     result = extract_citations(ir)

@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
-from ... import matrix, db as _db
-from ...llm import ExtractedFact, extract_facts_from_llm_report, extract_facts_from_full_document
-from ...models import LAYERS
+from .. import matrix, db as _db
+from ..llm import ExtractedFact, extract_facts_from_llm_report, extract_facts_from_full_document
+from ..models import LAYERS
 from .citations import ResolvedCitation, extract_citations
 from .classifiers.section_to_layer import suggest_subsection, SKIP_SECTION_HINTS
 from .snippet_resolver import ResolvedFact, resolve_snippets

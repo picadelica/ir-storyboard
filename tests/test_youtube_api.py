@@ -61,8 +61,8 @@ def _make_meta(video_id="testVID"):
 
 
 def _make_preview_result(video_id="testVID"):
-    from ir_storyboard.channels.llm_report.snippet_anchor import AnchoredFact
-    from ir_storyboard.channels.llm_report.youtube_pipeline import YouTubePreviewResult
+    from ir_storyboard.ingest.snippet_anchor import AnchoredFact
+    from ir_storyboard.ingest.youtube_pipeline import YouTubePreviewResult
 
     facts = [
         AnchoredFact(
@@ -99,9 +99,9 @@ def _make_preview_result(video_id="testVID"):
 
 
 def _make_preview_result_with_l5(video_id="testVID"):
-    from ir_storyboard.channels.llm_report.snippet_anchor import AnchoredFact
-    from ir_storyboard.channels.llm_report.layer_guard import SkippedFact
-    from ir_storyboard.channels.llm_report.youtube_pipeline import YouTubePreviewResult
+    from ir_storyboard.ingest.snippet_anchor import AnchoredFact
+    from ir_storyboard.ingest.layer_guard import SkippedFact
+    from ir_storyboard.ingest.youtube_pipeline import YouTubePreviewResult
 
     allowed = [
         AnchoredFact(
@@ -141,7 +141,7 @@ def _make_preview_result_with_l5(video_id="testVID"):
 
 def test_preview_returns_facts_with_anchors(client, tmp_path):
     with patch(
-        "ir_storyboard.channels.llm_report.youtube_pipeline.run_youtube_preview",
+        "ir_storyboard.ingest.youtube_pipeline.run_youtube_preview",
         return_value=_make_preview_result(),
     ):
         resp = client.post(
@@ -159,7 +159,7 @@ def test_preview_returns_facts_with_anchors(client, tmp_path):
 
 def test_preview_separates_skipped_l5_facts(client, tmp_path):
     with patch(
-        "ir_storyboard.channels.llm_report.youtube_pipeline.run_youtube_preview",
+        "ir_storyboard.ingest.youtube_pipeline.run_youtube_preview",
         return_value=_make_preview_result_with_l5(),
     ):
         resp = client.post(
@@ -177,7 +177,7 @@ def test_preview_separates_skipped_l5_facts(client, tmp_path):
 def _seed_preview_audit(tmp_path, preview_result, client_id="test_client"):
     """Write the preview audit row that run_youtube_preview would normally write."""
     import sqlite3 as _sq
-    from ir_storyboard.channels.llm_report.youtube_pipeline import (
+    from ir_storyboard.ingest.youtube_pipeline import (
         _ensure_audit_table_youtube, _anchored_to_dict,
     )
     db_path = tmp_path / "test_yt.db"
@@ -185,7 +185,7 @@ def _seed_preview_audit(tmp_path, preview_result, client_id="test_client"):
     conn.row_factory = _sq.Row
     _ensure_audit_table_youtube(conn)
 
-    from ir_storyboard.channels.llm_report.snippet_anchor import AnchoredFact
+    from ir_storyboard.ingest.snippet_anchor import AnchoredFact
     facts_data = [_anchored_to_dict(f) for f in preview_result.facts]
     skipped_data = [
         {"text": s.fact.text, "reason": s.reason,

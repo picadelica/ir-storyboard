@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from ir_storyboard.channels.llm_report.classifiers.section_to_layer import suggest_subsection
-from ir_storyboard.channels.llm_report.classifiers.flag_heuristics import apply_heuristics
+from ir_storyboard.ingest.classifiers.section_to_layer import suggest_subsection
+from ir_storyboard.ingest.classifiers.flag_heuristics import apply_heuristics
 
 
 # ── section → layer mapper ────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ def test_no_override_preserves_grey():
 
 def _make_citation_index():
     """Minimal stub citation index for tests."""
-    from ir_storyboard.channels.llm_report.citations import ResolvedCitation
+    from ir_storyboard.ingest.citations import ResolvedCitation
     return {
         1: ResolvedCitation(1, "https://businesswire.com/xyz", "BW Press Release",
                             "BusinessWire", "archival", "archival domain"),

@@ -57,7 +57,7 @@ def _make_conn(tmp_path):
 
 def _seed_transcript_cache(conn, video_id=KNOWN_VIDEO_ID):
     """Pre-seed youtube_transcripts so get_or_transcribe returns cached data."""
-    from ir_storyboard.channels.llm_report.loaders.transcriber import _ensure_transcripts_table
+    from ir_storyboard.ingest.loaders.transcriber import _ensure_transcripts_table
     _ensure_transcripts_table(conn)
     conn.execute(
         """INSERT OR REPLACE INTO youtube_transcripts
@@ -82,10 +82,10 @@ def _seed_transcript_cache(conn, video_id=KNOWN_VIDEO_ID):
 
 def test_e2e_cached_pipeline(tmp_path):
     """Full pipeline from cached transcript → facts in matrix. No network calls."""
-    from ir_storyboard.channels.llm_report.loaders.transcriber import (
+    from ir_storyboard.ingest.loaders.transcriber import (
         TranscriptSegment, Transcript,
     )
-    from ir_storyboard.channels.llm_report.loaders.youtube_url import YouTubeVideoMeta
+    from ir_storyboard.ingest.loaders.youtube_url import YouTubeVideoMeta
 
     conn = _make_conn(tmp_path)
     _seed_transcript_cache(conn)
@@ -175,21 +175,21 @@ def test_e2e_cached_pipeline(tmp_path):
         ]
     })
 
-    from ir_storyboard.channels.llm_report.youtube_pipeline import (
+    from ir_storyboard.ingest.youtube_pipeline import (
         run_youtube_preview, run_youtube_commit,
     )
 
     with patch(
-        "ir_storyboard.channels.llm_report.youtube_pipeline.normalize_url",
+        "ir_storyboard.ingest.youtube_pipeline.normalize_url",
         return_value=KNOWN_CANONICAL,
     ), patch(
-        "ir_storyboard.channels.llm_report.youtube_pipeline.fetch_metadata",
+        "ir_storyboard.ingest.youtube_pipeline.fetch_metadata",
         return_value=mock_meta,
     ), patch(
-        "ir_storyboard.channels.llm_report.youtube_pipeline.get_transcriber",
+        "ir_storyboard.ingest.youtube_pipeline.get_transcriber",
         return_value=_make_mock_transcriber(),
     ), patch(
-        "ir_storyboard.channels.llm_report.youtube_pipeline.get_or_transcribe",
+        "ir_storyboard.ingest.youtube_pipeline.get_or_transcribe",
         return_value=Transcript(
             segments=[TranscriptSegment(**s) for s in MOCK_TRANSCRIPT_SEGMENTS],
             language="en",
@@ -249,11 +249,11 @@ def test_e2e_cached_pipeline(tmp_path):
 
 def test_e2e_idempotent_replay(tmp_path):
     """Second ingest of same video → 0 new facts committed."""
-    from ir_storyboard.channels.llm_report.loaders.transcriber import (
+    from ir_storyboard.ingest.loaders.transcriber import (
         TranscriptSegment, Transcript,
     )
-    from ir_storyboard.channels.llm_report.loaders.youtube_url import YouTubeVideoMeta
-    from ir_storyboard.channels.llm_report.youtube_pipeline import (
+    from ir_storyboard.ingest.loaders.youtube_url import YouTubeVideoMeta
+    from ir_storyboard.ingest.youtube_pipeline import (
         run_youtube_preview, run_youtube_commit,
     )
 
@@ -293,13 +293,13 @@ def test_e2e_idempotent_replay(tmp_path):
     )
 
     mocks = [
-        patch("ir_storyboard.channels.llm_report.youtube_pipeline.normalize_url",
+        patch("ir_storyboard.ingest.youtube_pipeline.normalize_url",
               return_value=KNOWN_CANONICAL),
-        patch("ir_storyboard.channels.llm_report.youtube_pipeline.fetch_metadata",
+        patch("ir_storyboard.ingest.youtube_pipeline.fetch_metadata",
               return_value=mock_meta),
-        patch("ir_storyboard.channels.llm_report.youtube_pipeline.get_transcriber",
+        patch("ir_storyboard.ingest.youtube_pipeline.get_transcriber",
               return_value=_make_mock_transcriber()),
-        patch("ir_storyboard.channels.llm_report.youtube_pipeline.get_or_transcribe",
+        patch("ir_storyboard.ingest.youtube_pipeline.get_or_transcribe",
               return_value=transcript),
         patch("ir_storyboard.llm.generate", return_value=simple_fact),
     ]
@@ -343,7 +343,7 @@ def test_e2e_real_youtube_video(tmp_path):
 
     conn = _make_conn(tmp_path)
 
-    from ir_storyboard.channels.llm_report.youtube_pipeline import (
+    from ir_storyboard.ingest.youtube_pipeline import (
         run_youtube_preview, run_youtube_commit,
     )
 

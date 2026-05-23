@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from ir_storyboard.channels.llm_report.loaders.youtube_url import (
+from ir_storyboard.ingest.loaders.youtube_url import (
     normalize_url,
     fetch_metadata,
     YouTubeVideoMeta,
@@ -49,7 +49,7 @@ def test_normalize_rejects_non_youtube():
 def test_normalize_tco_shortlink():
     fake_final = "https://www.youtube.com/watch?v=abc123XYZ"
     with patch(
-        "ir_storyboard.channels.llm_report.loaders.youtube_url._resolve_shortlink",
+        "ir_storyboard.ingest.loaders.youtube_url._resolve_shortlink",
         return_value=fake_final,
     ):
         result = normalize_url("https://t.co/SomeShortCode")
@@ -59,7 +59,7 @@ def test_normalize_tco_shortlink():
 def test_normalize_bitly_shortlink():
     fake_final = "https://youtu.be/abc123XYZ"
     with patch(
-        "ir_storyboard.channels.llm_report.loaders.youtube_url._resolve_shortlink",
+        "ir_storyboard.ingest.loaders.youtube_url._resolve_shortlink",
         return_value=fake_final,
     ):
         result = normalize_url("https://bit.ly/SomeCode")
@@ -101,14 +101,14 @@ def _mock_yt_dlp(fake_info: dict):
 def test_fetch_metadata_stub():
     """fetch_metadata correctly maps yt-dlp info dict to YouTubeVideoMeta."""
     import importlib
-    import ir_storyboard.channels.llm_report.loaders.youtube_url as mod
+    import ir_storyboard.ingest.loaders.youtube_url as mod
 
     canonical = "https://www.youtube.com/watch?v=abc123XYZ"
     fake_info = _make_yt_info()
 
     with _mock_yt_dlp(fake_info):
         importlib.reload(mod)
-        from ir_storyboard.channels.llm_report.loaders.youtube_url import fetch_metadata as fm
+        from ir_storyboard.ingest.loaders.youtube_url import fetch_metadata as fm
         meta = fm(canonical)
 
     assert meta.video_id == "abc123XYZ"
@@ -123,14 +123,14 @@ def test_fetch_metadata_stub():
 def test_fetch_metadata_upload_date_formatted():
     """upload_date '20260521' → '2026-05-21'."""
     import importlib
-    import ir_storyboard.channels.llm_report.loaders.youtube_url as mod
+    import ir_storyboard.ingest.loaders.youtube_url as mod
 
     canonical = "https://www.youtube.com/watch?v=abc123XYZ"
     fake_info = _make_yt_info(upload_date="20260521")
 
     with _mock_yt_dlp(fake_info):
         importlib.reload(mod)
-        from ir_storyboard.channels.llm_report.loaders.youtube_url import fetch_metadata as fm
+        from ir_storyboard.ingest.loaders.youtube_url import fetch_metadata as fm
         meta = fm(canonical)
 
     assert meta.upload_date == "2026-05-21"
