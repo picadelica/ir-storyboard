@@ -651,25 +651,34 @@ def add_track(client_id: str, quarter: str, t: TrackCreate,
 
 @app.post("/api/clients/{client_id}/cycles/weekly", response_model=ArtifactOut)
 def cycle_weekly(client_id: str, body: WeeklyRunIn, conn=Depends(get_conn)):
-    res = run_weekly(conn, client_id=client_id, quarter=body.quarter,
-                     week_label=body.week_label, max_facts=body.max_facts)
+    try:
+        res = run_weekly(conn, client_id=client_id, quarter=body.quarter,
+                         week_label=body.week_label, max_facts=body.max_facts)
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     synthesize_work_items(conn, client_id, quarter=body.quarter)
     return _artifact_payload(conn, res["artifact_id"])
 
 
 @app.post("/api/clients/{client_id}/cycles/event", response_model=ArtifactOut)
 def cycle_event(client_id: str, body: EventRunIn, conn=Depends(get_conn)):
-    res = run_event(conn, client_id=client_id, event_text=body.event_text,
-                    landed_subsection_id=body.landed_subsection_id,
-                    quarter=body.quarter)
+    try:
+        res = run_event(conn, client_id=client_id, event_text=body.event_text,
+                        landed_subsection_id=body.landed_subsection_id,
+                        quarter=body.quarter)
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return _artifact_payload(conn, res["artifact_id"])
 
 
 @app.post("/api/clients/{client_id}/cycles/quarterly", response_model=ArtifactOut)
 def cycle_quarterly(client_id: str, body: QuarterlyRunIn, conn=Depends(get_conn)):
-    res = run_quarterly(conn, client_id=client_id, quarter=body.quarter,
-                        traversal=body.traversal,
-                        facts_per_subsection=body.facts_per_subsection)
+    try:
+        res = run_quarterly(conn, client_id=client_id, quarter=body.quarter,
+                            traversal=body.traversal,
+                            facts_per_subsection=body.facts_per_subsection)
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return _artifact_payload(conn, res["artifact_id"])
 
 
