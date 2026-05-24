@@ -10,70 +10,47 @@
 
 **Последнее обновление:** 2026-05-24
 **Ветка:** `feat/v2`
-**Working tree:** clean (untracked: `12.jpeg` — не относится к проекту)
-**HEAD = origin/feat/v2:** `3f1eaa2 fix: cycles — return 422 instead of 500 when plan is missing`
+**Working tree:** clean (untracked: `12.jpeg`, `DIARIZATION_PLAN.md`)
+**HEAD = origin/feat/v2:** `7d48fb0 fix: stop persisting preview/factEdits/skippedEdits to localStorage`
+**Прод:** в синке с HEAD, фронт и бэк пересобраны.
 
-## Что только что сделано (сессия 2026-05-24)
+## Что сделано за сессию 2026-05-24
 
-**Cycles → 422 вместо 500 при отсутствии плана.** Пользователь нажал
-Weekly бриф для `gonkaai` на 2026Q2 и получил безликий «500 Internal
-Server Error». Причина — `run_weekly` поднимает `RuntimeError("No
-narrative tracks for gonkaai in 2026Q2. Define a plan first.")`, и
-FastAPI отдавал его как пустой 500. Завернул три cycle-endpoint'а
-(`cycle_weekly` / `cycle_event` / `cycle_quarterly`) в `try/except
-RuntimeError` → `HTTPException(422, detail=str(e))`. Фронт в
-`CycleRunner.tsx:130` уже рендерит `(run.error as Error).message`, и
-`api.ts:21` пакует detail в текст ошибки, так что пользователь теперь
-видит реальное сообщение про отсутствие плана.
+1. **cycles → 422** (`3f1eaa2`). `run_weekly/event/quarterly` поднимали
+   `RuntimeError` при отсутствии narrative track — FastAPI отдавал голый
+   500. Завернули три endpoint-а в `try/except RuntimeError →
+   HTTPException(422)`. Фронт уже рендерит `detail` в CycleRunner.
 
-## ⚠ Что висит
+2. **Plan tab** (`3ad5a45`). Новая вкладка между Matrix и Ingest.
+   Список треков на квартал + форма «+ New track» (name / angle /
+   target layers или subsections / priority). В CycleRunner при ошибке
+   про tracks — amber-карточка с кнопкой «Открыть Plan →».
 
-1. **Прод не показывает новый фронтенд** (с прошлой сессии).
-   `b563f8a`+`d5187ff` (Research extractor + YouTube redirect) на проде
-   не видны: старая кнопка «Classify →», нет pink-баннера. Нужна
-   пересборка frontend-контейнера:
-   ```bash
-   ssh root@216.57.108.107 'cd /opt/ir-storyboard && git pull && \
-     docker compose build --no-cache frontend && \
-     docker compose up -d frontend && \
-     docker compose up -d --build backend'
-   ```
-   Бэк тоже пересобрать ради `3f1eaa2`. После — Cmd+Shift+R в браузере.
-   Проверить: `docker exec ir-storyboard-frontend-1 grep -c "Process via YouTube" /usr/share/nginx/html/assets/*.js`.
+3. **USER_GUIDE.md** (`55b0993`). Руководство пользователя: 8
+   task-oriented сценариев (новый клиент → план → 3 типа ingest →
+   weekly → work → анализ дыр), глоссарий, справочник по 11 вкладкам,
+   таблица ошибок, FAQ, known limitations. 517 строк.
 
-2. **У gonkaai нет narrative track на 2026Q2.** Weekly cycle by design
-   track-ориентирован. После деплоя `3f1eaa2` пользователь увидит
-   422-ошибку с текстом про план — но чтобы реально получить бриф,
-   нужно сначала завести track во вкладке Plan (name / target
-   layers|subsections / angle), затем повторить Weekly.
-
-## Открытые вопросы (с прошлой сессии, не решены)
-
-- **Filter/sort в preview** (по layer / flag / timestamp / edited /
-  dropped) — 173 факта в одном списке.
-- **Cycles + Methodology** — `cycles/weekly|event|quarterly` пока не
-  читают `tone_preset` / `descriptions` (только extractor'ы). Нужно?
-- **Per-ingest override тона** — сейчас только per-client.
-- **Backfill тестов** — sonnet fallback / preview-by-id / methodology
-  endpoints / `_build_subsection_list` / новый 422-wrap на cycles.
-- **Embedding-dedup / speaker diarization / параллелизация chunks** — v2.
+4. **localStorage cleanup** (`7d48fb0`). YouTube ingest больше не
+   сохраняет `preview` (200-500 KB JSON) и `factEdits`/`skippedEdits`
+   в localStorage. Хранятся только `url`, `jobId`, `jobStatus`, `screen`
+   (~200 байт). Если вернулся после того как preview уже готов —
+   попадаешь на input с сохранённым URL, Preview берётся из History.
 
 ## Следующие разумные шаги
 
-1. **Frontend rebuild на проде** (см. блок «Что висит»).
-2. **Завести track для gonkaai на 2026Q2** и прогнать Weekly заново.
-3. Filter/sort в preview.
-4. Tone в cycles — пропихнуть `tone_preset` в `cycles/*.py` `generate(...)`.
+1. **Завести track для gonkaai на 2026Q2** → Plan-вкладка → + New track
+   → повторить Weekly бриф.
+2. **Filter/sort в YouTube preview** — 173 факта в одном списке тяжело
+   читать. По layer / flag / timestamp / dropped.
+3. **Tone в cycles** — пропихнуть `tone_preset` в `cycles/*.py`
+   `generate(...)`, чтобы weekly/event/quarterly артефакты звучали
+   единообразно с экстракторами.
+4. **Backfill тестов** — cycles 422-wrap, Plan endpoints, localStorage
+   cleanup.
 
-## Как обновлять этот файл
+## Открытые вопросы
 
-В конце сессии, когда что-то значимое сделано:
-
-```
-1. Обновить "Последнее обновление" — сегодняшняя дата.
-2. Обновить "HEAD" — `git log -1 --oneline`.
-3. Перезаписать раздел "Что только что сделано" — что закрыли в этой сессии.
-4. Если открыты вопросы — в "Открытые вопросы".
-5. Скорректировать "Следующий разумный шаг".
-6. git add NEXT.md && git commit -m "chore: update NEXT.md"
-```
+- Edit/delete треков через UI — пока нет (backend только POST/GET).
+- Per-ingest override тона — сейчас только per-client.
+- Embedding-dedup / speaker diarization / параллелизация chunks — v2.
