@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { Layer } from "../types";
 
@@ -13,6 +14,7 @@ interface Props {
 
 export default function CycleRunner({ clientId, quarter, kind, onClose, onArtifactCreated }: Props) {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const layers = useQuery<Layer[]>({ queryKey: ["layers"], queryFn: api.layers });
 
   // Weekly state
@@ -125,11 +127,38 @@ export default function CycleRunner({ clientId, quarter, kind, onClose, onArtifa
             </>
           )}
 
-          {run.isError && (
-            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">
-              {(run.error as Error).message}
-            </div>
-          )}
+          {run.isError && (() => {
+            const msg = (run.error as Error).message;
+            const isPlanGap = /narrative tracks/i.test(msg);
+            if (isPlanGap) {
+              return (
+                <div className="text-xs bg-amber-50 border border-amber-300 rounded p-3 space-y-2">
+                  <div className="text-amber-900 font-medium">
+                    Для квартала {quarter} ещё не заведён narrative track.
+                  </div>
+                  <div className="text-amber-800">
+                    Cycle track-ориентирован by design — без активного трека он не
+                    знает на каких слоях/ячейках фокусироваться. Заведи трек во
+                    вкладке Plan и повтори.
+                  </div>
+                  <button
+                    onClick={() => {
+                      onClose();
+                      nav(`/clients/${clientId}/plan`);
+                    }}
+                    className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-ink/90"
+                  >
+                    Открыть Plan →
+                  </button>
+                </div>
+              );
+            }
+            return (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">
+                {msg}
+              </div>
+            );
+          })()}
         </div>
 
         <div className="px-5 py-4 border-t border-ink-line bg-slate-50 flex justify-end gap-2">

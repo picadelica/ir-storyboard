@@ -16,6 +16,7 @@ import ResearchView from "./components/ResearchView";
 import IngestLLMReport from "./components/IngestLLMReport";
 import IngestYouTube from "./components/IngestYouTube";
 import MethodologyView from "./components/MethodologyView";
+import PlanView from "./components/PlanView";
 
 export default function App() {
   return (
@@ -109,6 +110,9 @@ function ClientPage() {
           {activeTab === "methodology" && (
             <MethodologyView clientId={clientId!} />
           )}
+          {activeTab === "plan" && (
+            <PlanView clientId={clientId!} quarter={quarter} layers={layers.data} />
+          )}
         </div>
       </main>
 
@@ -141,6 +145,7 @@ function ClientPage() {
 function Tabs({ clientId, activeTab }: { clientId: string; activeTab: string }) {
   const tabs = [
     { id: "matrix",      label: "Matrix" },
+    { id: "plan",        label: "Plan" },
     { id: "ingest",      label: "Ingest" },
     { id: "youtube",     label: "YouTube" },
     { id: "research",    label: "Research" },
