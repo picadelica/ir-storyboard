@@ -42,14 +42,17 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
     L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${s.name} (${L.name})` }))
   );
 
-  const [screen, setScreen] = useState<"input" | "history" | "preview" | "done">(lsSaved.screen || "input");
+  // Restore only lightweight fields — preview JSON can be 200-500 KB and is
+  // already stored server-side (reopen via History).
+  const restoredScreen = lsSaved.screen === "preview" ? "input" : (lsSaved.screen || "input");
+  const [screen, setScreen] = useState<"input" | "history" | "preview" | "done">(restoredScreen);
   const [url, setUrl] = useState(lsSaved.url || "");
-  const [preview, setPreview] = useState<YouTubePreviewResult | null>(lsSaved.preview || null);
+  const [preview, setPreview] = useState<YouTubePreviewResult | null>(null);
   const [readOnly, setReadOnly] = useState(false);
   const [dropped, setDropped] = useState<Set<number>>(new Set());
   const [overrides, setOverrides] = useState<Set<number>>(new Set());
-  const [factEdits, setFactEdits] = useState<Record<number, FactEdit>>(lsSaved.factEdits || {});
-  const [skippedEdits, setSkippedEdits] = useState<Record<number, FactEdit>>(lsSaved.skippedEdits || {});
+  const [factEdits, setFactEdits] = useState<Record<number, FactEdit>>({});
+  const [skippedEdits, setSkippedEdits] = useState<Record<number, FactEdit>>({});
   const [expertEmail, setExpertEmail] = useState("");
   const [jobId, setJobId] = useState<string | null>(lsSaved.jobId || null);
   const [jobStatus, setJobStatus] = useState<string>(lsSaved.jobStatus || "");
@@ -125,8 +128,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             setFactEdits({});
             setSkippedEdits({});
             setScreen("preview");
-            saveState({ screen: "preview", preview: status.result, jobStatus: "done",
-                       factEdits: {}, skippedEdits: {} });
+            saveState({ screen: "preview", jobStatus: "done" });
           } else if (status.status === "error") {
             stopPolling();
             saveState({ jobStatus: "error" });
@@ -157,8 +159,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             setFactEdits({});
             setSkippedEdits({});
             setScreen("preview");
-            saveState({ screen: "preview", preview: status.result, jobStatus: "done",
-                       factEdits: {}, skippedEdits: {} });
+            saveState({ screen: "preview", jobStatus: "done" });
           } else if (status.status === "error") {
             stopPolling();
             saveState({ jobStatus: "error" });
@@ -219,7 +220,6 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         if (v === "" || v === undefined || v === null) delete (merged as any)[k];
       });
       if (Object.keys(merged).length === 0) delete next[idx]; else next[idx] = merged;
-      saveState({ factEdits: next });
       return next;
     });
   }
@@ -253,7 +253,6 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         if (v === "" || v === undefined || v === null) delete (merged as any)[k];
       });
       if (Object.keys(merged).length === 0) delete next[idx]; else next[idx] = merged;
-      saveState({ skippedEdits: next });
       return next;
     });
   }
@@ -302,7 +301,6 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
           next[idx] = newEdit;
         }
       });
-      saveState({ factEdits: next });
       return next;
     });
   }
@@ -327,7 +325,6 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
           next[idx] = newEdit;
         }
       });
-      saveState({ factEdits: next });
       return next;
     });
   }
