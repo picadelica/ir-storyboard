@@ -66,6 +66,8 @@ class ClientOut(BaseModel):
     aliases: Optional[List[str]] = None
     notes: Optional[str] = None
     tone_preset: Optional[str] = None
+    created_at: Optional[str] = None
+    created_by: Optional[str] = None
 
 
 class SeedFactIn(BaseModel):
@@ -198,6 +200,8 @@ class FactOut(BaseModel):
     source_url: Optional[str] = None
     source_archive_url: Optional[str] = None
     ingest_audit_id: Optional[str] = None
+    rationale: str = ""
+    created_by: Optional[str] = None
 
 
 class FactCreate(BaseModel):
@@ -208,6 +212,7 @@ class FactCreate(BaseModel):
     source_url: str = ""
     evidence_snippet: str = ""
     confidence: float = 1.0
+    rationale: Optional[str] = None
 
     @model_validator(mode="after")
     def _check_provenance(self):
@@ -225,6 +230,7 @@ class FactUpdate(BaseModel):
     text: Optional[str] = None
     flag: Optional[str] = Field(default=None, pattern="^(green|red|grey)$")
     confidence: Optional[float] = None
+    rationale: Optional[str] = None
 
 
 class TrackOut(BaseModel):
@@ -326,6 +332,8 @@ def _row_to_fact(row) -> FactOut:
         source_url=source_url,
         source_archive_url=row["source_archive_url"] if "source_archive_url" in keys else None,
         ingest_audit_id=row["ingest_audit_id"] if "ingest_audit_id" in keys else None,
+        rationale=(row["rationale"] if "rationale" in keys else "") or "",
+        created_by=row["created_by"] if "created_by" in keys else None,
     )
 
 
