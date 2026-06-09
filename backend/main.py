@@ -490,6 +490,46 @@ def upsert_client(c: ClientOut, conn=Depends(get_conn)):
     return _row_to_client(row) if row else c
 
 
+class ClientPatch(BaseModel):
+    name: Optional[str] = None
+    sector: Optional[str] = None
+    one_liner: Optional[str] = None
+    founder_name: Optional[str] = None
+    founder_handle: Optional[str] = None
+    aliases: Optional[List[str]] = None
+    notes: Optional[str] = None
+    tone_preset: Optional[str] = None
+
+
+@app.patch("/api/clients/{client_id}", response_model=ClientOut)
+def patch_client(client_id: str, u: ClientPatch, conn=Depends(get_conn)):
+    row = conn.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "client not found")
+
+    updates = u.model_dump(exclude_unset=True)
+    if not updates:
+        full = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+        return _row_to_client(full)
+
+    sets: List[str] = []
+    params: List[Any] = []
+    for field, value in updates.items():
+        if field == "aliases":
+            sets.append("aliases=?")
+            params.append(json.dumps(value or []))
+        else:
+            sets.append(f"{field}=?")
+            params.append(value)
+
+    params.append(client_id)
+    conn.execute(f"UPDATE clients SET {', '.join(sets)} WHERE id=?", params)
+    conn.commit()
+
+    full = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+    return _row_to_client(full)
+
+
 def _do_import_seed(conn, client_id: str, seed: ClientSeedIn) -> SeedImportResult:
     """Core import logic shared by JSON and YAML endpoints."""
     c = seed.client
