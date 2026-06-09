@@ -600,11 +600,15 @@ def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
                                title=f.source_title or "",
                                url=f.source_url or "",
                                archive_url=archive_url or "")
-    fid = matrix.add_fact(
-        conn, client_id=client_id, subsection_id=subsection_id,
-        text=f.text, flag=f.flag, source_id=src_id, confidence=f.confidence,
-        evidence_snippet=f.evidence_snippet,
-    )
+    try:
+        fid = matrix.add_fact(
+            conn, client_id=client_id, subsection_id=subsection_id,
+            text=f.text, flag=f.flag, source_id=src_id, confidence=f.confidence,
+            evidence_snippet=f.evidence_snippet,
+            rationale=f.rationale,
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
     # async save if no snapshot found
     if f.source_url and not archive_url and f.channel in ("online_research", "online_interview", "archival"):
@@ -618,8 +622,11 @@ def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
 def update_fact(fact_id: int, u: FactUpdate, conn=Depends(get_conn)):
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
-    matrix.update_fact(conn, fact_id, text=u.text, flag=u.flag,
-                       confidence=u.confidence)
+    try:
+        matrix.update_fact(conn, fact_id, text=u.text, flag=u.flag,
+                           confidence=u.confidence, rationale=u.rationale)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -921,6 +928,7 @@ class ConfirmFactIn(BaseModel):
     source_title: str = ""
     evidence_snippet: str = ""
     confidence: float = 1.0
+    rationale: Optional[str] = None
 
 
 class IngestConfirmIn(BaseModel):
@@ -1091,9 +1099,13 @@ def research_ingest_confirm(client_id: str, body: IngestConfirmIn, conn=Depends(
         src_id = matrix.add_source(conn, channel=f.channel,
                                    title=f.source_title, url=f.source_url,
                                    archive_url=archive_url)
-        fid = matrix.add_fact(conn, client_id=client_id, subsection_id=f.subsection_id,
-                              text=f.text, flag=f.flag, source_id=src_id,
-                              confidence=f.confidence, evidence_snippet=snippet)
+        try:
+            fid = matrix.add_fact(conn, client_id=client_id, subsection_id=f.subsection_id,
+                                  text=f.text, flag=f.flag, source_id=src_id,
+                                  confidence=f.confidence, evidence_snippet=snippet,
+                                  rationale=f.rationale)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
         if f.source_url and not archive_url and f.channel in ("online_research", "online_interview", "archival"):
             enqueue_save(f.source_url, src_id, db.connect)
         written.append(fid)
@@ -1146,6 +1158,7 @@ class ResolvedFactOut(BaseModel):
     evidence_snippet: str
     needs_review: bool
     snippet_source: str
+    rationale: str = ""
 
 
 class IngestPreviewOut(BaseModel):
@@ -1164,6 +1177,7 @@ class IngestEditIn(BaseModel):
     new_text: Optional[str] = None
     new_subsection_id: Optional[str] = None
     new_flag: Optional[str] = None
+    new_rationale: Optional[str] = None
 
 
 class IngestCommitIn(BaseModel):
@@ -1303,6 +1317,7 @@ def llm_report_ingest_commit(
             cite_ids=f.cite_ids,
             confidence=f.confidence,
             raw_paraphrase=f.raw_paraphrase,
+            rationale=f.rationale,
             evidence_snippet=f.evidence_snippet,
             needs_review=f.needs_review,
             snippet_source=f.snippet_source,  # type: ignore[arg-type]
@@ -1467,6 +1482,7 @@ class YouTubeFactOut(BaseModel):
     snippet_end_sec: float
     needs_review: bool
     layer_warning: bool
+    rationale: str = ""
 
 
 class YouTubeSkippedOut(BaseModel):
@@ -1483,6 +1499,7 @@ class YouTubeSkippedOut(BaseModel):
     snippet_start_sec: float = 0.0
     snippet_end_sec: float = 0.0
     override_allowed: bool = True
+    rationale: str = ""
 
 
 class YouTubeMetaOut(BaseModel):
@@ -1575,6 +1592,7 @@ def _preview_out_from_result(result) -> YouTubePreviewOut:
                 snippet_end_sec=f.snippet_end_sec,
                 needs_review=f.needs_review,
                 layer_warning=f.layer_warning,
+                rationale=getattr(f, "rationale", "") or "",
             )
             for f in result.facts
         ],
@@ -1593,6 +1611,7 @@ def _preview_out_from_result(result) -> YouTubePreviewOut:
                 snippet_start_sec=s.fact.snippet_start_sec,
                 snippet_end_sec=s.fact.snippet_end_sec,
                 override_allowed=s.override_allowed,
+                rationale=getattr(s.fact, "rationale", "") or "",
             )
             for s in result.skipped
         ],

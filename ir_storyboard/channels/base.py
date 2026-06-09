@@ -30,6 +30,7 @@ class PreFact:
     subsection_id: str
     flag: str               # green / red / grey
     confidence: float = 1.0
+    rationale: str = ""
 
 
 @dataclass
@@ -77,6 +78,7 @@ class Channel(ABC):
                     subsection_id=pf.subsection_id,
                     text=pf.text, flag=pf.flag,
                     source_id=source_id, confidence=pf.confidence,
+                    rationale=pf.rationale,
                 )
                 written.append(fid)
             return IngestResult(source_id, written, skipped, warnings)
@@ -96,12 +98,19 @@ class Channel(ABC):
                     f"skipped: channel {self.code} cannot fill layer {layer_id}"
                 )
                 continue
-            fid = matrix.add_fact(
-                conn, client_id=payload.client_id,
-                subsection_id=cand.suggested_subsection_id,
-                text=para, flag=cand.suggested_flag,
-                source_id=source_id, confidence=cand.confidence,
-            )
+            try:
+                fid = matrix.add_fact(
+                    conn, client_id=payload.client_id,
+                    subsection_id=cand.suggested_subsection_id,
+                    text=para, flag=cand.suggested_flag,
+                    source_id=source_id, confidence=cand.confidence,
+                    rationale=cand.rationale,
+                )
+            except ValueError as e:
+                # Likely "red fact requires rationale" — drop quietly with a warning.
+                skipped.append(para[:120])
+                warnings.append(f"skipped fact (validation): {e}")
+                continue
             written.append(fid)
 
         return IngestResult(source_id, written, skipped, warnings)

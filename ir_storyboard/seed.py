@@ -28,8 +28,8 @@ ONE_LINER = ("Equity pooling for unicorn founders — turn paper-billion stakes 
              "into a diversified, liquid pool, regulated under SEC.")
 
 
-def _pf(text: str, sid: str, flag: str = "green") -> PreFact:
-    return PreFact(text=text, subsection_id=sid, flag=flag)
+def _pf(text: str, sid: str, flag: str = "green", rationale: str = "") -> PreFact:
+    return PreFact(text=text, subsection_id=sid, flag=flag, rationale=rationale)
 
 
 def load_accumulator(conn: sqlite3.Connection) -> None:
@@ -127,7 +127,9 @@ def load_accumulator(conn: sqlite3.Connection) -> None:
             _pf("Видение: финансовые 'рельсы' для частного техсектора объёмом $6 трлн", "7.1"),
             _pf("Founders OS — экосистема (Accumulator + Fundraisly + KamaLama)", "7.1"),
             _pf("Цена сложности: exchange funds заметно сложнее обычных secondaries — "
-                "требуют доверия к управляющему и юридической грамотности", "7.2", flag="red"),
+                "требуют доверия к управляющему и юридической грамотности", "7.2", flag="red",
+                rationale="Сложность продукта повышает порог входа и требует "
+                          "повышенного due diligence у инвестора и фаундера."),
             _pf("Защита 'крови инноваций' — фаундеров и ангелов от 'смерти на бумаге'", "7.3"),
             _pf("С 1996 года число публичных компаний в США сократилось почти вдвое (с >7000 до <4000)", "8.1"),
             _pf("Stay Private Longer: средний возраст выхода на IPO вырос до 9–11 лет", "8.1"),
@@ -137,11 +139,15 @@ def load_accumulator(conn: sqlite3.Connection) -> None:
                 "с 2% до 7% от global AUM за 20 лет", "8.2"),
             _pf("Вторичный рынок достиг $110 млрд только в H1 2025", "8.2"),
             _pf("Геополитическая напряжённость, тарифная инфляция и волатильность ставок "
-                "усложняют underwriting активов", "8.2", flag="red"),
+                "усложняют underwriting активов", "8.2", flag="red",
+                rationale="Макро-волатильность напрямую снижает достоверность "
+                          "оценок частных активов в пуле."),
             _pf("Использование Rule 506(b) и Section 3(c)(1) обеспечивает юридическую чистоту "
                 "обмена акций; JOBS Act 2012 поднял лимит акционеров до 2000", "8.3"),
             _pf("В ЕС трансграничные операции фондов остаются дорогими и сложными "
-                "из-за фрагментированного регулирования", "8.3", flag="red"),
+                "из-за фрагментированного регулирования", "8.3", flag="red",
+                rationale="Регуляторная фрагментация ЕС ограничивает географическое "
+                          "масштабирование equity pooling за пределы США."),
         ],
     ))
 

@@ -19,7 +19,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +362,21 @@ _try_init_anthropic()
 _try_init_tavily()
 
 
+# ─────────────────── RATIONALE prompt fragment (shared by all extractors) ────
+
+_RATIONALE_RULES = """\
+RATIONALE field rules:
+- If flag is "red": you MUST provide a `rationale` (1-2 sentences) explaining
+  what specifically is the concern. Be concrete, not generic.
+  GOOD: "Founder has not disclosed Series B valuation while peers X and Y
+        did. Raises transparency concern for institutional investors."
+  BAD:  "This is bad." / "Risky." / "Concerning."
+- If flag is "grey": `rationale` is RECOMMENDED (1-2 sentences explaining
+  what specifically we don't know and why it matters). Optional but useful.
+- If flag is "green": leave `rationale` empty (omit the field or use "").
+"""
+
+
 # ─────────────────── LLM Report Ingest: full-document batch extractor ────────
 
 _BATCH_EXTRACT_SYSTEM_TMPL = """\
@@ -395,8 +410,10 @@ indicated by transcript_segments in metadata):
 - LayerGuard will reject facts mapped to L5/L6/L8 (online_interview cannot feed
   those layers). If you must emit such a fact, set layer_warning=true.
 
+__RATIONALE_RULES__
+
 Return ONLY valid JSON, no markdown fences:
-{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey", "cite_ids": [1], "confidence": 0.85, "raw_paraphrase": "...", "segment_idx_start": 0, "segment_idx_end": 2, "layer_warning": false}]}
+{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey", "cite_ids": [1], "confidence": 0.85, "raw_paraphrase": "...", "rationale": "", "segment_idx_start": 0, "segment_idx_end": 2, "layer_warning": false}]}
 
 For non-transcript mode, omit segment_idx_* and layer_warning fields.
 If no usable facts, return: {"facts": []}
@@ -423,8 +440,10 @@ Rules:
 - Assign confidence 0.0-1.0.
 - raw_paraphrase: copy the original sentence from the report that supports this fact (verbatim or near-verbatim, <=400 chars).
 
+__RATIONALE_RULES__
+
 Return ONLY valid JSON, no markdown fences:
-{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey", "cite_ids": [1,2], "confidence": 0.8, "raw_paraphrase": "..."}]}
+{"facts": [{"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey", "cite_ids": [1,2], "confidence": 0.8, "raw_paraphrase": "...", "rationale": ""}]}
 
 If no usable facts in the section, return: {"facts": []}
 """
@@ -500,7 +519,11 @@ def extract_facts_from_llm_report(
         + f"\n\nAvailable citations:\n{cite_ref}"
     )
 
-    system_prompt = _EXTRACT_SYSTEM_TMPL.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+    system_prompt = (
+        _EXTRACT_SYSTEM_TMPL
+        .replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+        .replace("__RATIONALE_RULES__", _RATIONALE_RULES.strip())
+    )
     if tone_instruction:
         system_prompt = (
             "TONE INSTRUCTION (applies to every fact you emit):\n"
@@ -544,9 +567,18 @@ def extract_facts_from_llm_report(
             cite_ids=[int(c) for c in (item.get("cite_ids") or []) if str(c).isdigit()],
             confidence=max(0.0, min(1.0, float(item.get("confidence", 0.5)))),
             raw_paraphrase=(item.get("raw_paraphrase") or text)[:400],
+            rationale=_normalize_rationale(final_flag, item.get("rationale")),
         ))
 
     return results
+
+
+def _normalize_rationale(flag: str, raw: Any) -> str:
+    """Clip + sanity-check LLM rationale. Green silently drops; red/grey keep."""
+    text = (raw or "").strip() if isinstance(raw, str) else ""
+    if flag == "green":
+        return ""
+    return text[:600]
 
 
 def _stub_extract(
@@ -620,8 +652,10 @@ def extract_facts_from_full_document(
         f"Document:\n{doc_text[:12000]}"  # cap at ~12K chars to stay within context
     )
 
-    system_prompt = _BATCH_EXTRACT_SYSTEM_TMPL.replace(
-        "SUBSECTION_LIST_PLACEHOLDER", subsection_list
+    system_prompt = (
+        _BATCH_EXTRACT_SYSTEM_TMPL
+        .replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+        .replace("__RATIONALE_RULES__", _RATIONALE_RULES.strip())
     )
     if tone_instruction:
         system_prompt = (
@@ -678,6 +712,7 @@ def extract_facts_from_full_document(
             cite_ids=[int(c) for c in (item.get("cite_ids") or []) if str(c).isdigit()],
             confidence=max(0.0, min(1.0, float(item.get("confidence", 0.5)))),
             raw_paraphrase=(item.get("raw_paraphrase") or text)[:400],
+            rationale=_normalize_rationale(final_flag, item.get("rationale")),
             segment_idx_start=int(seg_start) if seg_start is not None else None,
             segment_idx_end=int(seg_end) if seg_end is not None else None,
             layer_warning=bool(item.get("layer_warning", False)),
@@ -715,10 +750,12 @@ Rules:
   4.1=team expertise           4.2=team growth/scaling
   7.1=mission/vision           7.2=tensions/trade-offs
 
+__RATIONALE_RULES__
+
 Return ONLY valid JSON, no markdown:
 {"facts": [{"text_ru": "...", "text_en": "...", "quote": "...", "subsection_id": "X.Y",
             "flag": "green|red|grey", "segment_idx_start": N, "segment_idx_end": N,
-            "confidence": 0.8}]}
+            "confidence": 0.8, "rationale": ""}]}
 
 If truly no guest content in this chunk, return: {"facts": []}
 """
@@ -765,7 +802,11 @@ def extract_facts_from_transcript(
     subsection_list = _build_subsection_list(
         available_subsections, subsection_descriptions, client_subsection_notes,
     )
-    system_prompt = _TRANSCRIPT_CHUNK_SYSTEM.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+    system_prompt = (
+        _TRANSCRIPT_CHUNK_SYSTEM
+        .replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+        .replace("__RATIONALE_RULES__", _RATIONALE_RULES.strip())
+    )
     if tone_instruction:
         system_prompt = (
             "TONE INSTRUCTION (applies to every fact you emit):\n"
@@ -901,13 +942,15 @@ def extract_facts_from_transcript(
                         global_start = chunk_indices[ls]
                         global_end = chunk_indices[le]
 
+                        final_flag = apply_heuristics(primary, llm_flag)
                         all_facts.append(ExtractedFact(
                             text=primary[:400],
                             subsection_id=sid,
-                            flag=apply_heuristics(primary, llm_flag),
+                            flag=final_flag,
                             cite_ids=[1],
                             confidence=max(0.0, min(1.0, float(item.get("confidence", 0.7)))),
                             raw_paraphrase=text_en[:400],
+                            rationale=_normalize_rationale(final_flag, item.get("rationale")),
                             segment_idx_start=global_start,
                             segment_idx_end=global_end,
                             text_ru=text_ru[:400],
@@ -1063,10 +1106,12 @@ Rules:
 - confidence: 0.0-1.0. Use 0.85+ for direct quotes/clear claims, 0.5-0.7
   for paraphrased context, <0.5 for inferred statements.
 
+__RATIONALE_RULES__
+
 Output ONLY valid JSON (no markdown fences, no commentary):
 {"facts": [
   {"text": "...", "subsection_id": "X.Y", "flag": "green|red|grey",
-   "confidence": 0.85, "raw_paraphrase": "..."}
+   "confidence": 0.85, "raw_paraphrase": "...", "rationale": ""}
 ]}
 
 If the source truly contains no usable facts (extremely rare for a real
@@ -1106,8 +1151,10 @@ def extract_facts_from_research_text(
     subsection_list = _build_subsection_list(
         available_subsections, subsection_descriptions, client_subsection_notes,
     )
-    system_prompt = _RESEARCH_EXTRACT_SYSTEM.replace(
-        "SUBSECTION_LIST_PLACEHOLDER", subsection_list,
+    system_prompt = (
+        _RESEARCH_EXTRACT_SYSTEM
+        .replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+        .replace("__RATIONALE_RULES__", _RATIONALE_RULES.strip())
     )
     if tone_instruction:
         system_prompt = (
@@ -1147,13 +1194,15 @@ def extract_facts_from_research_text(
             llm_flag = item.get("flag", "green")
             if llm_flag not in ("green", "red", "grey"):
                 llm_flag = "green"
+            final_flag = apply_heuristics(fact_text, llm_flag)
             results.append(ExtractedFact(
                 text=fact_text[:400],
                 subsection_id=sid,
-                flag=apply_heuristics(fact_text, llm_flag),
+                flag=final_flag,
                 cite_ids=[],
                 confidence=max(0.0, min(1.0, float(item.get("confidence", 0.6)))),
                 raw_paraphrase=(item.get("raw_paraphrase") or fact_text)[:400],
+                rationale=_normalize_rationale(final_flag, item.get("rationale")),
             ))
         except (ValueError, TypeError, AttributeError):
             continue

@@ -18,6 +18,7 @@ class AnchoredFact:
     cite_ids: list[int] = field(default_factory=list)
     confidence: float = 0.5
     raw_paraphrase: str = ""
+    rationale: str = ""
     segment_idx_start: Optional[int] = None
     segment_idx_end: Optional[int] = None
     layer_warning: bool = False
@@ -69,6 +70,7 @@ def anchor_facts(
                 cite_ids=fact.cite_ids,
                 confidence=fact.confidence,
                 raw_paraphrase=fact.raw_paraphrase,
+                rationale=(fact.rationale if fact.flag != "green" else ""),
                 segment_idx_start=idx_start,
                 segment_idx_end=idx_end,
                 layer_warning=fact.layer_warning,
@@ -105,6 +107,7 @@ def anchor_facts(
             cite_ids=fact.cite_ids,
             confidence=fact.confidence,
             raw_paraphrase=fact.raw_paraphrase,
+            rationale=(fact.rationale if flag != "green" else ""),
             segment_idx_start=idx_start,
             segment_idx_end=idx_end,
             layer_warning=fact.layer_warning,

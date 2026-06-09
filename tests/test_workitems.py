@@ -76,7 +76,8 @@ def test_red_fact_does_not_close(conn):
     src_id = matrix.add_source(conn, channel="offline_interview",
                                title="Interview 2026-05-07", url="")
     matrix.add_fact(conn, client_id="acme", subsection_id="1.1",
-                    text="concern", flag="red", source_id=src_id)
+                    text="concern", flag="red", source_id=src_id,
+                    rationale="Founder declined to discuss the childhood incident.")
     assert _count(conn, "acme", "fill_gap", "needs_review") == 0
 
 

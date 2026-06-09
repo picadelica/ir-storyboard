@@ -174,6 +174,26 @@ def ensure_full_grid(conn: sqlite3.Connection, client_id: str) -> None:
 ONLINE_CHANNELS = {"online_research", "online_interview", "archival"}
 
 
+def validate_rationale(flag: str, rationale: Optional[str]) -> str:
+    """Return normalized rationale or raise ValueError on missing red rationale.
+
+    Rules:
+      * red   → non-empty rationale required (1-2 sentences explaining the concern).
+      * grey  → rationale optional (returned as-is, stripped).
+      * green → rationale silently dropped (green facts don't carry rationale).
+    """
+    text = (rationale or "").strip()
+    if flag == FLAG_RED:
+        if not text:
+            raise ValueError(
+                "red fact requires rationale explaining the concern"
+            )
+        return text
+    if flag == FLAG_GREEN:
+        return ""
+    return text
+
+
 def validate_provenance(channel: str, source_url: str, evidence_snippet: str,
                         source_title: str = "", flag: str = "green") -> None:
     """Raise ValueError if provenance rules are violated.
@@ -218,9 +238,10 @@ def add_source(conn: sqlite3.Connection, channel: str, title: str = "",
 def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
              text: str, flag: str, source_id: Optional[int] = None,
              confidence: float = 1.0, valid_until: Optional[str] = None,
-             evidence_snippet: str = "") -> int:
+             evidence_snippet: str = "", rationale: Optional[str] = None) -> int:
     if flag not in (FLAG_GREEN, FLAG_RED, FLAG_GREY):
         raise ValueError(f"bad flag {flag}")
+    rationale = validate_rationale(flag, rationale)
     # methodological guard: warn if source channel can't really fill this layer
     layer_id = int(subsection_id.split(".")[0])
     if source_id is not None:
@@ -233,9 +254,11 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
 
     cell_id = get_or_create_cell(conn, client_id, subsection_id)
     cur = conn.execute(
-        """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until, evidence_snippet)
-            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (cell_id, text, flag, source_id, confidence, valid_until, evidence_snippet),
+        """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until,
+                              evidence_snippet, rationale)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (cell_id, text, flag, source_id, confidence, valid_until,
+         evidence_snippet, rationale),
     )
     conn.commit()
     fact_id = cur.lastrowid
@@ -278,7 +301,8 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
 
 def update_fact(conn: sqlite3.Connection, fact_id: int, *,
                 text: Optional[str] = None, flag: Optional[str] = None,
-                confidence: Optional[float] = None) -> None:
+                confidence: Optional[float] = None,
+                rationale: Optional[str] = None) -> None:
     sets, params = [], []
     if text is not None:
         sets.append("text=?"); params.append(text)
@@ -288,6 +312,20 @@ def update_fact(conn: sqlite3.Connection, fact_id: int, *,
         sets.append("flag=?"); params.append(flag)
     if confidence is not None:
         sets.append("confidence=?"); params.append(confidence)
+
+    # Re-validate (flag, rationale) only when either is being changed.
+    if flag is not None or rationale is not None:
+        row = conn.execute(
+            "SELECT flag, rationale FROM facts WHERE id=?", (fact_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"fact {fact_id} not found")
+        effective_flag = flag if flag is not None else row["flag"]
+        effective_rationale = rationale if rationale is not None else (row["rationale"] or "")
+        normalized = validate_rationale(effective_flag, effective_rationale)
+        if rationale is not None or normalized != (row["rationale"] or ""):
+            sets.append("rationale=?"); params.append(normalized)
+
     if not sets:
         return
     params.append(fact_id)

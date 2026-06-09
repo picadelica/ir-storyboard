@@ -345,6 +345,7 @@ def _anchored_to_dict(af: AnchoredFact) -> dict:
         "layer_warning": af.layer_warning,
         "segment_idx_start": af.segment_idx_start,
         "segment_idx_end": af.segment_idx_end,
+        "rationale": getattr(af, "rationale", "") or "",
     }
 
 
@@ -369,6 +370,11 @@ def _apply_edit(base: dict, edit: dict) -> dict:
         out["subsection_id"] = str(edit["subsection_id"])
     if "flag" in edit and edit["flag"] in _VALID_FLAGS:
         out["flag"] = edit["flag"]
+    if "rationale" in edit and edit["rationale"] is not None:
+        out["rationale"] = str(edit["rationale"])
+    # Drop rationale if final flag is green
+    if out.get("flag") == "green":
+        out["rationale"] = ""
     return out
 
 
@@ -461,6 +467,7 @@ def run_youtube_commit(
                 source_id=source_id,
                 confidence=fdict.get("confidence", 0.8),
                 evidence_snippet=fdict.get("evidence_snippet", ""),
+                rationale=fdict.get("rationale", ""),
             )
             conn.execute(
                 "UPDATE facts SET ingest_audit_id = ?, source_url = ? WHERE id = ?",
@@ -488,6 +495,7 @@ def run_youtube_commit(
                 source_id=source_id,
                 confidence=sdict.get("confidence", 0.7),
                 evidence_snippet=sdict.get("evidence_snippet", ""),
+                rationale=sdict.get("rationale", ""),
             )
             conn.execute(
                 "UPDATE facts SET ingest_audit_id = ?, source_url = ? WHERE id = ?",

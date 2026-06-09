@@ -31,6 +31,7 @@ class ResolvedFact:
     cite_ids: list[int] = field(default_factory=list)
     confidence: float = 0.5
     raw_paraphrase: str = ""
+    rationale: str = ""
 
     # Snippet fields added by resolver
     evidence_snippet: str = ""
@@ -68,6 +69,7 @@ def _resolve_paraphrase(facts: list[ExtractedFact]) -> list[ResolvedFact]:
             cite_ids=f.cite_ids,
             confidence=f.confidence,
             raw_paraphrase=f.raw_paraphrase,
+            rationale=(f.rationale if flag != "green" else ""),
             evidence_snippet=snippet,
             needs_review=short,
             snippet_source="llm_paraphrase",
@@ -150,6 +152,7 @@ def _resolve_fetch(
             cite_ids=f.cite_ids,
             confidence=f.confidence,
             raw_paraphrase=f.raw_paraphrase,
+            rationale=(f.rationale if final_flag != "green" else ""),
             evidence_snippet=snippet,
             needs_review=needs_review,
             snippet_source=source,

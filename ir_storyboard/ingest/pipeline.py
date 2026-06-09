@@ -292,6 +292,7 @@ def commit_llm_report(
                 source_id=source_id,
                 confidence=rf.confidence,
                 evidence_snippet=rf.evidence_snippet,
+                rationale=rf.rationale,
             )
             # Tag fact with the audit row so we can find the original report
             conn.execute(
@@ -356,11 +357,16 @@ def _apply_edits(facts: list[ResolvedFact], edits: list[dict]) -> list[ResolvedF
             continue
         elif edit["action"] == "edit":
             from dataclasses import replace
+            new_flag = edit.get("new_flag", rf.flag)
+            new_rationale = edit.get("new_rationale", rf.rationale)
+            if new_flag == "green":
+                new_rationale = ""
             updated = replace(
                 rf,
                 text=edit.get("new_text", rf.text),
                 subsection_id=edit.get("new_subsection_id", rf.subsection_id),
-                flag=edit.get("new_flag", rf.flag),
+                flag=new_flag,
+                rationale=new_rationale,
             )
             result.append(updated)
     return result
