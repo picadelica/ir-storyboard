@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api";
 import type { Channel, Fact, Flag, Layer } from "../types";
+import SourceLine from "./SourceLine";
 
 interface Props {
   clientId: string;
@@ -151,31 +152,15 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                     {f.evidence_snippet}
                   </blockquote>
                 )}
-                <div className="text-[10px] text-ink-mute mt-2 flex items-center gap-2 font-mono flex-wrap">
-                  {f.source_channel && (
-                    <span className="px-1.5 py-0.5 bg-white border border-ink-line rounded">{f.source_channel}</span>
-                  )}
-                  {f.source_title && <span className="truncate">{f.source_title}</span>}
-                  {f.source_url && !f.source_url.startsWith("internal://") && (
-                    <a href={f.source_url} target="_blank" rel="noreferrer"
-                       className="text-blue-600 underline truncate">src</a>
-                  )}
-                  {f.source_archive_url && (
-                    <a href={f.source_archive_url} target="_blank" rel="noreferrer"
-                       className="text-emerald-600 underline truncate" title="Wayback snapshot">📦</a>
-                  )}
-                  {f.source_url && isOnlineChannel(f.source_channel as Channel) && !f.source_archive_url && !f.source_url.startsWith("internal://") && (
-                    <span className="text-amber-500" title="Archiving in background…">⏳</span>
-                  )}
-                  {f.ingest_audit_id && (
-                    <a
-                      href={`/api/clients/${clientId}/ingest/llm-report/${f.ingest_audit_id}/file`}
-                      target="_blank" rel="noreferrer"
-                      className="text-violet-600 underline truncate" title="Download source LLM report"
-                    >report</a>
-                  )}
-                  <span className="ml-auto">{(f.captured_at ?? "").slice(0, 10)}</span>
-                </div>
+                <SourceLine
+                  client_id={clientId}
+                  channel={f.source_channel}
+                  source_url={f.source_url}
+                  source_title={f.source_title}
+                  source_archive_url={f.source_archive_url}
+                  ingest_audit_id={f.ingest_audit_id}
+                  captured_at={f.captured_at}
+                />
               </>
             )}
           </div>

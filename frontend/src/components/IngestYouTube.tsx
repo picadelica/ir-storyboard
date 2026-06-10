@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import type { Layer, YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
+import SourceLine from "./SourceLine";
 
 interface Props {
   clientId: string;
@@ -818,6 +819,8 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                 return next;
               })}
               onEdit={(patch) => updateFactEdit(idx, patch)}
+              clientId={clientId}
+              sourceTitle={preview.meta.title}
             />
           ))}
         </div>
@@ -838,6 +841,8 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                 overridden={overrides.has(idx)}
                 readOnly={readOnly}
                 subsectionOptions={subsectionOptions}
+                clientId={clientId}
+                sourceTitle={preview.meta.title}
                 onToggleOverride={() => setOverrides((prev) => {
                   const next = new Set(prev);
                   next.has(idx) ? next.delete(idx) : next.add(idx);
@@ -899,16 +904,16 @@ interface FactCardProps {
   subsectionOptions: { id: string; label: string }[];
   onToggleDrop: () => void;
   onEdit: (patch: FactEdit) => void;
+  clientId: string;
+  sourceTitle?: string;
 }
 
-function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, subsectionOptions, onToggleDrop, onEdit }: FactCardProps) {
+function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, subsectionOptions, onToggleDrop, onEdit, clientId, sourceTitle }: FactCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (fact.text_ru || fact.text);
   const effectiveSid = edit?.subsection_id ?? fact.subsection_id;
   const effectiveFlag = (edit?.flag ?? fact.flag) as string;
   const flagStyle = FLAG_COLORS[effectiveFlag] ?? FLAG_COLORS.grey;
-  const tSec = Math.floor(fact.snippet_start_sec);
-  const timeStr = `${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, "0")}`;
   const displayRu = effectiveTextRu;
   const displayEn = fact.text_en || "";
   const displayQuote = fact.quote || fact.evidence_snippet || "";
@@ -962,25 +967,23 @@ function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, sub
                   "{displayQuote}"
                 </div>
               )}
-              <div className="flex items-center gap-3">
-                <a
-                  href={fact.source_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:underline"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  ▶ {timeStr}
-                </a>
-                {isEdited && (
+              <SourceLine
+                client_id={clientId}
+                channel="online_interview"
+                source_url={fact.source_url}
+                source_title={sourceTitle}
+                timestamp_sec={fact.snippet_start_sec}
+              />
+              {isEdited && (
+                <div className="flex items-center gap-3">
                   <button
                     onClick={() => onEdit({ text_ru: undefined, subsection_id: undefined, flag: undefined })}
                     className="text-[10px] text-amber-600 hover:underline"
                   >
                     revert edits
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </>
           ) : (
             <FactEditForm
@@ -1127,15 +1130,15 @@ interface SkippedCardProps {
   subsectionOptions: { id: string; label: string }[];
   onToggleOverride: () => void;
   onEdit: (patch: FactEdit) => void;
+  clientId: string;
+  sourceTitle?: string;
 }
 
-function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOptions, onToggleOverride, onEdit }: SkippedCardProps) {
+function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOptions, onToggleOverride, onEdit, clientId, sourceTitle }: SkippedCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (skipped.text_ru || skipped.text);
   const effectiveSid = edit?.subsection_id ?? skipped.subsection_id;
   const effectiveFlag = (edit?.flag ?? skipped.flag ?? "green") as string;
-  const tSec = Math.floor(skipped.snippet_start_sec ?? 0);
-  const timeStr = `${Math.floor(tSec / 60)}:${String(tSec % 60).padStart(2, "0")}`;
   const displayRu = effectiveTextRu;
   const displayEn = skipped.text_en || "";
   const displayQuote = skipped.quote || skipped.evidence_snippet || "";
@@ -1175,27 +1178,25 @@ function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOptions, o
                   "{displayQuote}"
                 </div>
               )}
-              <div className="flex items-center gap-3">
-                {skipped.source_url && (
-                  <a
-                    href={skipped.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    ▶ {timeStr}
-                  </a>
-                )}
-                {isEdited && (
+              {skipped.source_url && (
+                <SourceLine
+                  client_id={clientId}
+                  channel="online_interview"
+                  source_url={skipped.source_url}
+                  source_title={sourceTitle}
+                  timestamp_sec={skipped.snippet_start_sec}
+                />
+              )}
+              {isEdited && (
+                <div className="flex items-center gap-3">
                   <button
                     onClick={() => onEdit({ text_ru: undefined, subsection_id: undefined, flag: undefined })}
                     className="text-[10px] text-amber-600 hover:underline"
                   >
                     revert edits
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </>
           ) : (
             <FactEditForm

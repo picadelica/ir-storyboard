@@ -214,7 +214,7 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
               className="text-sm font-medium text-blue-600 hover:underline leading-snug line-clamp-2">
               {hit.title || hit.url}
             </a>
-            <div className="text-[10px] text-ink-mute font-mono truncate mt-0.5">{hit.url}</div>
+            <div className="text-xs text-ink-mute font-mono truncate mt-0.5">{hit.url}</div>
           </div>
           <ChannelBadge ch={channel} />
         </div>

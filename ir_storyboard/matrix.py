@@ -273,8 +273,12 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
 def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                    subsection_id: str) -> List[sqlite3.Row]:
     return list(conn.execute(
-        """SELECT f.*, s.channel AS source_channel, s.title AS source_title,
-                  s.url AS source_url, s.archive_url AS source_archive_url,
+        """SELECT f.id, f.cell_id, f.text, f.flag, f.source_id, f.confidence,
+                  f.captured_at, f.valid_until, f.evidence_snippet,
+                  f.ingest_audit_id, f.rationale, f.created_by,
+                  s.channel AS source_channel, s.title AS source_title,
+                  COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
+                  s.archive_url AS source_archive_url,
                   s.publisher AS source_publisher
             FROM facts f
             JOIN cells c ON c.id = f.cell_id
@@ -287,8 +291,12 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
 
 def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
     return conn.execute(
-        """SELECT f.*, s.channel AS source_channel, s.title AS source_title,
-                  s.url AS source_url, s.archive_url AS source_archive_url,
+        """SELECT f.id, f.cell_id, f.text, f.flag, f.source_id, f.confidence,
+                  f.captured_at, f.valid_until, f.evidence_snippet,
+                  f.ingest_audit_id, f.rationale, f.created_by,
+                  s.channel AS source_channel, s.title AS source_title,
+                  COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
+                  s.archive_url AS source_archive_url,
                   s.publisher AS source_publisher,
                   c.client_id, c.subsection_id
             FROM facts f

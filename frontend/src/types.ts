@@ -28,6 +28,8 @@ export interface Client {
   aliases?: string[];
   notes?: string;
   tone_preset?: string;
+  created_at?: string;
+  created_by?: string | null;
 }
 
 export interface MethodologyCell {
@@ -142,6 +144,7 @@ export interface LLMResolvedFact {
   evidence_snippet: string;
   needs_review: boolean;
   snippet_source: string;
+  rationale?: string;
 }
 
 export interface LLMIngestPreview {
@@ -160,6 +163,7 @@ export interface LLMIngestEdit {
   new_text?: string;
   new_subsection_id?: string;
   new_flag?: string;
+  new_rationale?: string;
 }
 
 export interface LLMIngestCommitOut {
@@ -221,6 +225,7 @@ export interface YouTubeFact {
   snippet_end_sec: number;
   needs_review: boolean;
   layer_warning: boolean;
+  rationale?: string;
 }
 
 export interface YouTubeSkipped {
@@ -237,6 +242,7 @@ export interface YouTubeSkipped {
   snippet_start_sec: number;
   snippet_end_sec: number;
   override_allowed: boolean;
+  rationale?: string;
 }
 
 export interface YouTubePreviewResult {
@@ -296,6 +302,8 @@ export interface Fact {
   source_url?: string;
   source_archive_url?: string;
   ingest_audit_id?: string;
+  rationale?: string;
+  created_by?: string | null;
 }
 
 export interface Track {
