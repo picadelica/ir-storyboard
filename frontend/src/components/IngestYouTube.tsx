@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import type { Layer, YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
 import SourceLine from "./SourceLine";
+import FlagDot from "./FlagDot";
 
 interface Props {
   clientId: string;
@@ -913,7 +914,6 @@ function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, sub
   const effectiveTextRu = edit?.text_ru ?? (fact.text_ru || fact.text);
   const effectiveSid = edit?.subsection_id ?? fact.subsection_id;
   const effectiveFlag = (edit?.flag ?? fact.flag) as string;
-  const flagStyle = FLAG_COLORS[effectiveFlag] ?? FLAG_COLORS.grey;
   const displayRu = effectiveTextRu;
   const displayEn = fact.text_en || "";
   const displayQuote = fact.quote || fact.evidence_snippet || "";
@@ -938,7 +938,7 @@ function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, sub
           />
         )}
         {/* Left: badges */}
-        <div className="flex flex-col gap-1 shrink-0 mt-0.5">
+        <div className="flex flex-col items-center gap-1 shrink-0 mt-0.5">
           <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded border text-center ${
             edit?.subsection_id
               ? "bg-amber-50 border-amber-200 text-amber-700"
@@ -946,9 +946,7 @@ function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, sub
           }`}>
             {effectiveSid}
           </span>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded border text-center ${flagStyle}`}>
-            {effectiveFlag}
-          </span>
+          <FlagDot flag={effectiveFlag} />
         </div>
 
         {/* Center: content */}
@@ -965,6 +963,20 @@ function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, sub
               {displayQuote && (
                 <div className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2 line-clamp-3">
                   "{displayQuote}"
+                </div>
+              )}
+              {effectiveFlag === "red" && (
+                fact.rationale
+                  ? <div className="text-xs border-l-2 border-flag-red/60 text-flag-red pl-2 leading-snug">
+                      <span className="font-medium uppercase tracking-wide text-[10px] mr-1">concern:</span>
+                      {fact.rationale}
+                    </div>
+                  : <div className="text-xs italic text-amber-600">⚠ Concern: (не указано)</div>
+              )}
+              {effectiveFlag === "grey" && fact.rationale && (
+                <div className="text-xs border-l-2 border-slate-300 text-ink-mute pl-2 leading-snug">
+                  <span className="font-medium uppercase tracking-wide text-[10px] mr-1">gap:</span>
+                  {fact.rationale}
                 </div>
               )}
               <SourceLine

@@ -52,10 +52,11 @@ export const api = {
     text: string; flag: string; channel: string;
     source_title?: string; source_url?: string;
     evidence_snippet?: string; confidence?: number;
+    rationale?: string;
   }) => call<Fact>(`/clients/${clientId}/cells/${sid}/facts`, {
     method: "POST", body: JSON.stringify(body),
   }),
-  patchFact: (factId: number, body: { text?: string; flag?: string; confidence?: number }) =>
+  patchFact: (factId: number, body: { text?: string; flag?: string; confidence?: number; rationale?: string }) =>
     call<Fact>(`/facts/${factId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteFact: (factId: number) =>
     call<{ ok: boolean }>(`/facts/${factId}`, { method: "DELETE" }),
@@ -122,6 +123,7 @@ export const api = {
   ingestConfirm: (clientId: string, facts: {
     text: string; subsection_id: string; flag: string; channel: string;
     source_url?: string; source_title?: string; evidence_snippet?: string; confidence?: number;
+    rationale?: string;
   }[]) => call<IngestConfirmOut>(`/clients/${clientId}/ingest/confirm`, {
     method: "POST", body: JSON.stringify({ facts }),
   }),

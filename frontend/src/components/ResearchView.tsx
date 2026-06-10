@@ -56,9 +56,11 @@ interface CandidateRowProps {
   onFlag: (f: Flag) => void;
   subsectionId: string;
   onSid: (s: string) => void;
+  rationale: string;
+  onRationale: (r: string) => void;
 }
 
-function CandidateRow({ cand, checked, onToggle, flag, onFlag, subsectionId, onSid }: CandidateRowProps) {
+function CandidateRow({ cand, checked, onToggle, flag, onFlag, subsectionId, onSid, rationale, onRationale }: CandidateRowProps) {
   return (
     <div className={`flex gap-2 p-2.5 rounded border text-sm ${checked ? "border-blue-400 bg-blue-50" : "border-ink-line bg-white"}`}>
       <input type="checkbox" checked={checked} onChange={onToggle}
@@ -92,6 +94,16 @@ function CandidateRow({ cand, checked, onToggle, flag, onFlag, subsectionId, onS
         </div>
         {cand.rationale && (
           <div className="text-[10px] text-ink-mute italic">{cand.rationale}</div>
+        )}
+        {flag === "red" && (
+          <input
+            value={rationale}
+            onChange={e => onRationale(e.target.value)}
+            placeholder="Concern: что именно проблема (обязательно для red)"
+            className={`w-full text-[11px] border rounded px-1.5 py-0.5 ${
+              rationale.trim() ? "border-ink-line" : "border-red-400"
+            }`}
+          />
         )}
       </div>
     </div>
@@ -145,7 +157,7 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
     nav(`/clients/${clientId}/youtube?url=${encodeURIComponent(youtubeUrl)}`);
   }
 
-  type RowState = { checked: boolean; flag: Flag; sid: string };
+  type RowState = { checked: boolean; flag: Flag; sid: string; rationale: string };
   const [rows, setRows] = useState<RowState[]>([]);
 
   const classifyMut = useMutation({
@@ -167,6 +179,7 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
         checked: c.confidence >= 0.5,
         flag: c.suggested_flag as Flag,
         sid: c.suggested_subsection_id || "",
+        rationale: "",
       })));
     },
     onError: (err: unknown) => {
@@ -190,6 +203,7 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
         source_title: hit.title,
         evidence_snippet: c.text,
         confidence: c.confidence,
+        rationale: r.rationale.trim() || undefined,
       })));
     },
     onSuccess: (res) => {
@@ -312,6 +326,8 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
                 onFlag={f => setRows(r => r.map((x, j) => j === i ? { ...x, flag: f } : x))}
                 subsectionId={rows[i]?.sid ?? ""}
                 onSid={s => setRows(r => r.map((x, j) => j === i ? { ...x, sid: s } : x))}
+                rationale={rows[i]?.rationale ?? ""}
+                onRationale={r2 => setRows(r => r.map((x, j) => j === i ? { ...x, rationale: r2 } : x))}
               />
             ))}
           </div>

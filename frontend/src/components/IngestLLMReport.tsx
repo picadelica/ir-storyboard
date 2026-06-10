@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { LLMIngestEdit, LLMIngestPreview, LLMResolvedFact } from "../types";
+import FlagDot from "./FlagDot";
 
 interface Props {
   clientId: string;
@@ -375,13 +376,25 @@ function FactCard({ idx, fact, action, onAction }: FactCardProps) {
           L{fact.subsection_id}
         </span>
 
-        {/* Flag */}
-        <span className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 mt-0.5 ${flagStyle}`}>
-          {fact.flag}
-        </span>
+        {/* Flag dot */}
+        <FlagDot flag={fact.flag} className="mt-1.5" />
 
         <div className="flex-1 min-w-0">
           <div className={`${dropped ? "line-through" : ""}`}>{fact.text}</div>
+          {fact.flag === "red" && (
+            fact.rationale
+              ? <div className="mt-1 text-xs border-l-2 border-flag-red/60 text-flag-red pl-2 leading-snug">
+                  <span className="font-medium uppercase tracking-wide text-[10px] mr-1">concern:</span>
+                  {fact.rationale}
+                </div>
+              : <div className="mt-1 text-xs italic text-amber-600">⚠ Concern: (не указано)</div>
+          )}
+          {fact.flag === "grey" && fact.rationale && (
+            <div className="mt-1 text-xs border-l-2 border-slate-300 text-ink-mute pl-2 leading-snug">
+              <span className="font-medium uppercase tracking-wide text-[10px] mr-1">gap:</span>
+              {fact.rationale}
+            </div>
+          )}
           {fact.evidence_snippet && (
             <div className="mt-1 text-xs text-ink-mute italic line-clamp-2">
               "{fact.evidence_snippet}"

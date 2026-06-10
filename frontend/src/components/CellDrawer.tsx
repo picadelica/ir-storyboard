@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "../api";
 import type { Channel, Fact, Flag, Layer } from "../types";
 import SourceLine from "./SourceLine";
+import FlagDot from "./FlagDot";
 
 interface Props {
   clientId: string;
@@ -25,6 +26,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftText, setDraftText] = useState("");
   const [draftFlag, setDraftFlag] = useState<Flag>("green");
+  const [draftRationale, setDraftRationale] = useState("");
 
   const [showAdd, setShowAdd] = useState(false);
   const [newText, setNewText] = useState("");
@@ -33,6 +35,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
   const [newSourceTitle, setNewSourceTitle] = useState("");
   const [newSourceUrl, setNewSourceUrl] = useState("");
   const [newSnippet, setNewSnippet] = useState("");
+  const [newRationale, setNewRationale] = useState("");
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["facts", clientId, subsectionId] });
@@ -51,17 +54,18 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
       text: newText, flag: newFlag, channel: newChannel,
       source_title: newSourceTitle, source_url: newSourceUrl,
       evidence_snippet: newSnippet, confidence: 1.0,
+      rationale: newRationale.trim() || undefined,
     }),
     onSuccess: () => {
       setShowAdd(false); setNewText(""); setNewSourceTitle("");
-      setNewSourceUrl(""); setNewSnippet("");
+      setNewSourceUrl(""); setNewSnippet(""); setNewRationale("");
       invalidate();
     },
   });
 
   const patchFact = useMutation({
-    mutationFn: ({ id, text, flag }: { id: number; text: string; flag: Flag }) =>
-      api.patchFact(id, { text, flag }),
+    mutationFn: ({ id, text, flag, rationale }: { id: number; text: string; flag: Flag; rationale: string }) =>
+      api.patchFact(id, { text, flag, rationale: rationale.trim() || undefined }),
     onSuccess: () => { setEditingId(null); invalidate(); },
   });
 
@@ -119,11 +123,25 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                   onChange={e => setDraftText(e.target.value)}
                   className="w-full text-sm border border-ink-line rounded px-2 py-1.5 min-h-[5rem]"
                 />
+                <textarea
+                  value={draftRationale}
+                  onChange={e => setDraftRationale(e.target.value)}
+                  placeholder={draftFlag === "red"
+                    ? "Concern: что именно проблема (обязательно для red)"
+                    : "Rationale (опц.)"}
+                  rows={3}
+                  className={`w-full text-xs border rounded px-2 py-1.5 min-h-[3rem] resize-none ${
+                    draftFlag === "red" && !draftRationale.trim()
+                      ? "border-red-400" : "border-ink-line"
+                  }`}
+                />
                 <div className="flex items-center gap-2">
                   <FlagPicker value={draftFlag} onChange={setDraftFlag} />
                   <button
-                    onClick={() => patchFact.mutate({ id: f.id, text: draftText, flag: draftFlag })}
-                    className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-black"
+                    onClick={() => patchFact.mutate({ id: f.id, text: draftText, flag: draftFlag, rationale: draftRationale })}
+                    disabled={draftFlag === "red" && !draftRationale.trim()}
+                    title={draftFlag === "red" && !draftRationale.trim() ? "Red facts require a rationale" : undefined}
+                    className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300"
                   >Save</button>
                   <button
                     onClick={() => setEditingId(null)}
@@ -133,11 +151,12 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-between mb-1.5">
-                  <FlagBadge flag={f.flag} />
-                  <div className="flex items-center gap-1">
+                <div className="flex items-start gap-2 mb-1.5">
+                  <FlagDot flag={f.flag} className="mt-1.5" />
+                  <div className="text-sm leading-snug whitespace-pre-wrap flex-1">{f.text}</div>
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
-                      onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); }}
+                      onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); }}
                       className="text-[11px] text-ink-mute hover:text-ink px-1.5 py-0.5 rounded hover:bg-white"
                     >edit</button>
                     <button
@@ -146,7 +165,22 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                     >delete</button>
                   </div>
                 </div>
-                <div className="text-sm leading-snug whitespace-pre-wrap">{f.text}</div>
+                {f.flag === "red" && (
+                  f.rationale
+                    ? <div className="mt-2 text-xs border-l-2 pl-2 leading-snug border-flag-red/60 text-flag-red">
+                        <span className="font-medium uppercase tracking-wide text-[10px] mr-1">concern:</span>
+                        {f.rationale}
+                      </div>
+                    : <div className="mt-2 text-xs text-amber-600 italic">
+                        ⚠ Concern: (не указано) — обновите факт через edit
+                      </div>
+                )}
+                {f.flag === "grey" && f.rationale && (
+                  <div className="mt-2 text-xs border-l-2 pl-2 leading-snug border-flag-grey/60 text-ink-mute">
+                    <span className="font-medium uppercase tracking-wide text-[10px] mr-1">gap:</span>
+                    {f.rationale}
+                  </div>
+                )}
                 {f.evidence_snippet && (
                   <blockquote className="mt-2 text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug">
                     {f.evidence_snippet}
@@ -224,15 +258,31 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                 </div>
               )}
             </div>
+            <textarea
+              placeholder={newFlag === "red"
+                ? "Concern: что именно проблема (обязательно для red)"
+                : "Rationale (опц.)"}
+              value={newRationale}
+              onChange={e => setNewRationale(e.target.value)}
+              rows={2}
+              className={`w-full text-xs border rounded px-2 py-1.5 resize-none ${
+                newFlag === "red" && !newRationale.trim() && newText
+                  ? "border-red-400" : "border-ink-line"
+              }`}
+            />
             {channelHint && (
               <div className="text-[11px] text-ink-mute">{channelHint}</div>
             )}
             <div className="flex gap-2">
               <button
                 onClick={() => addFact.mutate()}
-                disabled={!newText.trim() || !snippetValid || addFact.isPending}
+                disabled={!newText.trim() || !snippetValid || (newFlag === "red" && !newRationale.trim()) || addFact.isPending}
                 className="text-sm px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300"
-                title={!snippetValid ? "Evidence snippet ≥20 chars required for online channels" : undefined}
+                title={
+                  !snippetValid ? "Evidence snippet ≥20 chars required for online channels"
+                  : (newFlag === "red" && !newRationale.trim()) ? "Red facts require a rationale"
+                  : undefined
+                }
               >Save</button>
               <button
                 onClick={() => setShowAdd(false)}
@@ -251,16 +301,6 @@ function flagBg(f: Flag) {
 }
 function flagBorder(f: Flag) {
   return f === "green" ? "border-flag-green/40" : f === "red" ? "border-flag-red/40" : "border-flag-grey/40";
-}
-
-function FlagBadge({ flag }: { flag: Flag }) {
-  const map = {
-    green: { color: "bg-flag-green text-white", label: "GREEN" },
-    red:   { color: "bg-flag-red text-white",   label: "RED" },
-    grey:  { color: "bg-flag-grey text-white",  label: "GREY" },
-  } as const;
-  const m = map[flag];
-  return <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${m.color}`}>{m.label}</span>;
 }
 
 function FlagPicker({ value, onChange }: { value: Flag; onChange: (f: Flag) => void }) {
