@@ -39,7 +39,7 @@ function RootRedirect() {
 function EmptyState() {
   return (
     <div className="h-screen flex">
-      <Sidebar quarter="2026Q2" onQuarterChange={() => {}} onRunCycle={() => {}} />
+      <Sidebar />
       <div className="flex-1 flex items-center justify-center text-sm text-ink-mute">
         <div className="max-w-sm text-center">
           <div className="text-base font-semibold text-ink mb-1">No clients yet</div>
@@ -69,15 +69,16 @@ function ClientPage() {
 
   return (
     <div className="h-screen flex">
-      <Sidebar
-        clientId={clientId}
-        quarter={quarter}
-        onQuarterChange={setQuarter}
-        onRunCycle={(k) => setCycleKind(k)}
-      />
+      <Sidebar clientId={clientId} />
 
       <main className="flex-1 flex flex-col overflow-hidden">
-        <Tabs clientId={clientId!} activeTab={activeTab} />
+        <Tabs
+          clientId={clientId!}
+          activeTab={activeTab}
+          quarter={quarter}
+          onQuarterChange={setQuarter}
+          onRunCycle={(k) => setCycleKind(k)}
+        />
 
         <div className="flex-1 overflow-y-auto">
           {activeTab === "matrix" && (
@@ -142,7 +143,15 @@ function ClientPage() {
   );
 }
 
-function Tabs({ clientId, activeTab }: { clientId: string; activeTab: string }) {
+interface TabsProps {
+  clientId: string;
+  activeTab: string;
+  quarter: string;
+  onQuarterChange: (q: string) => void;
+  onRunCycle: (kind: "weekly" | "event" | "quarterly") => void;
+}
+
+function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle }: TabsProps) {
   const tabs = [
     { id: "matrix",      label: "Matrix" },
     { id: "plan",        label: "Plan" },
@@ -158,18 +167,45 @@ function Tabs({ clientId, activeTab }: { clientId: string; activeTab: string }) 
   ];
   return (
     <div className="flex items-center gap-0 border-b border-ink-line bg-white px-4">
-      {tabs.map(t => (
-        <NavLink
-          key={t.id}
-          to={`/clients/${clientId}/${t.id}`}
-          className={`px-4 py-3 text-sm border-b-2 transition
-            ${activeTab === t.id
-              ? "border-ink text-ink font-medium"
-              : "border-transparent text-ink-mute hover:text-ink"}`}
-        >
-          {t.label}
-        </NavLink>
-      ))}
+      <div className="flex items-center gap-0 overflow-x-auto">
+        {tabs.map(t => (
+          <NavLink
+            key={t.id}
+            to={`/clients/${clientId}/${t.id}`}
+            className={`px-3 py-3 text-sm border-b-2 transition whitespace-nowrap
+              ${activeTab === t.id
+                ? "border-ink text-ink font-medium"
+                : "border-transparent text-ink-mute hover:text-ink"}`}
+          >
+            {t.label}
+          </NavLink>
+        ))}
+      </div>
+
+      <div className="ml-auto flex items-center gap-1.5 py-1.5 pl-3">
+        <input
+          value={quarter}
+          onChange={e => onQuarterChange(e.target.value)}
+          placeholder="2026Q2"
+          className="w-20 text-xs border border-ink-line rounded px-2 py-1 font-mono"
+          title="Quarter for cycles + plan"
+        />
+        <button
+          onClick={() => onRunCycle("weekly")}
+          className="text-xs px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap"
+          title="Run weekly cycle"
+        >Weekly</button>
+        <button
+          onClick={() => onRunCycle("event")}
+          className="text-xs px-2.5 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 whitespace-nowrap"
+          title="Run event-driven cycle"
+        >Event</button>
+        <button
+          onClick={() => onRunCycle("quarterly")}
+          className="text-xs px-2.5 py-1 bg-emerald-700 text-white rounded hover:bg-emerald-800 whitespace-nowrap"
+          title="Run quarterly cycle"
+        >Quarterly</button>
+      </div>
     </div>
   );
 }
