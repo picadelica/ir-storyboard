@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
-import type { Track } from "../types";
+import type { Client, Track } from "../types";
 
 interface Props {
   clientId?: string;
@@ -13,43 +13,68 @@ interface Props {
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
-function NewClientDrawer({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+interface ClientDrawerProps {
+  mode: "create" | "edit";
+  initial?: Client;
+  onClose: () => void;
+  onSaved: (id: string) => void;
+}
+
+function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
   const qc = useQueryClient();
-  const [id, setId] = useState("");
-  const [name, setName] = useState("");
-  const [sector, setSector] = useState("");
-  const [oneLiner, setOneLiner] = useState("");
-  const [founderName, setFounderName] = useState("");
-  const [founderHandle, setFounderHandle] = useState("");
+  const isEdit = mode === "edit";
+  const [id, setId] = useState(initial?.id ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [sector, setSector] = useState(initial?.sector ?? "");
+  const [oneLiner, setOneLiner] = useState(initial?.one_liner ?? "");
+  const [founderName, setFounderName] = useState(initial?.founder_name ?? "");
+  const [founderHandle, setFounderHandle] = useState(initial?.founder_handle ?? "");
+  const [aliases, setAliases] = useState((initial?.aliases ?? []).join(", "));
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   const [yamlContent, setYamlContent] = useState("");
-  const [mode, setMode] = useState<"form" | "yaml">("form");
+  const [inputMode, setInputMode] = useState<"form" | "yaml">("form");
   const [error, setError] = useState("");
 
-  const createMut = useMutation({
+  const saveMut = useMutation({
     mutationFn: async () => {
       setError("");
-      if (mode === "yaml") {
+      if (!isEdit && inputMode === "yaml") {
         const lines = yamlContent.split("\n");
         const idLine = lines.find(l => l.trim().startsWith("id:"));
         const parsedId = idLine ? idLine.split(":")[1].trim() : "";
         if (!parsedId) throw new Error("YAML must contain client.id");
         await api.upsertClient({ id: parsedId, name: parsedId });
         return api.importSeedYaml(parsedId, yamlContent);
-      } else {
-        if (!SLUG_RE.test(id)) throw new Error("ID: only lowercase letters, digits, hyphens");
-        if (!name.trim()) throw new Error("Name is required");
-        await api.upsertClient({
-          id, name, sector: sector || undefined,
-          one_liner: oneLiner || undefined,
-          founder_name: founderName || undefined,
-          founder_handle: founderHandle || undefined,
-        });
-        return { client_id: id, fact_count: 0, source_count: 0, track_count: 0 };
       }
+
+      const aliasList = aliases.split(",").map(a => a.trim()).filter(Boolean);
+      const payload = {
+        name,
+        sector: sector || undefined,
+        one_liner: oneLiner || undefined,
+        founder_name: founderName || undefined,
+        founder_handle: founderHandle || undefined,
+        aliases: aliasList,
+        notes: notes || undefined,
+      };
+
+      if (isEdit) {
+        if (!name.trim()) throw new Error("Name is required");
+        await api.patchClient(initial!.id, payload);
+        return { client_id: initial!.id };
+      }
+
+      if (!SLUG_RE.test(id)) throw new Error("ID: only lowercase letters, digits, hyphens");
+      if (!name.trim()) throw new Error("Name is required");
+      await api.upsertClient({ id, ...payload });
+      return { client_id: id };
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["clients"] });
-      onCreated(result.client_id);
+      if (isEdit && initial) {
+        qc.invalidateQueries({ queryKey: ["client", initial.id] });
+      }
+      onSaved((result as { client_id: string }).client_id);
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -59,27 +84,42 @@ function NewClientDrawer({ onClose, onCreated }: { onClose: () => void; onCreate
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div className="relative ml-auto w-[420px] h-full bg-white shadow-xl flex flex-col">
         <div className="px-5 py-4 border-b border-ink-line flex items-center justify-between">
-          <h2 className="text-sm font-semibold">New client</h2>
+          <h2 className="text-sm font-semibold">{isEdit ? "Edit client" : "New client"}</h2>
           <button onClick={onClose} className="text-ink-mute hover:text-ink text-lg leading-none">×</button>
         </div>
 
-        <div className="flex border-b border-ink-line text-xs">
-          <button
-            onClick={() => setMode("form")}
-            className={`px-4 py-2 border-b-2 transition ${mode === "form" ? "border-ink font-medium" : "border-transparent text-ink-mute"}`}
-          >Manual</button>
-          <button
-            onClick={() => setMode("yaml")}
-            className={`px-4 py-2 border-b-2 transition ${mode === "yaml" ? "border-ink font-medium" : "border-transparent text-ink-mute"}`}
-          >Import YAML</button>
-        </div>
+        {isEdit && initial && (initial.created_at || initial.created_by) && (
+          <div className="px-5 py-2 bg-slate-50 border-b border-ink-line text-xs text-ink-mute font-mono leading-snug">
+            <div>Created: {(initial.created_at ?? "—").slice(0, 19).replace("T", " ")}</div>
+            <div>Created by: {initial.created_by ?? "—"}</div>
+          </div>
+        )}
+
+        {!isEdit && (
+          <div className="flex border-b border-ink-line text-xs">
+            <button
+              onClick={() => setInputMode("form")}
+              className={`px-4 py-2 border-b-2 transition ${inputMode === "form" ? "border-ink font-medium" : "border-transparent text-ink-mute"}`}
+            >Manual</button>
+            <button
+              onClick={() => setInputMode("yaml")}
+              className={`px-4 py-2 border-b-2 transition ${inputMode === "yaml" ? "border-ink font-medium" : "border-transparent text-ink-mute"}`}
+            >Import YAML</button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          {mode === "form" ? (
+          {(isEdit || inputMode === "form") ? (
             <>
-              <Field label="ID (slug)" required>
-                <input value={id} onChange={e => setId(e.target.value.toLowerCase())}
-                  placeholder="acme-inc" className={input} />
+              <Field label="ID (slug)" required={!isEdit}>
+                <input
+                  value={id}
+                  onChange={e => !isEdit && setId(e.target.value.toLowerCase())}
+                  placeholder="acme-inc"
+                  readOnly={isEdit}
+                  title={isEdit ? "Slug cannot be changed — it is referenced by all related rows" : undefined}
+                  className={`${input} ${isEdit ? "bg-slate-50 text-ink-mute cursor-not-allowed" : ""}`}
+                />
               </Field>
               <Field label="Name" required>
                 <input value={name} onChange={e => setName(e.target.value)}
@@ -100,6 +140,15 @@ function NewClientDrawer({ onClose, onCreated }: { onClose: () => void; onCreate
               <Field label="Founder handle">
                 <input value={founderHandle} onChange={e => setFounderHandle(e.target.value)}
                   placeholder="@janesmith" className={input} />
+              </Field>
+              <Field label="Aliases (comma-separated)">
+                <input value={aliases} onChange={e => setAliases(e.target.value)}
+                  placeholder="Acme, ACM, Acme Corp" className={input} />
+              </Field>
+              <Field label="Notes">
+                <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                  placeholder="Internal notes" rows={4}
+                  className={`${input} resize-none`} />
               </Field>
             </>
           ) : (
@@ -123,11 +172,13 @@ function NewClientDrawer({ onClose, onCreated }: { onClose: () => void; onCreate
             Cancel
           </button>
           <button
-            onClick={() => createMut.mutate()}
-            disabled={createMut.isPending}
+            onClick={() => saveMut.mutate()}
+            disabled={saveMut.isPending}
             className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            {createMut.isPending ? "Creating…" : "Create client"}
+            {saveMut.isPending
+              ? (isEdit ? "Saving…" : "Creating…")
+              : (isEdit ? "Save" : "Create client")}
           </button>
         </div>
       </div>
@@ -153,6 +204,7 @@ export default function Sidebar({ clientId, quarter, onQuarterChange, onRunCycle
   const nav = useNavigate();
   const { tab } = useParams();
   const [showNewClient, setShowNewClient] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
 
   const clients = useQuery({ queryKey: ["clients"], queryFn: api.listClients });
   const tracks = useQuery({
@@ -196,15 +248,21 @@ export default function Sidebar({ clientId, quarter, onQuarterChange, onRunCycle
           )}
           <ul className="space-y-0.5">
             {clients.data?.map(c => (
-              <li key={c.id}>
+              <li key={c.id} className="group relative">
                 <Link
                   to={`/clients/${c.id}/${tab ?? "matrix"}`}
                   className={`flex items-center justify-between px-2 py-1.5 rounded text-sm
                     ${clientId === c.id ? "bg-slate-100 font-medium" : "hover:bg-slate-50"}`}
                 >
                   <span>{c.name}</span>
-                  <span className="text-[10px] text-ink-mute uppercase truncate ml-2">{c.sector?.split("/")[0]}</span>
+                  <span className="text-[10px] text-ink-mute uppercase truncate ml-2 mr-5">{c.sector?.split("/")[0]}</span>
                 </Link>
+                <button
+                  onClick={(e) => { e.preventDefault(); setEditingClient(c); }}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition px-1.5 text-ink-mute hover:text-ink rounded hover:bg-white"
+                  title="Edit client"
+                  aria-label={`Edit ${c.name}`}
+                >✎</button>
               </li>
             ))}
           </ul>
@@ -266,12 +324,21 @@ export default function Sidebar({ clientId, quarter, onQuarterChange, onRunCycle
       </aside>
 
       {showNewClient && (
-        <NewClientDrawer
+        <ClientDrawer
+          mode="create"
           onClose={() => setShowNewClient(false)}
-          onCreated={(id) => {
+          onSaved={(id) => {
             setShowNewClient(false);
             nav(`/clients/${id}/matrix`);
           }}
+        />
+      )}
+      {editingClient && (
+        <ClientDrawer
+          mode="edit"
+          initial={editingClient}
+          onClose={() => setEditingClient(null)}
+          onSaved={() => setEditingClient(null)}
         />
       )}
     </>

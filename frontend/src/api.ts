@@ -32,6 +32,8 @@ export const api = {
   getClient: (id: string) => call<Client>(`/clients/${id}`),
   upsertClient: (c: Client) =>
     call<Client>("/clients", { method: "POST", body: JSON.stringify(c) }),
+  patchClient: (id: string, patch: Partial<Omit<Client, "id" | "created_at" | "created_by">>) =>
+    call<Client>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   seedAccumulator: () =>
     call<{ ok: boolean; client_id: string }>("/clients/accumulator/seed-accumulator", {
       method: "POST", body: "{}",
