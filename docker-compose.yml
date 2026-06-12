@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    env_file:
+      - .env          # TRANSCRIBER, OPENAI_API_KEY, etc. — иначе аудио-ingest падает
+                      # на локальный faster-whisper (на 4 ГБ сервере висит часами)
     volumes:
       - storyboard-data:/app/data    # SQLite persists across restarts
     expose:
