@@ -1685,12 +1685,8 @@ def youtube_preview(client_id: str, body: YouTubePreviewIn, conn=Depends(get_con
     return YouTubeJobOut(job_id=job_id, status="processing")
 
 
-@app.get(
-    "/api/clients/{client_id}/ingest/youtube/preview/{job_id}",
-    response_model=YouTubeJobOut,
-    summary="Poll async YouTube preview job status",
-)
-def youtube_preview_status(client_id: str, job_id: str, conn=Depends(get_conn)):
+def _job_status_out(job_id: str) -> YouTubeJobOut:
+    """Shared poll logic for async preview jobs (YouTube + audio uploads)."""
     with _yt_jobs_lock:
         job = _yt_jobs.get(job_id)
     if job is None:
@@ -1704,6 +1700,15 @@ def youtube_preview_status(client_id: str, job_id: str, conn=Depends(get_conn)):
     if job["status"] == "error":
         return YouTubeJobOut(job_id=job_id, status="error", error=job["error"])
     return YouTubeJobOut(job_id=job_id, status="processing")
+
+
+@app.get(
+    "/api/clients/{client_id}/ingest/youtube/preview/{job_id}",
+    response_model=YouTubeJobOut,
+    summary="Poll async YouTube preview job status",
+)
+def youtube_preview_status(client_id: str, job_id: str, conn=Depends(get_conn)):
+    return _job_status_out(job_id)
 
 
 @app.post(
@@ -1855,6 +1860,140 @@ def _check_client(client_id: str, conn) -> None:
     row = conn.execute("SELECT id FROM clients WHERE id = ?", (client_id,)).fetchone()
     if not row:
         raise HTTPException(404, f"Client '{client_id}' not found")
+
+
+# ── Audio file Ingest endpoints (same job store + preview/commit contract) ────
+
+_AUDIO_ALLOWED_EXTENSIONS = {".m4a", ".mp3", ".wav", ".ogg", ".aac"}
+_AUDIO_MAX_BYTES = 500 * 1024 * 1024   # 500 MB
+
+
+def _audio_uploads_dir() -> Path:
+    import os
+    return Path(os.environ.get("AUDIO_UPLOADS_DIR", str(ROOT / "data" / "audio_uploads")))
+
+
+def _audio_job_run(job_id: str, client_id: str, file_path: str, title: str,
+                   sha256_hex: str, db_path: str) -> None:
+    """Background thread: run full audio preview pipeline and store result."""
+    from ir_storyboard import db as _db
+    conn = _db.connect(_db.DEFAULT_DB_PATH if not db_path else _db.Path(db_path))
+    _db.init_schema(conn)
+    from ir_storyboard.ingest.audio_pipeline import run_audio_preview
+    try:
+        result = run_audio_preview(
+            client_id, Path(file_path), title, conn, sha256_hex=sha256_hex,
+        )
+        with _yt_jobs_lock:
+            _yt_jobs[job_id] = {"status": "done", "result": result, "error": None}
+    except Exception as exc:
+        with _yt_jobs_lock:
+            _yt_jobs[job_id] = {"status": "error", "result": None, "error": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post(
+    "/api/clients/{client_id}/ingest/audio/preview",
+    response_model=YouTubeJobOut,
+    status_code=202,
+    summary="Upload an audio file and start async preview job — returns job_id",
+)
+def audio_preview(
+    client_id: str,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    conn=Depends(get_conn),
+):
+    _check_client(client_id, conn)
+    import hashlib as _hashlib
+    import shutil as _shutil
+    import tempfile as _tempfile
+    import uuid as _uuid
+    from ir_storyboard import db as _db
+
+    suffix = Path(file.filename or "upload.m4a").suffix.lower()
+    if suffix not in _AUDIO_ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            400,
+            f"Unsupported file type: {suffix}. Allowed: {sorted(_AUDIO_ALLOWED_EXTENSIONS)}",
+        )
+
+    # Stream to a temp file while hashing + enforcing the size limit
+    hasher = _hashlib.sha256()
+    total = 0
+    with _tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        while True:
+            block = file.file.read(1024 * 1024)
+            if not block:
+                break
+            total += len(block)
+            if total > _AUDIO_MAX_BYTES:
+                tmp.close()
+                tmp_path.unlink(missing_ok=True)
+                raise HTTPException(413, "Audio file exceeds the 500 MB limit")
+            hasher.update(block)
+            tmp.write(block)
+    if total == 0:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(400, "Empty file")
+
+    sha = hasher.hexdigest()
+    uploads_dir = _audio_uploads_dir()
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    dest = uploads_dir / f"{sha}{suffix}"
+    if dest.exists():
+        # Same content already uploaded — dedup by sha, drop the temp copy
+        tmp_path.unlink(missing_ok=True)
+    else:
+        _shutil.move(str(tmp_path), str(dest))
+
+    job_id = str(_uuid.uuid4())
+    with _yt_jobs_lock:
+        _yt_jobs[job_id] = {"status": "processing", "result": None, "error": None}
+    t = _threading.Thread(
+        target=_audio_job_run,
+        args=(
+            job_id, client_id, str(dest),
+            (title or "").strip() or (file.filename or dest.name),
+            sha, str(_db.DEFAULT_DB_PATH),
+        ),
+        daemon=True,
+    )
+    t.start()
+    return YouTubeJobOut(job_id=job_id, status="processing")
+
+
+@app.get(
+    "/api/clients/{client_id}/ingest/audio/preview/{job_id}",
+    response_model=YouTubeJobOut,
+    summary="Poll async audio preview job status",
+)
+def audio_preview_status(client_id: str, job_id: str, conn=Depends(get_conn)):
+    return _job_status_out(job_id)
+
+
+@app.post(
+    "/api/clients/{client_id}/ingest/audio/commit",
+    response_model=YouTubeCommitOut,
+    summary="Commit previewed audio-file facts into the matrix",
+)
+def audio_commit(client_id: str, body: YouTubeCommitIn, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    from ir_storyboard.ingest.audio_pipeline import run_audio_commit
+    try:
+        result = run_audio_commit(
+            preview_id=body.preview_id,
+            accepted_fact_ids=body.accepted_fact_ids or [],
+            overrides=body.overrides,
+            conn=conn,
+            expert_email=body.expert_email,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return YouTubeCommitOut(committed=result.committed, skipped=result.skipped)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

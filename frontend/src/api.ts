@@ -197,6 +197,43 @@ export const api = {
   youtubePreviewById: (clientId: string, previewId: string): Promise<YouTubePreviewResult> =>
     call<YouTubePreviewResult>(`/clients/${clientId}/ingest/youtube/preview-by-id/${previewId}`),
 
+  // ── Audio file Ingest (same job/preview/commit contract as YouTube) ─────────
+  audioPreviewStart: (clientId: string, file: File, title?: string): Promise<YouTubeJobOut> => {
+    const form = new FormData();
+    form.append("file", file);
+    if (title) form.append("title", title);
+    return fetch(`${API_BASE}/clients/${clientId}/ingest/audio/preview`, {
+      method: "POST",
+      body: form,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(`${res.status} ${res.statusText} — ${detail}`);
+      }
+      return res.json() as Promise<YouTubeJobOut>;
+    });
+  },
+
+  audioPreviewStatus: (clientId: string, jobId: string): Promise<YouTubeJobOut> =>
+    call<YouTubeJobOut>(`/clients/${clientId}/ingest/audio/preview/${jobId}`),
+
+  audioCommit: (
+    clientId: string,
+    previewId: string,
+    acceptedFactIds: number[],
+    overrides: Array<Record<string, unknown>>,
+    expertEmail: string,
+  ): Promise<YouTubeCommitOut> =>
+    call<YouTubeCommitOut>(`/clients/${clientId}/ingest/audio/commit`, {
+      method: "POST",
+      body: JSON.stringify({
+        preview_id: previewId,
+        accepted_fact_ids: acceptedFactIds,
+        overrides,
+        expert_email: expertEmail,
+      }),
+    }),
+
   // ── Methodology ─────────────────────────────────────────────────────────────
   methodology: (): Promise<MethodologyCell[]> => call<MethodologyCell[]>("/methodology"),
 

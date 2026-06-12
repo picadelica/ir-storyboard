@@ -1,0 +1,420 @@
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api";
+import type { Layer, YouTubePreviewResult } from "../types";
+import {
+  FactCard, SkippedCard, fmtDuration, editIsEmpty, type FactEdit,
+} from "./IngestYouTube";
+
+const ALLOWED_EXT = [".m4a", ".mp3", ".wav", ".ogg", ".aac"];
+const MAX_BYTES = 500 * 1024 * 1024;
+
+interface Props {
+  clientId: string;
+  onJumpToCell: (sid: string) => void;
+  layers?: Layer[];
+}
+
+export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
+  const subsectionOptions = (layers ?? []).flatMap(L =>
+    L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${s.name} (${L.name})` }))
+  );
+
+  const [screen, setScreen] = useState<"input" | "preview" | "done">("input");
+  const [file, setFile] = useState<File | null>(null);
+  const [title, setTitle] = useState("");
+  const [preview, setPreview] = useState<YouTubePreviewResult | null>(null);
+  const [dropped, setDropped] = useState<Set<number>>(new Set());
+  const [overrides, setOverrides] = useState<Set<number>>(new Set());
+  const [factEdits, setFactEdits] = useState<Record<number, FactEdit>>({});
+  const [skippedEdits, setSkippedEdits] = useState<Record<number, FactEdit>>({});
+  const [expertEmail, setExpertEmail] = useState("");
+  const [jobStatus, setJobStatus] = useState<string>("");
+  const [jobError, setJobError] = useState<string>("");
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const qc = useQueryClient();
+
+  function stopPolling() {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }
+  useEffect(() => () => stopPolling(), []);
+
+  const fileError = (() => {
+    if (!file) return "";
+    const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
+    if (!ALLOWED_EXT.includes(ext)) return `Неподдерживаемый формат ${ext}. Можно: ${ALLOWED_EXT.join(", ")}`;
+    if (file.size > MAX_BYTES) return "Файл больше 500 MB";
+    return "";
+  })();
+
+  const previewMut = useMutation({
+    mutationFn: () => {
+      if (!file) throw new Error("No file");
+      return api.audioPreviewStart(clientId, file, title.trim() || undefined);
+    },
+    onSuccess: (job) => {
+      setJobStatus("processing");
+      setJobError("");
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await api.audioPreviewStatus(clientId, job.job_id);
+          setJobStatus(status.status);
+          if (status.status === "done" && status.result) {
+            stopPolling();
+            setPreview(status.result);
+            setDropped(new Set());
+            setOverrides(new Set());
+            setFactEdits({});
+            setSkippedEdits({});
+            setScreen("preview");
+          } else if (status.status === "error") {
+            stopPolling();
+            setJobError(status.error || "что-то пошло не так");
+          }
+        } catch { stopPolling(); }
+      }, 5000);
+    },
+    onError: (e) => setJobError(e instanceof Error ? e.message : String(e)),
+  });
+
+  const commitMut = useMutation({
+    mutationFn: () => {
+      if (!preview) throw new Error("No preview");
+      const accepted = preview.facts
+        .map((_, i) => i)
+        .filter((i) => !dropped.has(i));
+
+      const ov: Array<Record<string, unknown>> = [];
+      for (const i of accepted) {
+        const e = factEdits[i];
+        if (!editIsEmpty(e)) ov.push({ kind: "fact", idx: i, ...e });
+      }
+      for (const i of Array.from(overrides)) {
+        const e = skippedEdits[i] || {};
+        ov.push({ kind: "skipped", idx: i, force_keep: true, ...e });
+      }
+
+      return api.audioCommit(
+        clientId,
+        preview.preview_id,
+        accepted,
+        ov,
+        expertEmail || "anonymous@example.com",
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["matrix", clientId] });
+      qc.invalidateQueries({ queryKey: ["punch", clientId] });
+      setScreen("done");
+    },
+  });
+
+  const keptCount = preview
+    ? preview.facts.filter((_, i) => !dropped.has(i)).length
+    : 0;
+
+  function updateEdit(
+    setter: (updater: (prev: Record<number, FactEdit>) => Record<number, FactEdit>) => void,
+    idx: number,
+    patch: FactEdit,
+  ) {
+    setter((prev) => {
+      const next = { ...prev };
+      const merged = { ...next[idx], ...patch } as Record<string, unknown>;
+      Object.keys(merged).forEach((k) => {
+        const v = merged[k];
+        if (v === "" || v === undefined || v === null) delete merged[k];
+      });
+      if (Object.keys(merged).length === 0) delete next[idx]; else next[idx] = merged as FactEdit;
+      return next;
+    });
+  }
+
+  // ── Input screen ─────────────────────────────────────────────────────────
+
+  if (screen === "input") {
+    const processing = previewMut.isPending || jobStatus === "processing";
+    return (
+      <div className="p-5 max-w-2xl space-y-6">
+        <h2 className="text-lg font-semibold">Ingest Audio Recording</h2>
+
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-ink-mute">
+            Audio file ({ALLOWED_EXT.join(" / ")}, до 500 MB)
+          </label>
+          <input
+            type="file"
+            accept={ALLOWED_EXT.join(",")}
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-ink-mute file:mr-3 file:px-3 file:py-1.5 file:text-sm file:font-medium file:border file:border-ink-line file:rounded file:bg-white file:text-ink hover:file:bg-slate-50 file:cursor-pointer"
+          />
+          {fileError && <div className="text-xs text-red-600">{fileError}</div>}
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-ink-mute">
+            Title (опционально — по умолчанию имя файла)
+          </label>
+          <input
+            type="text"
+            placeholder='например "Interview with founder 2026-06-01"'
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full text-sm border border-ink-line rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-ink"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <button
+            onClick={() => previewMut.mutate()}
+            disabled={!file || !!fileError || processing}
+            className={`px-4 py-2 text-sm rounded font-medium transition ${
+              !file || fileError || processing
+                ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                : "bg-ink text-white hover:bg-ink/90"
+            }`}
+          >
+            {processing ? "Processing…" : "Preview"}
+          </button>
+          {processing && (
+            <div className="text-xs text-ink-mute space-y-1">
+              <div>Запущено в фоне — обрабатываем…</div>
+              <div className="text-[10px] text-slate-400">
+                Транскрибируем → извлекаем факты. Для часовой записи ~5–15 мин.
+                Повторная загрузка того же файла бесплатна — транскрипт кэшируется.
+              </div>
+            </div>
+          )}
+          {(jobStatus === "error" || jobError) && !processing && (
+            <div className="text-sm text-red-600 bg-red-50 rounded p-3">
+              Ошибка: {jobError || "что-то пошло не так"}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Done screen ────────────────────────────────────────────────────────────
+
+  if (screen === "done" && commitMut.data) {
+    const r = commitMut.data;
+    return (
+      <div className="p-5 max-w-2xl space-y-4">
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+          <div className="font-semibold text-emerald-800 mb-1">Saved to matrix</div>
+          <div className="text-sm text-emerald-700">
+            {r.committed} fact{r.committed !== 1 ? "s" : ""} committed ·{" "}
+            {r.skipped} skipped (duplicates or dropped)
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={() => onJumpToCell(preview?.facts[0]?.subsection_id ?? "2.1")}
+            className="px-4 py-2 text-sm bg-ink text-white rounded hover:bg-ink/90"
+          >
+            View in Matrix
+          </button>
+          <button
+            onClick={() => {
+              setScreen("input");
+              setPreview(null);
+              setFile(null);
+              setTitle("");
+              setJobStatus("");
+              setJobError("");
+              stopPolling();
+              previewMut.reset();
+              commitMut.reset();
+            }}
+            className="px-4 py-2 text-sm border border-ink-line rounded hover:bg-slate-50"
+          >
+            Ingest another
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Preview screen ─────────────────────────────────────────────────────────
+
+  if (!preview) return null;
+
+  return (
+    <div className="p-5 max-w-4xl space-y-6">
+      <div className="flex items-baseline justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Preview</h2>
+          <div className="text-xs text-ink-mute mt-0.5">
+            {preview.facts.length} facts · {preview.skipped.length} skipped by LayerGuard
+          </div>
+        </div>
+        <button
+          onClick={() => { setScreen("input"); previewMut.reset(); setJobStatus(""); }}
+          className="text-xs text-ink-mute hover:text-ink"
+        >
+          ← Back
+        </button>
+      </div>
+
+      {/* Audio meta */}
+      <div className="bg-slate-50 border border-ink-line rounded-lg p-4 space-y-1 text-sm">
+        <div className="font-medium">{preview.meta.title}</div>
+        <div className="text-xs text-ink-mute">
+          {preview.meta.channel_name} · {fmtDuration(preview.meta.duration_sec)}
+          {preview.from_cache && " · transcript from cache"}
+          {preview.transcribe_cost_usd != null &&
+            ` · ~$${preview.transcribe_cost_usd.toFixed(2)} (OpenAI Whisper)`}
+        </div>
+        <div className="text-xs text-slate-400 font-mono">{preview.meta.canonical_url}</div>
+      </div>
+
+      {/* Orientation brief */}
+      {(preview.video_brief || (preview.cell_briefs && Object.keys(preview.cell_briefs).length > 0)) && (
+        <div className="border border-ink-line rounded-lg p-4 space-y-3 bg-white">
+          {preview.video_brief && (
+            <div>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-ink-mute mb-1">
+                Brief
+              </div>
+              <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
+                {preview.video_brief}
+              </div>
+            </div>
+          )}
+          {preview.cell_briefs && Object.keys(preview.cell_briefs).length > 0 && (
+            <div>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-ink-mute mb-1">
+                Coverage ({Object.keys(preview.cell_briefs).length} cells)
+              </div>
+              <ul className="space-y-1">
+                {Object.entries(preview.cell_briefs)
+                  .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+                  .map(([sid, brief]) => (
+                    <li key={sid} className="text-sm flex gap-2">
+                      <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600 shrink-0 mt-0.5">
+                        {sid}
+                      </span>
+                      <span className="text-slate-700">{brief}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Chunk-failure warning */}
+      {(preview.stats.chunks_failed ?? 0) > 0 && (
+        <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-900">
+          <div className="font-medium">
+            ⚠ {preview.stats.chunks_failed} of {preview.stats.chunks_total ?? "?"} chunks failed
+          </div>
+          <div className="text-xs mt-1">
+            Часть окон не дала фактов (LLM вернул пустой ответ). Перезапустите
+            preview — транскрипт в кэше, повтор бесплатный.
+          </div>
+        </div>
+      )}
+
+      {/* Parser notes */}
+      {preview.notes.length > 0 && (
+        <details className="text-xs text-ink-mute">
+          <summary className="cursor-pointer hover:text-ink">
+            {preview.notes.length} note{preview.notes.length !== 1 ? "s" : ""}
+          </summary>
+          <ul className="mt-1 space-y-0.5 pl-3">
+            {preview.notes.map((n, i) => <li key={i}>— {n}</li>)}
+          </ul>
+        </details>
+      )}
+
+      {/* Facts */}
+      <div>
+        <div className="text-xs font-medium uppercase text-ink-mute tracking-wide mb-2">
+          Facts ({preview.facts.length})
+        </div>
+        <div className="space-y-2">
+          {preview.facts.map((fact, idx) => (
+            <FactCard
+              key={idx}
+              fact={fact}
+              edit={factEdits[idx]}
+              dropped={dropped.has(idx)}
+              subsectionOptions={subsectionOptions}
+              onToggleDrop={() => setDropped((prev) => {
+                const next = new Set(prev);
+                next.has(idx) ? next.delete(idx) : next.add(idx);
+                return next;
+              })}
+              onEdit={(patch) => updateEdit(setFactEdits, idx, patch)}
+              clientId={clientId}
+              sourceTitle={preview.meta.title}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Skipped facts (LayerGuard) */}
+      {preview.skipped.length > 0 && (
+        <div>
+          <div className="text-xs font-medium uppercase text-ink-mute tracking-wide mb-2">
+            Skipped by LayerGuard ({preview.skipped.length})
+          </div>
+          <div className="space-y-2">
+            {preview.skipped.map((s, idx) => (
+              <SkippedCard
+                key={idx}
+                skipped={s}
+                edit={skippedEdits[idx]}
+                overridden={overrides.has(idx)}
+                subsectionOptions={subsectionOptions}
+                clientId={clientId}
+                sourceTitle={preview.meta.title}
+                onToggleOverride={() => setOverrides((prev) => {
+                  const next = new Set(prev);
+                  next.has(idx) ? next.delete(idx) : next.add(idx);
+                  return next;
+                })}
+                onEdit={(patch) => updateEdit(setSkippedEdits, idx, patch)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Commit bar */}
+      <div className="sticky bottom-0 bg-white border-t border-ink-line pt-4 pb-2 space-y-3">
+        <div className="flex items-center gap-3">
+          <input
+            type="email"
+            placeholder="your@email.com"
+            value={expertEmail}
+            onChange={(e) => setExpertEmail(e.target.value)}
+            className="flex-1 text-sm border border-ink-line rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-ink"
+          />
+          <button
+            onClick={() => commitMut.mutate()}
+            disabled={keptCount === 0 || commitMut.isPending}
+            className={`px-5 py-2 text-sm rounded font-medium transition ${
+              keptCount === 0 || commitMut.isPending
+                ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                : "bg-ink text-white hover:bg-ink/90"
+            }`}
+          >
+            {commitMut.isPending
+              ? "Saving…"
+              : `Save ${keptCount} fact${keptCount !== 1 ? "s" : ""} to matrix`}
+          </button>
+        </div>
+        {keptCount === 0 && (
+          <div className="text-xs text-red-600">Drop all facts — nothing to commit</div>
+        )}
+        {commitMut.isError && (
+          <div className="text-xs text-red-600">{String(commitMut.error)}</div>
+        )}
+      </div>
+    </div>
+  );
+}

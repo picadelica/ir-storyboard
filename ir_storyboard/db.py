@@ -67,7 +67,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS ingest_audit (
             id              TEXT PRIMARY KEY,
             client_id       TEXT NOT NULL,
-            ingest_kind     TEXT NOT NULL CHECK(ingest_kind IN ('llm_report', 'manual_seed', 'youtube')),
+            ingest_kind     TEXT NOT NULL CHECK(ingest_kind IN ('llm_report', 'manual_seed', 'youtube', 'audio_file')),
             source_artifact TEXT NOT NULL,
             agent           TEXT,
             cite_format     TEXT,
@@ -83,6 +83,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     """)
     # youtube ingest: extend CHECK constraint to include 'youtube' on existing DBs
     _migrate_audit_add_youtube(conn)
+    # audio ingest: extend CHECK constraint to include 'audio_file' on existing DBs
+    _migrate_audit_add_audio_file(conn)
     # youtube ingest: add youtube-specific columns to ingest_audit
     _add_column_if_missing(conn, "ingest_audit", "video_id", "TEXT")
     _add_column_if_missing(conn, "ingest_audit", "transcriber", "TEXT")
@@ -115,7 +117,7 @@ def _migrate_audit_add_youtube(conn: sqlite3.Connection) -> None:
         CREATE TABLE ingest_audit (
             id              TEXT PRIMARY KEY,
             client_id       TEXT NOT NULL,
-            ingest_kind     TEXT NOT NULL CHECK(ingest_kind IN ('llm_report', 'manual_seed', 'youtube')),
+            ingest_kind     TEXT NOT NULL CHECK(ingest_kind IN ('llm_report', 'manual_seed', 'youtube', 'audio_file')),
             source_artifact TEXT NOT NULL,
             agent           TEXT,
             cite_format     TEXT,
@@ -146,6 +148,72 @@ def _migrate_audit_add_youtube(conn: sqlite3.Connection) -> None:
                COALESCE(expert_email, ''),
                COALESCE(confirmed_at, parsed_at),
                COALESCE(preview_json, '{}')
+        FROM _ingest_audit_old;
+
+        DROP TABLE _ingest_audit_old;
+    """)
+
+
+def _migrate_audit_add_audio_file(conn: sqlite3.Connection) -> None:
+    """Extend ingest_audit CHECK constraint to include 'audio_file' kind (idempotent).
+
+    Same rebuild pattern as _migrate_audit_add_youtube: SQLite cannot ALTER a CHECK,
+    so the table is recreated with the extended constraint, preserving data and the
+    youtube-era columns (which may or may not exist on the old table).
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='ingest_audit'"
+    ).fetchone()
+    if row is None:
+        return  # table not yet created
+    ddl = row[0] or ""
+    if "'audio_file'" in ddl or '"audio_file"' in ddl:
+        return  # already migrated
+
+    old_cols = {
+        r[1] for r in conn.execute("PRAGMA table_info(ingest_audit)").fetchall()
+    }
+    extra = [c for c in ("video_id", "transcriber", "transcribe_cost_usd",
+                         "transcribe_duration_sec") if c in old_cols]
+    extra_select = ("".join(f", {c}" for c in extra))
+
+    conn.executescript(f"""
+        ALTER TABLE ingest_audit RENAME TO _ingest_audit_old;
+
+        CREATE TABLE ingest_audit (
+            id              TEXT PRIMARY KEY,
+            client_id       TEXT NOT NULL,
+            ingest_kind     TEXT NOT NULL CHECK(ingest_kind IN ('llm_report', 'manual_seed', 'youtube', 'audio_file')),
+            source_artifact TEXT NOT NULL,
+            agent           TEXT,
+            cite_format     TEXT,
+            parsed_at       TIMESTAMP NOT NULL,
+            facts_emitted   INTEGER NOT NULL DEFAULT 0,
+            facts_committed INTEGER NOT NULL DEFAULT 0,
+            greys_emitted   INTEGER NOT NULL DEFAULT 0,
+            channel_warnings INTEGER NOT NULL DEFAULT 0,
+            expert_email    TEXT NOT NULL DEFAULT '',
+            confirmed_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            preview_json    TEXT NOT NULL DEFAULT '{{}}',
+            video_id        TEXT,
+            transcriber     TEXT,
+            transcribe_cost_usd REAL,
+            transcribe_duration_sec INTEGER
+        );
+
+        INSERT INTO ingest_audit
+            (id, client_id, ingest_kind, source_artifact, agent, cite_format,
+             parsed_at, facts_emitted, facts_committed, greys_emitted,
+             channel_warnings, expert_email, confirmed_at, preview_json{extra_select})
+        SELECT id, client_id, ingest_kind, source_artifact, agent, cite_format,
+               parsed_at,
+               COALESCE(facts_emitted, 0),
+               COALESCE(facts_committed, 0),
+               COALESCE(greys_emitted, 0),
+               COALESCE(channel_warnings, 0),
+               COALESCE(expert_email, ''),
+               COALESCE(confirmed_at, parsed_at),
+               COALESCE(preview_json, '{{}}'){extra_select}
         FROM _ingest_audit_old;
 
         DROP TABLE _ingest_audit_old;

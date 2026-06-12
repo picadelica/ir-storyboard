@@ -178,3 +178,13 @@ tests/fixtures/llm_report/
 
 Эти файлы — заархивированный контекст. Не редактировать без явной причины.
 Новый объём работы — новый task-spec или серия коммитов с понятным префиксом.
+
+## Оркестратор
+
+Проект зарегистрирован в оркестраторе (UI: http://216.57.108.107:5000/ui/projects/ir-storyboard),
+слаг: `ir-storyboard`. Правила и API: ~/Projects/conductor-orchestrator/docs/claudecode-onboarding.md;
+реквизиты: `source ~/.config/conductor-orchestrator/credentials`; управление — скилл /conductor.
+Деплой: workflow `deploy_ir_storyboard` (pull feat/v2 → compose build (оба файла) → up → health),
+сервер otto 216.57.108.107, /opt/ir-storyboard. Руками по SSH не деплоить, на сервере не коммитить.
+Паспорт (стадия/вехи/доки): `PATCH $REGISTRY/projects/ir-storyboard/state` (X-Api-Key).
+В `input.projectId` запусков — `ir-storyboard`.

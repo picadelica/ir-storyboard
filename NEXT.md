@@ -8,82 +8,61 @@
 
 ---
 
-**Последнее обновление:** 2026-06-09
+**Последнее обновление:** 2026-06-12
 **Ветка:** `feat/v2`
-**Working tree:** clean (untracked: `12.jpeg`, `DIARIZATION_PLAN.md`, `frontend/package-lock.json`, локальные TS-кэши)
-**HEAD:** `924bd28 polish-6: drop GREEN/RED/GREY labels + show rationale in card views`
-**Прод:** не перекатан — после деплоя нужен rebuild фронта (новые компоненты `SourceLine`/`FlagDot`, edit-drawer) + backend (миграция rationale/created_by идемпотентная, безопасна на live SQLite).
+**Working tree:** НЕ закоммичена серия Audio Ingest (см. ниже) — коммитить после
+зелёного `pytest tests/` + `npm run build`.
+**HEAD:** `2e45f39 feat: collapsible sidebar — clients only, controls moved to tabs row`
 
-## Что сделано за сессию 2026-06-09 — polish series (Tasks 1–6)
+## Что сделано за сессию 2026-06-12 — Audio file Ingest (uncommitted)
 
-1. **polish-1** (`4b711aa`) — schema migrations + API. `facts.rationale`,
-   `facts.created_by`, `clients.created_by` через идемпотентные `ALTER TABLE`
-   в `db.init_schema`. `ClientOut.created_at` / `created_by`, `FactOut.rationale`
-   / `created_by` отдаются через API. 6 тестов в `tests/test_polish_schema.py`.
+Ingest аудиофайлов (.m4a/.mp3/.wav/.ogg/.aac) по образцу YouTube Ingest.
+Начато одной сессией (рефакторинг общего ядра), достроено другой:
 
-2. **polish-2** (`b09f1a6`) — rationale field сквозной слой. Все 4 extractor-промпта
-   (Research / LLM Report section + batch / YouTube transcript) получили
-   общий блок `_RATIONALE_RULES`. `ExtractedFact` / `ResolvedFact` /
-   `AnchoredFact` / `PreFact` несут `rationale`. `matrix.validate_rationale`
-   (red→required, grey→optional, green→silently dropped) интегрирован в
-   `add_fact` / `update_fact`. Все 3 commit endpoint'а (research / llm-report
-   / youtube) пробрасывают rationale в БД. Channel base пропускает auto-classify
-   red факты без rationale (warning вместо crash). 16 тестов в
-   `tests/test_polish_rationale.py`. Legacy red факты с пустым rationale
-   уцелели (PATCH без изменения flag/rationale не валидирует пару).
+1. **Рефакторинг общего ядра** (начат предыдущей сессией, дофиксен):
+   - `loaders/transcriber.py`: `transcribe_audio_chunks()` (split → transcribe
+     → shift → dedup, общий для YouTube и файлов), таблица `audio_transcripts`
+     (кэш по sha256 файла) + `get_or_transcribe_audio_file()`.
+   - `youtube_pipeline.py`: `run_transcript_preview()` — общий preview-кор
+     (extract → anchor → guard → dedup → brief → ingest_audit). Дофиксено:
+     INSERT использовал несуществующий `transcriber.name` и хардкод
+     `'youtube'` → теперь параметры `transcriber_name` / `ingest_kind`;
+     `run_youtube_commit` берёт channel из `preview_json["channel"]`
+     (fallback `online_interview`).
 
-3. **polish-3** (`603d3a9`) — `PATCH /api/clients/{id}` + `ClientPatch`.
-   Partial update через `model_dump(exclude_unset=True)`. id read-only
-   (Pydantic ignore`s` extra body keys). 8 тестов в
-   `tests/test_polish_client_patch.py`.
+2. **`ingest/audio_pipeline.py`** — `AudioFileMeta` (duck-typed под
+   YouTubeVideoMeta, `video_id`=sha256[:16], `canonical_url`=file://sha16,
+   `channel_name`='audio upload'), `run_audio_preview()` (ffprobe-длительность,
+   sha-кэш транскрипта, `ingest_kind='audio_file'`, факты без per-fact URL —
+   `fact_source_urls=False`), `run_audio_commit()` (делегат общего commit).
+   Канал — `online_interview` (как YouTube), LayerGuard блокирует L5/L6/L8.
 
-4. **polish-4** (`4ec1da5`) — `<SourceLine>` компонент. Четыре render-ветки
-   (web / llm_report / offline / none); ≥12px шрифт; ChannelBadge + truncated
-   title + ↗ + 📦/⏳ + ▶ MM:SS. Применён в CellDrawer + IngestYouTube
-   (FactCard + SkippedCard). ResearchView: 10px URL bumped to text-xs.
-   `matrix.facts_for_cell` / `get_fact` переписаны на явный SELECT с
-   `COALESCE(NULLIF(f.source_url, ''), s.url)` — иначе для не-YouTube фактов
-   `source_url` оставался пустым. 4 теста в `tests/test_polish_source_line.py`.
+3. **`backend/main.py`** — POST `/api/clients/{id}/ingest/audio/preview`
+   (multipart, лимит 500MB, дедуп файла по sha256 в `data/audio_uploads/`
+   (env `AUDIO_UPLOADS_DIR`), form-поле `title` опц.) → 202 `{job_id}`;
+   GET `.../audio/preview/{job_id}` (общий `_job_status_out` с YouTube);
+   POST `.../audio/commit`. Job store общий (`_yt_jobs`).
 
-5. **polish-5** (`7f33b71`) — Edit client drawer + ✎ pencil.
-   `NewClientDrawer` → `ClientDrawer` с `mode: "create" | "edit"`,
-   `initial?: Client`. В edit-режиме: блок Created/Created by сверху,
-   YAML-tab скрыт, id read-only, Save → `api.patchClient`. Pencil в списке
-   клиентов hover-revealed. `api.patchClient(id, patch)` добавлен.
+4. **Frontend** — `IngestAudio.tsx` (file input + title → джоб-поллинг →
+   preview с edit/drop/override → commit), переиспользует экспортированные
+   `FactCard`/`SkippedCard`/`FactEditForm`-логику из `IngestYouTube.tsx`.
+   Таб "Audio" в `App.tsx`, `api.audioPreviewStart/Status/Commit`.
 
-6. **polish-6** (`924bd28`) — visual cleanup. Новый `<FlagDot>` (8×8 цветной
-   кружок с aria-label). Заменил текстовые подписи GREEN/RED/GREY в
-   CellDrawer / IngestYouTube / IngestLLMReport. Концерн-блок ("concern: …")
-   под red фактом, "(не указано)" для legacy red без rationale; "gap: …" для
-   grey с rationale. CellDrawer edit + add форма — textarea для rationale,
-   Save заблокирован для red без rationale. ResearchView CandidateRow:
-   при `flag=red` появляется rationale input — иначе confirm уйдёт в 422.
-   Цветовая модель ячеек MatrixGrid не тронута.
+5. **`tests/test_audio_ingest.py`** — 8 тестов, всё внешнее замокано
+   (ffprobe/ffmpeg/whisper): sha-кэш (повтор → from_cache, transcribe один
+   раз), audit kind `audio_file`, commit пишет факты + идемпотентный replay,
+   API job-flow (202 → poll → done), отказ по расширению/пустому файлу,
+   sha-дедуп файлов на диске, commit endpoint.
 
-**Тесты:** 163 passed, 9 failed (тот же baseline что был до polish-серии —
-LLM Report e2e/api/citations/extractor/pipeline + 2 youtube_api теста; не
-регрессии этой серии).
+## Open / следующие шаги
 
-## Следующие разумные шаги
-
-1. **Бэкфилл rationale для legacy red фактов** — решено НЕ делать в этой серии
-   (см. open question ниже). Эксперт допишет вручную через CellDrawer edit
-   при необходимости.
-2. **YouTube FactEditForm rationale-поле** — пропущено в polish-6 (требует
-   расширения `FactEdit`, `editIsEmpty`, `_apply_edit`-сериализации;
-   аналитик пока редактирует rationale пост-коммитом через CellDrawer).
-3. **Починить baseline 9 failed тестов** — отдельная серия, ортогональна polish.
-   Все 9 падают и на чистом `ccb8c8f` тоже (предсуществующие, не наши).
-4. **Перекат прода** — после полировки рекомендуется
-   `docker-compose up -d --build` на сервере. Миграция SQLite — идемпотентный
-   ALTER, без даунтайма.
-
-## Открытые вопросы
-
-- **Backfill rationale для existing red.** В БД могут быть red факты с
-  `rationale=''` (из старых ingest до polish-2). UI показывает
-  «⚠ Concern: (не указано)». Если эксперты захотят авто-сгенерировать
-  rationale задним числом — отдельный скрипт через Anthropic. Default: НЕ
-  делать.
-- **rationale-поле в YouTube/LLM-report preview edit-form** — см. шаг 2 выше.
-- **`created_by` пока NULL** — заготовка под мульти-пользователя.
+1. **Прогнать `python -m pytest tests/ -q` и `npm run build`** — в сессии
+   2026-06-12 pytest был заблокирован permission-настройками агентского
+   окружения (запуск из cwd вне проекта); код не прогонялся локально.
+   `tsc -b` (часть build) прошёл.
+2. Закоммитить серию (`audio-1: ...`) после зелёных тестов.
+3. Baseline 9 failed тестов (LLM Report + 2 youtube_api) — предсуществующие,
+   ортогональны (см. сессию 2026-06-09).
+4. Audio history endpoint/таб не делали (preview-by-id и history покрывают
+   только youtube kind) — добавить при необходимости.
+5. Диаризация — см. `DIARIZATION_PLAN.md` (untracked, план).

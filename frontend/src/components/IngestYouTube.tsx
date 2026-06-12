@@ -18,7 +18,7 @@ export interface FactEdit {
   flag?: string;
 }
 
-function editIsEmpty(e: FactEdit | undefined): boolean {
+export function editIsEmpty(e: FactEdit | undefined): boolean {
   return !e || (!e.text_ru && !e.subsection_id && !e.flag);
 }
 
@@ -28,7 +28,7 @@ const FLAG_COLORS: Record<string, string> = {
   grey: "text-slate-500 bg-slate-50 border-slate-200",
 };
 
-function fmtDuration(sec: number): string {
+export function fmtDuration(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
@@ -909,7 +909,7 @@ interface FactCardProps {
   sourceTitle?: string;
 }
 
-function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, subsectionOptions, onToggleDrop, onEdit, clientId, sourceTitle }: FactCardProps) {
+export function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, subsectionOptions, onToggleDrop, onEdit, clientId, sourceTitle }: FactCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (fact.text_ru || fact.text);
   const effectiveSid = edit?.subsection_id ?? fact.subsection_id;
@@ -1146,7 +1146,7 @@ interface SkippedCardProps {
   sourceTitle?: string;
 }
 
-function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOptions, onToggleOverride, onEdit, clientId, sourceTitle }: SkippedCardProps) {
+export function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOptions, onToggleOverride, onEdit, clientId, sourceTitle }: SkippedCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (skipped.text_ru || skipped.text);
   const effectiveSid = edit?.subsection_id ?? skipped.subsection_id;

@@ -276,6 +276,39 @@ def dedup_overlap_segments(
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
+def transcribe_audio_chunks(
+    audio_path: Path,
+    transcriber: Transcriber,
+    language_hint: Optional[str] = None,
+) -> list[TranscriptSegment]:
+    """Transcribe one audio file: split → per-chunk transcribe → shift → dedup.
+
+    Shared core for both YouTube ingest (after fetch_audio) and direct audio
+    file uploads. Returns segments with global (whole-file) timestamps.
+    """
+    chunks = split_audio(audio_path)
+    overlap_sec = int(os.environ.get("CHUNK_OVERLAP_SEC", "5"))
+
+    chunk_segments: list[list[TranscriptSegment]] = []
+    chunk_boundaries: list[float] = []
+
+    for chunk in chunks:
+        raw = transcriber.transcribe(audio_path=chunk.path, language_hint=language_hint)
+        # Shift to global time
+        shifted = [
+            TranscriptSegment(
+                text=s.text,
+                start=s.start + chunk.chunk_start_sec,
+                end=s.end + chunk.chunk_start_sec,
+            )
+            for s in raw
+        ]
+        chunk_segments.append(shifted)
+        chunk_boundaries.append(chunk.chunk_start_sec)
+
+    return dedup_overlap_segments(chunk_segments, chunk_boundaries, overlap_sec)
+
+
 def get_or_transcribe(
     video_id: str,
     meta,                          # YouTubeVideoMeta
@@ -329,30 +362,8 @@ def get_or_transcribe(
 
     t_start = time.time()
     audio_path = fetch_audio(video_id, cache_dir)
-    chunks = split_audio(audio_path)
-    overlap_sec = int(os.environ.get("CHUNK_OVERLAP_SEC", "5"))
-
-    chunk_segments: list[list[TranscriptSegment]] = []
-    chunk_boundaries: list[float] = []
+    all_segments = transcribe_audio_chunks(audio_path, transcriber, language_hint=meta.language)
     detected_language = meta.language or "en"
-
-    for chunk in chunks:
-        raw = transcriber.transcribe(audio_path=chunk.path, language_hint=meta.language)
-        # Shift to global time
-        shifted = [
-            TranscriptSegment(
-                text=s.text,
-                start=s.start + chunk.chunk_start_sec,
-                end=s.end + chunk.chunk_start_sec,
-            )
-            for s in raw
-        ]
-        if shifted and not detected_language:
-            detected_language = "en"
-        chunk_segments.append(shifted)
-        chunk_boundaries.append(chunk.chunk_start_sec)
-
-    all_segments = dedup_overlap_segments(chunk_segments, chunk_boundaries, overlap_sec)
     wall_clock = int(time.time() - t_start)
 
     segments_json = json.dumps([
@@ -397,3 +408,83 @@ def _ensure_transcripts_table(conn: sqlite3.Connection) -> None:
         )
     """)
     conn.commit()
+
+
+# ── Audio file uploads (cache keyed by file sha256) ──────────────────────────
+
+def _ensure_audio_transcripts_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS audio_transcripts (
+            file_sha256     TEXT PRIMARY KEY,
+            canonical_url   TEXT NOT NULL,
+            title           TEXT NOT NULL,
+            channel_name    TEXT NOT NULL,
+            duration_sec    INTEGER NOT NULL,
+            language        TEXT NOT NULL,
+            transcriber     TEXT NOT NULL,
+            segments_json   TEXT NOT NULL,
+            transcribed_at  TIMESTAMP NOT NULL,
+            transcribe_duration_sec INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.commit()
+
+
+def get_or_transcribe_audio_file(
+    file_sha256: str,
+    audio_path: Path,
+    meta,                          # AudioFileMeta (duck-typed: title/channel_name/duration_sec/language/canonical_url)
+    transcriber: Transcriber,
+    conn: sqlite3.Connection,
+) -> Transcript:
+    """Return Transcript for an uploaded audio file, using the sha256-keyed
+    audio_transcripts cache. Same semantics as get_or_transcribe: a cache row
+    produced by a different transcriber is re-transcribed and overwritten.
+    """
+    _ensure_audio_transcripts_table(conn)
+
+    row = conn.execute(
+        "SELECT * FROM audio_transcripts WHERE file_sha256 = ?", (file_sha256,)
+    ).fetchone()
+
+    if row and row["transcriber"] == transcriber.name:
+        segs = [
+            TranscriptSegment(**s)
+            for s in json.loads(row["segments_json"])
+        ]
+        return Transcript(
+            segments=segs,
+            language=row["language"],
+            transcriber=row["transcriber"],
+            duration_sec=row["duration_sec"],
+        )
+
+    t_start = time.time()
+    all_segments = transcribe_audio_chunks(audio_path, transcriber, language_hint=meta.language)
+    detected_language = meta.language or "en"
+    wall_clock = int(time.time() - t_start)
+
+    segments_json = json.dumps([
+        {"text": s.text, "start": s.start, "end": s.end}
+        for s in all_segments
+    ])
+
+    conn.execute(
+        """INSERT OR REPLACE INTO audio_transcripts
+            (file_sha256, canonical_url, title, channel_name, duration_sec,
+             language, transcriber, segments_json, transcribed_at, transcribe_duration_sec)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)""",
+        (
+            file_sha256, meta.canonical_url, meta.title, meta.channel_name,
+            meta.duration_sec, detected_language, transcriber.name,
+            segments_json, wall_clock,
+        ),
+    )
+    conn.commit()
+
+    return Transcript(
+        segments=all_segments,
+        language=detected_language,
+        transcriber=transcriber.name,
+        duration_sec=meta.duration_sec,
+    )

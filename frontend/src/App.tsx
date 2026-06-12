@@ -15,6 +15,7 @@ import WorkView from "./components/WorkView";
 import ResearchView from "./components/ResearchView";
 import IngestLLMReport from "./components/IngestLLMReport";
 import IngestYouTube from "./components/IngestYouTube";
+import IngestAudio from "./components/IngestAudio";
 import MethodologyView from "./components/MethodologyView";
 import PlanView from "./components/PlanView";
 
@@ -108,6 +109,9 @@ function ClientPage() {
           {activeTab === "youtube" && (
             <IngestYouTube clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
           )}
+          {activeTab === "audio" && (
+            <IngestAudio clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
+          )}
           {activeTab === "methodology" && (
             <MethodologyView clientId={clientId!} />
           )}
@@ -157,6 +161,7 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle }: Tab
     { id: "plan",        label: "Plan" },
     { id: "ingest",      label: "Ingest" },
     { id: "youtube",     label: "YouTube" },
+    { id: "audio",       label: "Audio" },
     { id: "research",    label: "Research" },
     { id: "work",        label: "Work" },
     { id: "punch",       label: "Punch-list" },

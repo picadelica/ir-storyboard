@@ -131,24 +131,13 @@ def run_youtube_preview(
     cache_dir=None,
 ) -> YouTubePreviewResult:
     """Full pipeline: URL → metadata → transcript → extract → anchor → guard → preview."""
-    import uuid
     from pathlib import Path
 
     _ensure_audit_table_youtube(conn)
     from .loaders.transcriber import _ensure_transcripts_table
     _ensure_transcripts_table(conn)
 
-    preview_id = str(uuid.uuid4())
     notes: list[str] = []
-    stats: dict[str, int] = {
-        "facts_emitted": 0,
-        "greys": 0,
-        "channel_warnings": 0,
-        "skipped_layer_guard": 0,
-        "duplicates_skipped": 0,
-        "chunks_total": 0,
-        "chunks_failed": 0,
-    }
 
     # Step 1: normalize + metadata
     canonical_url = normalize_url(url)
@@ -176,7 +165,54 @@ def run_youtube_preview(
     if transcriber.name == "openai-whisper-1":
         transcribe_cost_usd = round((meta.duration_sec / 60.0) * 0.006, 4)
 
-    # Steps 3-5: extract facts directly from transcript segments (chunk-by-chunk)
+    # Steps 3-9: shared transcript → facts → audit core
+    return run_transcript_preview(
+        client_id=client_id,
+        canonical_url=canonical_url,
+        meta=meta,
+        transcript=transcript,
+        conn=conn,
+        channel="online_interview",
+        ingest_kind="youtube",
+        transcriber_name=transcriber.name,
+        from_cache=from_cache,
+        transcribe_cost_usd=transcribe_cost_usd,
+        notes=notes,
+    )
+
+
+def run_transcript_preview(
+    client_id: str,
+    canonical_url: str,
+    meta,                          # YouTubeVideoMeta or AudioFileMeta (duck-typed)
+    transcript,                    # loaders.transcriber.Transcript
+    conn: sqlite3.Connection,
+    *,
+    channel: str = "online_interview",
+    ingest_kind: str = "youtube",
+    transcriber_name: str = "",
+    from_cache: bool = False,
+    transcribe_cost_usd: Optional[float] = None,
+    notes: Optional[list] = None,
+    fact_source_urls: bool = True,  # False → facts carry no per-fact URL (e.g. file uploads)
+) -> YouTubePreviewResult:
+    """Shared preview core: transcript → extract → anchor → guard → dedup →
+    brief → ingest_audit row. Used by both YouTube and audio-file ingest."""
+    import uuid
+
+    preview_id = str(uuid.uuid4())
+    notes = list(notes or [])
+    stats: dict[str, int] = {
+        "facts_emitted": 0,
+        "greys": 0,
+        "channel_warnings": 0,
+        "skipped_layer_guard": 0,
+        "duplicates_skipped": 0,
+        "chunks_total": 0,
+        "chunks_failed": 0,
+    }
+
+    # Extract facts directly from transcript segments (chunk-by-chunk)
     segments_dicts = [
         {"text": s.text, "start": s.start, "end": s.end}
         for s in transcript.segments
@@ -202,15 +238,21 @@ def run_youtube_preview(
             f"Chunk {ce['chunk_start_min']}-{ce['chunk_end_min']} min skipped: {ce['reason']}"
         )
 
-    # Step 6: anchor
+    # Anchor: evidence snippet + timestamp URL
     anchored = anchor_facts(raw_facts, transcript, canonical_url)
+    if not fact_source_urls:
+        # File uploads have no clickable per-fact URL — provenance lives in the
+        # source row (title + file:// canonical url); timestamps stay in
+        # snippet_start_sec / snippet_end_sec.
+        for af in anchored:
+            af.source_url = ""
 
-    # Step 7: LayerGuard
-    allowed, skipped = guard_layers(anchored, "online_interview")
+    # LayerGuard
+    allowed, skipped = guard_layers(anchored, channel)
     stats["channel_warnings"] = len(skipped)
     stats["skipped_layer_guard"] = len(skipped)
 
-    # Step 8: dedup vs existing matrix
+    # Dedup vs existing matrix
     deduped: list[AnchoredFact] = []
     for af in allowed:
         if _is_duplicate_in_matrix(conn, client_id, af.subsection_id, af.text):
@@ -222,7 +264,7 @@ def run_youtube_preview(
     stats["facts_emitted"] = len(deduped) + len(skipped)
     stats["greys"] = sum(1 for f in deduped if f.flag == "grey")
 
-    # Step 9: orientation brief (one extra LLM call, non-fatal on failure)
+    # Orientation brief (one extra LLM call, non-fatal on failure)
     facts_by_sid: dict[str, list[str]] = {}
     for af in deduped:
         facts_by_sid.setdefault(af.subsection_id, []).append(af.text)
@@ -254,6 +296,7 @@ def run_youtube_preview(
         "preview_id": preview_id,
         "video_id": meta.video_id,
         "canonical_url": canonical_url,
+        "channel": channel,
         "meta": {
             "video_id": meta.video_id,
             "canonical_url": meta.canonical_url,
@@ -296,19 +339,19 @@ def run_youtube_preview(
              parsed_at, facts_emitted, facts_committed, greys_emitted,
              channel_warnings, expert_email, confirmed_at, preview_json,
              video_id, transcriber, transcribe_cost_usd)
-           VALUES (?, ?, 'youtube', ?, ?,
+           VALUES (?, ?, ?, ?, ?,
                    ?, ?, 0, ?,
                    ?, '', ?, ?,
                    ?, ?, ?)""",
         (
-            preview_id, client_id, canonical_url, transcriber.name,
+            preview_id, client_id, ingest_kind, canonical_url, transcriber_name,
             now,
             stats["facts_emitted"],
             stats["greys"],
             stats["channel_warnings"],
             now,
             preview_json,
-            meta.video_id, transcriber.name, transcribe_cost_usd,
+            meta.video_id, transcriber_name, transcribe_cost_usd,
         ),
     )
     conn.commit()
@@ -404,6 +447,7 @@ def run_youtube_commit(
     client_id = row["client_id"]
     canonical_url = preview_data["canonical_url"]
     video_id = preview_data["video_id"]
+    channel = preview_data.get("channel", "online_interview")
     all_facts = preview_data["facts"]
     all_skipped = preview_data.get("skipped", [])
 
@@ -428,7 +472,7 @@ def run_youtube_commit(
     committed = 0
     skipped_count = 0
 
-    # Get or create source row for this video
+    # Get or create source row for this video / audio file
     existing_src = conn.execute(
         "SELECT id FROM sources WHERE url = ?", (canonical_url,)
     ).fetchone()
@@ -437,7 +481,7 @@ def run_youtube_commit(
     else:
         source_id = matrix.add_source(
             conn,
-            channel="online_interview",
+            channel=channel,
             title=preview_data.get("meta", {}).get("title", "") or "",
             url=canonical_url,
             publisher=preview_data.get("meta", {}).get("channel_name", "") or "",
