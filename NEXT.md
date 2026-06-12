@@ -10,9 +10,10 @@
 
 **Последнее обновление:** 2026-06-12
 **Ветка:** `feat/v2`
-**Working tree:** НЕ закоммичена серия Audio Ingest (см. ниже) — коммитить после
+**Working tree:** clean (audio ingest закоммичен 0db4628 и выкачен на прод 2026-06-13 через оркестратор; deploy_ir_storyboard: build+up+health зелёные). Коммитить после
 зелёного `pytest tests/` + `npm run build`.
-**HEAD:** `2e45f39 feat: collapsible sidebar — clients only, controls moved to tabs row`
+**HEAD:** `0db4628 feat: audio file ingest (m4a/mp3/wav)`
+**Прод:** перекатан 2026-06-13 (audio ingest + polish series), TRANSCRIBER=openai
 
 ## Что сделано за сессию 2026-06-12 — Audio file Ingest (uncommitted)
 
