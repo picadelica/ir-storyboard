@@ -194,6 +194,7 @@ export interface LLMIngestAuditRow {
 export interface YouTubeJobOut {
   job_id: string;
   status: "processing" | "done" | "error";
+  stage?: string | null;   // человекочитаемый этап (прогресс в UI)
   error?: string | null;
   result?: YouTubePreviewResult | null;
 }

@@ -1598,6 +1598,7 @@ class YouTubeHistoryOut(BaseModel):
 class YouTubeJobOut(BaseModel):
     job_id: str
     status: str   # queued | processing | done | error
+    stage: Optional[str] = None   # человекочитаемый этап (для прогресса в UI)
     error: Optional[str] = None
     result: Optional[YouTubePreviewOut] = None
 
@@ -1699,7 +1700,9 @@ def _job_status_out(job_id: str) -> YouTubeJobOut:
         )
     if job["status"] == "error":
         return YouTubeJobOut(job_id=job_id, status="error", error=job["error"])
-    return YouTubeJobOut(job_id=job_id, status="processing")
+    return YouTubeJobOut(
+        job_id=job_id, status="processing", stage=job.get("stage"),
+    )
 
 
 @app.get(
@@ -1880,9 +1883,17 @@ def _audio_job_run(job_id: str, client_id: str, file_path: str, title: str,
     conn = _db.connect(_db.DEFAULT_DB_PATH if not db_path else _db.Path(db_path))
     _db.init_schema(conn)
     from ir_storyboard.ingest.audio_pipeline import run_audio_preview
+
+    def _set_stage(stage: str) -> None:
+        with _yt_jobs_lock:
+            job = _yt_jobs.get(job_id)
+            if job is not None and job.get("status") == "processing":
+                job["stage"] = stage
+
     try:
         result = run_audio_preview(
             client_id, Path(file_path), title, conn, sha256_hex=sha256_hex,
+            progress_cb=_set_stage,
         )
         with _yt_jobs_lock:
             _yt_jobs[job_id] = {"status": "done", "result": result, "error": None}

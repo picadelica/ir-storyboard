@@ -67,6 +67,7 @@ def run_audio_preview(
     title: str,
     conn: sqlite3.Connection,
     sha256_hex: Optional[str] = None,
+    progress_cb=None,
 ) -> YouTubePreviewResult:
     """Full pipeline for an uploaded audio file:
     sha256 → ffprobe duration → transcript (sha-keyed cache) → shared
@@ -80,6 +81,8 @@ def run_audio_preview(
     _ensure_audit_table_youtube(conn)
     _ensure_audio_transcripts_table(conn)
 
+    if progress_cb:
+        progress_cb("анализ файла (ffprobe)")
     sha = sha256_hex or file_sha256(file_path)
     canonical_url = f"file://{sha[:16]}"
     duration_sec = int(_probe_duration(file_path))
@@ -103,7 +106,11 @@ def run_audio_preview(
         and row_before["transcriber"] == transcriber.name
     )
 
-    transcript = get_or_transcribe_audio_file(sha, file_path, meta, transcriber, conn)
+    if from_cache and progress_cb:
+        progress_cb("транскрипт найден в кэше")
+    transcript = get_or_transcribe_audio_file(
+        sha, file_path, meta, transcriber, conn, progress_cb=progress_cb,
+    )
     if from_cache:
         notes.append(f"Transcript loaded from cache (transcriber={transcriber.name})")
 
@@ -112,6 +119,8 @@ def run_audio_preview(
     if transcriber.name == "openai-whisper-1":
         transcribe_cost_usd = round((duration_sec / 60.0) * 0.006, 4)
 
+    if progress_cb:
+        progress_cb("извлечение фактов и якорение (LLM)")
     return run_transcript_preview(
         client_id=client_id,
         canonical_url=canonical_url,

@@ -31,9 +31,19 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
   const [expertEmail, setExpertEmail] = useState("");
   const [jobStatus, setJobStatus] = useState<string>("");
   const [jobError, setJobError] = useState<string>("");
+  const [jobStage, setJobStage] = useState<string>("");
+  const [jobStartedAt, setJobStartedAt] = useState<number | null>(null);
+  const [, forceTick] = useState(0); // тикер для elapsed-счётчика
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qc = useQueryClient();
+
+  // Секундный тик, пока идёт обработка — чтобы elapsed обновлялся
+  useEffect(() => {
+    if (jobStatus !== "processing") return;
+    const t = setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [jobStatus]);
 
   function stopPolling() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -56,10 +66,13 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
     onSuccess: (job) => {
       setJobStatus("processing");
       setJobError("");
+      setJobStage("загрузка принята, запуск пайплайна…");
+      setJobStartedAt(Date.now());
       pollRef.current = setInterval(async () => {
         try {
           const status = await api.audioPreviewStatus(clientId, job.job_id);
           setJobStatus(status.status);
+          if (status.stage) setJobStage(status.stage);
           if (status.status === "done" && status.result) {
             stopPolling();
             setPreview(status.result);
@@ -179,10 +192,22 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
           </button>
           {processing && (
             <div className="text-xs text-ink-mute space-y-1">
-              <div>Запущено в фоне — обрабатываем…</div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+                <span className="font-medium">
+                  {jobStage || "Запущено в фоне — обрабатываем…"}
+                </span>
+                {jobStartedAt && (
+                  <span className="font-mono text-[10px] text-slate-400">
+                    {Math.floor((Date.now() - jobStartedAt) / 60000)}:
+                    {String(Math.floor(((Date.now() - jobStartedAt) / 1000) % 60)).padStart(2, "0")}
+                  </span>
+                )}
+              </div>
               <div className="text-[10px] text-slate-400">
-                Транскрибируем → извлекаем факты. Для часовой записи ~5–15 мин.
-                Повторная загрузка того же файла бесплатна — транскрипт кэшируется.
+                Этапы: нарезка → транскрибирование чанков → извлечение фактов.
+                Для часовой записи ~5–15 мин. Повторная загрузка того же файла
+                бесплатна — транскрипт кэшируется.
               </div>
             </div>
           )}

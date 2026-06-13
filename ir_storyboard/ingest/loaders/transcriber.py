@@ -280,19 +280,27 @@ def transcribe_audio_chunks(
     audio_path: Path,
     transcriber: Transcriber,
     language_hint: Optional[str] = None,
+    progress_cb=None,
 ) -> list[TranscriptSegment]:
     """Transcribe one audio file: split → per-chunk transcribe → shift → dedup.
 
     Shared core for both YouTube ingest (after fetch_audio) and direct audio
     file uploads. Returns segments with global (whole-file) timestamps.
+    progress_cb(stage: str) — опциональный колбэк для UI-прогресса джоба.
     """
+    if progress_cb:
+        progress_cb("нарезка аудио на чанки (ffmpeg)")
     chunks = split_audio(audio_path)
     overlap_sec = int(os.environ.get("CHUNK_OVERLAP_SEC", "5"))
 
     chunk_segments: list[list[TranscriptSegment]] = []
     chunk_boundaries: list[float] = []
 
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
+        if progress_cb:
+            progress_cb(
+                f"транскрибирование: чанк {i + 1} из {len(chunks)} ({transcriber.name})"
+            )
         raw = transcriber.transcribe(audio_path=chunk.path, language_hint=language_hint)
         # Shift to global time
         shifted = [
@@ -436,6 +444,7 @@ def get_or_transcribe_audio_file(
     meta,                          # AudioFileMeta (duck-typed: title/channel_name/duration_sec/language/canonical_url)
     transcriber: Transcriber,
     conn: sqlite3.Connection,
+    progress_cb=None,
 ) -> Transcript:
     """Return Transcript for an uploaded audio file, using the sha256-keyed
     audio_transcripts cache. Same semantics as get_or_transcribe: a cache row
@@ -460,7 +469,9 @@ def get_or_transcribe_audio_file(
         )
 
     t_start = time.time()
-    all_segments = transcribe_audio_chunks(audio_path, transcriber, language_hint=meta.language)
+    all_segments = transcribe_audio_chunks(
+        audio_path, transcriber, language_hint=meta.language, progress_cb=progress_cb,
+    )
     detected_language = meta.language or "en"
     wall_clock = int(time.time() - t_start)
 
