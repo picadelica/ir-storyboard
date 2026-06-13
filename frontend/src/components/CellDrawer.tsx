@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "../api";
 import type { Channel, Fact, Flag, Layer } from "../types";
 import SourceLine from "./SourceLine";
+import AudioSourcePanel, { type AudioSourceHandle } from "./AudioSourcePanel";
 import FlagDot from "./FlagDot";
 
 interface Props {
@@ -27,6 +28,21 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
   const [draftText, setDraftText] = useState("");
   const [draftFlag, setDraftFlag] = useState<Flag>("green");
   const [draftRationale, setDraftRationale] = useState("");
+
+  // Audio source player: one open panel at a time, keyed by fact id.
+  const [audioPanel, setAudioPanel] = useState<{ factId: number; sha: string } | null>(null);
+  const audioRef = useRef<AudioSourceHandle | null>(null);
+
+  const openAudio = (factId: number, sha: string, sec: number) => {
+    if (audioPanel?.factId === factId) {
+      // Already open for this fact — just seek.
+      audioRef.current?.seek(sec);
+    } else {
+      setAudioPanel({ factId, sha });
+      // Seek once the panel (and its <audio>) has mounted.
+      setTimeout(() => audioRef.current?.seek(sec), 0);
+    }
+  };
 
   const [showAdd, setShowAdd] = useState(false);
   const [newText, setNewText] = useState("");
@@ -193,8 +209,21 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                   source_title={f.source_title}
                   source_archive_url={f.source_archive_url}
                   ingest_audit_id={f.ingest_audit_id}
+                  ingest_kind={f.ingest_kind}
+                  audio_sha={f.audio_sha}
+                  timestamp_sec={f.snippet_start_sec ?? undefined}
                   captured_at={f.captured_at}
+                  onOpenAudio={(sha, sec) => openAudio(f.id, sha, sec)}
                 />
+                {audioPanel?.factId === f.id && (
+                  <div className="mt-2 border-t border-ink-line/60 pt-2">
+                    <AudioSourcePanel
+                      ref={audioRef}
+                      clientId={clientId}
+                      sha={audioPanel.sha}
+                    />
+                  </div>
+                )}
               </>
             )}
           </div>

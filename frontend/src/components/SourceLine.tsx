@@ -7,17 +7,33 @@ interface SourceLineProps {
   source_publisher?: string;
   source_archive_url?: string | null;
   ingest_audit_id?: string | null;
+  ingest_kind?: string | null;
+  audio_sha?: string | null;
   client_id: string;
   captured_at?: string;
   timestamp_sec?: number;
   /** When set, the timecode renders as a button that seeks an audio player. */
   onSeek?: (sec: number) => void;
+  /**
+   * Audio-file sources: opens the player + transcript for `sha`, seeking to
+   * `sec` (0 for older facts without a timecode).
+   */
+  onOpenAudio?: (sha: string, sec: number) => void;
 }
 
-type Kind = "web" | "llm_report" | "offline" | "none";
+type Kind = "web" | "audio" | "llm_report" | "offline" | "none";
+
+function isAudioSource(props: SourceLineProps): boolean {
+  const { ingest_kind, audio_sha, source_url } = props;
+  if (ingest_kind === "audio_file" && audio_sha) return true;
+  // Fallback: facts whose source_url is a file:// canonical url.
+  if (audio_sha && source_url && /^file:\/\//i.test(source_url)) return true;
+  return false;
+}
 
 function pickKind(props: SourceLineProps): Kind {
   const { source_url, ingest_audit_id, channel, source_title } = props;
+  if (isAudioSource(props)) return "audio";
   if (source_url && /^https?:\/\//i.test(source_url)) return "web";
   if (!source_url && ingest_audit_id) return "llm_report";
   if (!source_url && channel === "offline_interview" && source_title) return "offline";
@@ -54,7 +70,8 @@ export default function SourceLine(props: SourceLineProps) {
   const kind = pickKind(props);
   const {
     source_url, source_title, source_archive_url, ingest_audit_id,
-    client_id, captured_at, timestamp_sec, channel, onSeek,
+    audio_sha, client_id, captured_at, timestamp_sec, channel, onSeek,
+    onOpenAudio,
   } = props;
 
   const hasTimecode = typeof timestamp_sec === "number" && timestamp_sec >= 0;
@@ -109,6 +126,35 @@ export default function SourceLine(props: SourceLineProps) {
             <span className="text-amber-500" title="Archiving in background…">⏳</span>
           )}
           <Timecode />
+        </>
+      )}
+
+      {kind === "audio" && audio_sha && (
+        <>
+          <ChannelBadge channel={channel} />
+          {source_title && (
+            <span className="truncate max-w-[14rem]" title={source_title}>
+              {source_title}
+            </span>
+          )}
+          {onOpenAudio ? (
+            <button
+              type="button"
+              onClick={() => onOpenAudio(audio_sha, hasTimecode ? (timestamp_sec as number) : 0)}
+              className="text-violet-600 font-medium hover:underline hover:text-violet-700"
+              title="Открыть плеер и транскрипт источника"
+            >
+              ▶ Прослушать источник
+              {hasTimecode && (timestamp_sec as number) > 0
+                ? ` · ${fmtTime(timestamp_sec as number)}`
+                : ""}
+            </button>
+          ) : (
+            <span className="text-ink-mute" title="Audio source">
+              🎧 audio{hasTimecode && (timestamp_sec as number) > 0
+                ? ` · ${fmtTime(timestamp_sec as number)}` : ""}
+            </span>
+          )}
         </>
       )}
 

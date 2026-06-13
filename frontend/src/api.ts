@@ -35,6 +35,8 @@ export const api = {
     call<Client>("/clients", { method: "POST", body: JSON.stringify(c) }),
   patchClient: (id: string, patch: Partial<Omit<Client, "id" | "created_at" | "created_by">>) =>
     call<Client>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  clearClientData: (id: string) =>
+    call<{ deleted: Record<string, number> }>(`/clients/${id}/data`, { method: "DELETE" }),
   seedAccumulator: () =>
     call<{ ok: boolean; client_id: string }>("/clients/accumulator/seed-accumulator", {
       method: "POST", body: "{}",

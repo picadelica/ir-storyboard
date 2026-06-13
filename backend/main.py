@@ -203,6 +203,9 @@ class FactOut(BaseModel):
     ingest_audit_id: Optional[str] = None
     rationale: str = ""
     created_by: Optional[str] = None
+    snippet_start_sec: Optional[float] = None
+    ingest_kind: Optional[str] = None
+    audio_sha: Optional[str] = None
 
 
 class FactCreate(BaseModel):
@@ -323,6 +326,22 @@ def _row_to_fact(row) -> FactOut:
     # Don't expose internal:// pseudo-URLs to the frontend — use ingest_audit_id link instead
     if source_url and source_url.startswith("internal://"):
         source_url = None
+
+    ingest_kind = row["ingest_kind"] if "ingest_kind" in keys else None
+    # audio_sha: for audio-file facts, the ingest_audit.source_artifact is the
+    # canonical 'file://<sha16>' url — strip the scheme so the frontend can hit
+    # the audio source/transcript endpoints (which accept sha or sha-prefix).
+    audio_sha = None
+    if ingest_kind == "audio_file" and "ingest_artifact" in keys:
+        artifact = row["ingest_artifact"] or ""
+        if artifact.startswith("file://"):
+            audio_sha = artifact[len("file://"):]
+        elif artifact:
+            audio_sha = artifact
+    snippet_start_sec = (
+        row["snippet_start_sec"] if "snippet_start_sec" in keys else None
+    )
+
     return FactOut(
         id=row["id"], text=row["text"], flag=row["flag"],
         confidence=row["confidence"] or 1.0,
@@ -335,6 +354,9 @@ def _row_to_fact(row) -> FactOut:
         ingest_audit_id=row["ingest_audit_id"] if "ingest_audit_id" in keys else None,
         rationale=(row["rationale"] if "rationale" in keys else "") or "",
         created_by=row["created_by"] if "created_by" in keys else None,
+        snippet_start_sec=snippet_start_sec,
+        ingest_kind=ingest_kind,
+        audio_sha=audio_sha,
     )
 
 
@@ -529,6 +551,127 @@ def patch_client(client_id: str, u: ClientPatch, conn=Depends(get_conn)):
 
     full = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
     return _row_to_client(full)
+
+
+class ClearClientDataOut(BaseModel):
+    deleted: dict
+
+
+@app.delete(
+    "/api/clients/{client_id}/data",
+    response_model=ClearClientDataOut,
+    summary="Wipe all client-scoped data (facts, sources, ingest, work, plans, "
+            "artifacts, notes) and reset the matrix to empty cells. Keeps the "
+            "client row and the shared (sha/video-keyed) transcript caches.",
+)
+def clear_client_data(client_id: str, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+
+    # Everything in one transaction. SQLite with sqlite3 is in an implicit
+    # transaction since the first statement; commit only at the very end.
+    deleted: dict[str, int] = {}
+
+    def _count(sql: str, params: tuple = ()) -> int:
+        row = conn.execute(sql, params).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+    try:
+        # ── facts (live in this client's cells) ───────────────────────────────
+        deleted["facts"] = _count(
+            "SELECT COUNT(*) FROM facts WHERE cell_id IN "
+            "(SELECT id FROM cells WHERE client_id=?)",
+            (client_id,),
+        )
+
+        # sources have no client_id — they are reachable only through this
+        # client's facts. Capture the ids BEFORE deleting facts, then delete
+        # only those sources that aren't referenced by any OTHER client's facts.
+        src_ids = [
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT f.source_id FROM facts f "
+                "JOIN cells c ON c.id = f.cell_id "
+                "WHERE c.client_id=? AND f.source_id IS NOT NULL",
+                (client_id,),
+            ).fetchall()
+        ]
+
+        # Delete facts via cells (ON DELETE CASCADE on cells would also drop
+        # facts, but we delete facts explicitly so we can recreate cells after).
+        conn.execute(
+            "DELETE FROM facts WHERE cell_id IN "
+            "(SELECT id FROM cells WHERE client_id=?)",
+            (client_id,),
+        )
+
+        # ── sources (only those now orphaned for this client) ─────────────────
+        sources_deleted = 0
+        for sid in src_ids:
+            still_used = conn.execute(
+                "SELECT 1 FROM facts WHERE source_id=? LIMIT 1", (sid,)
+            ).fetchone()
+            if still_used is None:
+                conn.execute("DELETE FROM sources WHERE id=?", (sid,))
+                sources_deleted += 1
+        deleted["sources"] = sources_deleted
+
+        # ── ingest_audit (client_id scoped) ───────────────────────────────────
+        deleted["ingest_audit"] = _count(
+            "SELECT COUNT(*) FROM ingest_audit WHERE client_id=?", (client_id,)
+        )
+        conn.execute("DELETE FROM ingest_audit WHERE client_id=?", (client_id,))
+
+        # ── work_items (client_id scoped) ─────────────────────────────────────
+        deleted["work_items"] = _count(
+            "SELECT COUNT(*) FROM work_items WHERE client_id=?", (client_id,)
+        )
+        conn.execute("DELETE FROM work_items WHERE client_id=?", (client_id,))
+
+        # ── narrative_tracks (scoped via plans, no direct client_id) ──────────
+        deleted["narrative_tracks"] = _count(
+            "SELECT COUNT(*) FROM narrative_tracks WHERE plan_id IN "
+            "(SELECT id FROM plans WHERE client_id=?)",
+            (client_id,),
+        )
+        conn.execute(
+            "DELETE FROM narrative_tracks WHERE plan_id IN "
+            "(SELECT id FROM plans WHERE client_id=?)",
+            (client_id,),
+        )
+
+        # ── plans (client_id scoped) ──────────────────────────────────────────
+        deleted["plans"] = _count(
+            "SELECT COUNT(*) FROM plans WHERE client_id=?", (client_id,)
+        )
+        conn.execute("DELETE FROM plans WHERE client_id=?", (client_id,))
+
+        # ── artifacts (client_id scoped) ──────────────────────────────────────
+        deleted["artifacts"] = _count(
+            "SELECT COUNT(*) FROM artifacts WHERE client_id=?", (client_id,)
+        )
+        conn.execute("DELETE FROM artifacts WHERE client_id=?", (client_id,))
+
+        # ── client_subsection_notes (client_id scoped) ───────────────────────
+        deleted["client_subsection_notes"] = _count(
+            "SELECT COUNT(*) FROM client_subsection_notes WHERE client_id=?",
+            (client_id,),
+        )
+        conn.execute(
+            "DELETE FROM client_subsection_notes WHERE client_id=?", (client_id,)
+        )
+
+        # ── cells: drop then recreate the empty 24-cell grid ──────────────────
+        deleted["cells"] = _count(
+            "SELECT COUNT(*) FROM cells WHERE client_id=?", (client_id,)
+        )
+        conn.execute("DELETE FROM cells WHERE client_id=?", (client_id,))
+        matrix.ensure_full_grid(conn, client_id)
+
+        conn.commit()
+    except Exception as e:  # pragma: no cover - defensive rollback
+        conn.rollback()
+        raise HTTPException(500, f"Failed to clear client data: {e}")
+
+    return ClearClientDataOut(deleted=deleted)
 
 
 def _do_import_seed(conn, client_id: str, seed: ClientSeedIn) -> SeedImportResult:

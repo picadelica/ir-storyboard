@@ -92,6 +92,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "ingest_audit", "transcribe_duration_sec", "INTEGER")
     # youtube ingest: add source_url to facts for timestamp deep-links
     _add_column_if_missing(conn, "facts", "source_url", "TEXT DEFAULT ''")
+    # audio ingest: snippet start timecode (seconds) for clickable audio sources
+    _add_column_if_missing(conn, "facts", "snippet_start_sec", "REAL")
     # polish: rationale for red-flag concerns + multi-user placeholder
     _add_column_if_missing(conn, "facts", "rationale", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "facts", "created_by", "TEXT")

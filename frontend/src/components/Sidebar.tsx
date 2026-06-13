@@ -34,6 +34,39 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
   const [inputMode, setInputMode] = useState<"form" | "yaml">("form");
   const [error, setError] = useState("");
 
+  // Danger zone: clear all client data.
+  const [showClear, setShowClear] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState("");
+  const [clearMsg, setClearMsg] = useState("");
+  const clearValid =
+    !!initial &&
+    (clearConfirm.trim() === initial.name.trim() ||
+      clearConfirm.trim().toUpperCase() === "ОЧИСТИТЬ");
+
+  const clearMut = useMutation({
+    mutationFn: () => api.clearClientData(initial!.id),
+    onSuccess: (res) => {
+      const d = res.deleted || {};
+      const parts = Object.entries(d)
+        .filter(([, v]) => (v as number) > 0)
+        .map(([k, v]) => `${k}: ${v}`);
+      setClearMsg(
+        parts.length
+          ? `Данные клиента очищены — ${parts.join(", ")}.`
+          : "Данные клиента очищены (всё уже было пусто).",
+      );
+      setShowClear(false);
+      setClearConfirm("");
+      // Invalidate every view that depends on client data.
+      qc.invalidateQueries({ queryKey: ["matrix", initial!.id] });
+      qc.invalidateQueries({ queryKey: ["punch", initial!.id] });
+      qc.invalidateQueries({ queryKey: ["scorecard", initial!.id] });
+      qc.invalidateQueries({ queryKey: ["facts", initial!.id] });
+      qc.invalidateQueries({ queryKey: ["work-items", initial!.id] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
   const saveMut = useMutation({
     mutationFn: async () => {
       setError("");
@@ -163,6 +196,68 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
           )}
 
           {error && <div className="text-xs text-red-600 bg-red-50 rounded px-3 py-2">{error}</div>}
+
+          {isEdit && initial && (
+            <div className="mt-4 border border-red-200 rounded-lg bg-red-50/40 p-3 space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-red-700">
+                Danger zone
+              </div>
+              {clearMsg && (
+                <div className="text-xs text-emerald-700 bg-emerald-50 rounded px-2 py-1.5">
+                  {clearMsg}
+                </div>
+              )}
+              {!showClear ? (
+                <>
+                  <p className="text-xs text-ink-mute leading-snug">
+                    Удалить все данные клиента: факты, источники, ingest-историю,
+                    work-items, планы, артефакты и заметки. Матрица сбрасывается
+                    в пустую. Сам клиент остаётся. Кэши транскриптов (общие между
+                    клиентами) не трогаются. Действие необратимо.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setShowClear(true); setClearMsg(""); }}
+                    className="text-xs px-3 py-1.5 border border-red-400 text-red-700 rounded hover:bg-red-100"
+                  >
+                    Очистить данные клиента…
+                  </button>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-ink-mute leading-snug">
+                    Для подтверждения введите имя клиента
+                    {" "}<span className="font-mono font-medium">{initial.name}</span>{" "}
+                    или слово <span className="font-mono font-medium">ОЧИСТИТЬ</span>.
+                  </p>
+                  <input
+                    value={clearConfirm}
+                    onChange={e => setClearConfirm(e.target.value)}
+                    placeholder={initial.name}
+                    className={`${input} ${clearConfirm && !clearValid ? "border-red-400" : ""}`}
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => clearMut.mutate()}
+                      disabled={!clearValid || clearMut.isPending}
+                      className="text-xs px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {clearMut.isPending ? "Очищаю…" : "Удалить все данные"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowClear(false); setClearConfirm(""); }}
+                      className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="px-5 py-4 border-t border-ink-line flex gap-2 justify-end">

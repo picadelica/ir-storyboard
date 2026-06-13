@@ -276,13 +276,17 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
         """SELECT f.id, f.cell_id, f.text, f.flag, f.source_id, f.confidence,
                   f.captured_at, f.valid_until, f.evidence_snippet,
                   f.ingest_audit_id, f.rationale, f.created_by,
+                  f.snippet_start_sec,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
                   s.archive_url AS source_archive_url,
-                  s.publisher AS source_publisher
+                  s.publisher AS source_publisher,
+                  ia.ingest_kind AS ingest_kind,
+                  ia.source_artifact AS ingest_artifact
             FROM facts f
             JOIN cells c ON c.id = f.cell_id
             LEFT JOIN sources s ON s.id = f.source_id
+            LEFT JOIN ingest_audit ia ON ia.id = f.ingest_audit_id
             WHERE c.client_id=? AND c.subsection_id=?
             ORDER BY f.captured_at DESC""",
         (client_id, subsection_id),
@@ -294,14 +298,18 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
         """SELECT f.id, f.cell_id, f.text, f.flag, f.source_id, f.confidence,
                   f.captured_at, f.valid_until, f.evidence_snippet,
                   f.ingest_audit_id, f.rationale, f.created_by,
+                  f.snippet_start_sec,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
                   s.archive_url AS source_archive_url,
                   s.publisher AS source_publisher,
+                  ia.ingest_kind AS ingest_kind,
+                  ia.source_artifact AS ingest_artifact,
                   c.client_id, c.subsection_id
             FROM facts f
             JOIN cells c ON c.id = f.cell_id
             LEFT JOIN sources s ON s.id = f.source_id
+            LEFT JOIN ingest_audit ia ON ia.id = f.ingest_audit_id
             WHERE f.id=?""",
         (fact_id,),
     ).fetchone()

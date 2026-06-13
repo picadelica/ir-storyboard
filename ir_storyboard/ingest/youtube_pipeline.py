@@ -514,8 +514,10 @@ def run_youtube_commit(
                 rationale=fdict.get("rationale", ""),
             )
             conn.execute(
-                "UPDATE facts SET ingest_audit_id = ?, source_url = ? WHERE id = ?",
-                (preview_id, fdict.get("source_url", ""), fact_id),
+                "UPDATE facts SET ingest_audit_id = ?, source_url = ?, "
+                "snippet_start_sec = ? WHERE id = ?",
+                (preview_id, fdict.get("source_url", ""),
+                 fdict.get("snippet_start_sec"), fact_id),
             )
             committed += 1
         except Exception:
@@ -542,8 +544,10 @@ def run_youtube_commit(
                 rationale=sdict.get("rationale", ""),
             )
             conn.execute(
-                "UPDATE facts SET ingest_audit_id = ?, source_url = ? WHERE id = ?",
-                (preview_id, sdict.get("source_url", ""), fact_id),
+                "UPDATE facts SET ingest_audit_id = ?, source_url = ?, "
+                "snippet_start_sec = ? WHERE id = ?",
+                (preview_id, sdict.get("source_url", ""),
+                 sdict.get("snippet_start_sec"), fact_id),
             )
             committed += 1
         except Exception:

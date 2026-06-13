@@ -317,6 +317,9 @@ export interface Fact {
   ingest_audit_id?: string;
   rationale?: string;
   created_by?: string | null;
+  snippet_start_sec?: number | null;
+  ingest_kind?: string | null;
+  audio_sha?: string | null;
 }
 
 export interface Track {
