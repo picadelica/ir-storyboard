@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Literal, Optional
 import yaml
 from fastapi import FastAPI, File, Form, HTTPException, Depends, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 
 # Make sure the ir_storyboard package is importable when running from repo root
@@ -2005,6 +2006,84 @@ def audio_commit(client_id: str, body: YouTubeCommitIn, conn=Depends(get_conn)):
         raise HTTPException(400, str(e))
 
     return YouTubeCommitOut(committed=result.committed, skipped=result.skipped)
+
+
+# ── Audio source file + transcript serving (for the preview player) ───────────
+
+_AUDIO_MEDIA_TYPES = {
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".aac": "audio/aac",
+}
+
+
+class TranscriptSegmentOut(BaseModel):
+    text: str
+    start: float
+    end: float
+
+
+class AudioTranscriptOut(BaseModel):
+    title: str
+    duration_sec: int
+    segments: List[TranscriptSegmentOut]
+
+
+@app.get(
+    "/api/clients/{client_id}/ingest/audio/source/{sha}",
+    summary="Stream the original uploaded audio file (supports HTTP Range)",
+)
+def audio_source(client_id: str, sha: str, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    # canonical_url carries a 16-char sha prefix; accept prefix OR full sha.
+    if not sha or not all(c in "0123456789abcdefABCDEF" for c in sha):
+        raise HTTPException(400, "Invalid sha")
+    uploads_dir = _audio_uploads_dir()
+    matches = sorted(uploads_dir.glob(f"{sha}*")) if uploads_dir.exists() else []
+    matches = [p for p in matches if p.is_file()]
+    if not matches:
+        raise HTTPException(404, "Audio source file not found")
+    path = matches[0]
+    media_type = _AUDIO_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    # FileResponse handles Accept-Ranges / 206 partial content for seeking.
+    return FileResponse(path, media_type=media_type, filename=path.name)
+
+
+@app.get(
+    "/api/clients/{client_id}/ingest/audio/transcript/{sha}",
+    response_model=AudioTranscriptOut,
+    summary="Return the cached transcript (segments) for an uploaded audio file",
+)
+def audio_transcript(client_id: str, sha: str, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    if not sha or not all(c in "0123456789abcdefABCDEF" for c in sha):
+        raise HTTPException(400, "Invalid sha")
+    from ir_storyboard.ingest.loaders.transcriber import _ensure_audio_transcripts_table
+    _ensure_audio_transcripts_table(conn)
+    row = conn.execute(
+        "SELECT title, duration_sec, segments_json FROM audio_transcripts "
+        "WHERE file_sha256 LIKE ? ORDER BY file_sha256 LIMIT 1",
+        (f"{sha}%",),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Transcript not found")
+    import json as _json
+    raw_segments = _json.loads(row["segments_json"]) or []
+    segments = [
+        TranscriptSegmentOut(
+            text=str(s.get("text", "")),
+            start=float(s.get("start", 0.0)),
+            end=float(s.get("end", 0.0)),
+        )
+        for s in raw_segments
+    ]
+    return AudioTranscriptOut(
+        title=row["title"],
+        duration_sec=int(row["duration_sec"]),
+        segments=segments,
+    )
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

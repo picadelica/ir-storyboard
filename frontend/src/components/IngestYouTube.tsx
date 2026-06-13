@@ -907,9 +907,11 @@ interface FactCardProps {
   onEdit: (patch: FactEdit) => void;
   clientId: string;
   sourceTitle?: string;
+  /** When set, the timecode renders as a button that seeks an audio player. */
+  onSeek?: (sec: number) => void;
 }
 
-export function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, subsectionOptions, onToggleDrop, onEdit, clientId, sourceTitle }: FactCardProps) {
+export function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, subsectionOptions, onToggleDrop, onEdit, clientId, sourceTitle, onSeek }: FactCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (fact.text_ru || fact.text);
   const effectiveSid = edit?.subsection_id ?? fact.subsection_id;
@@ -985,6 +987,7 @@ export function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSele
                 source_url={fact.source_url}
                 source_title={sourceTitle}
                 timestamp_sec={fact.snippet_start_sec}
+                onSeek={onSeek}
               />
               {isEdited && (
                 <div className="flex items-center gap-3">
@@ -1144,9 +1147,11 @@ interface SkippedCardProps {
   onEdit: (patch: FactEdit) => void;
   clientId: string;
   sourceTitle?: string;
+  /** When set, the timecode renders as a button that seeks an audio player. */
+  onSeek?: (sec: number) => void;
 }
 
-export function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOptions, onToggleOverride, onEdit, clientId, sourceTitle }: SkippedCardProps) {
+export function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOptions, onToggleOverride, onEdit, clientId, sourceTitle, onSeek }: SkippedCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (skipped.text_ru || skipped.text);
   const effectiveSid = edit?.subsection_id ?? skipped.subsection_id;
@@ -1190,13 +1195,14 @@ export function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOpt
                   "{displayQuote}"
                 </div>
               )}
-              {skipped.source_url && (
+              {(skipped.source_url || onSeek) && (
                 <SourceLine
                   client_id={clientId}
                   channel="online_interview"
                   source_url={skipped.source_url}
                   source_title={sourceTitle}
                   timestamp_sec={skipped.snippet_start_sec}
+                  onSeek={onSeek}
                 />
               )}
               {isEdited && (

@@ -24,19 +24,39 @@ _RED_TRIGGERS = [
 ]
 
 
-def apply_heuristics(text: str, llm_flag: str) -> str:
-    """Return the final flag, applying safety-net heuristics.
+def classify_with_reason(text: str, llm_flag: str) -> tuple[str, str]:
+    """Return (final_flag, reason), applying safety-net heuristics.
 
     If grey triggers found → grey (overrides green or red).
     If red triggers found and llm says green → red.
     Otherwise → keep llm_flag.
+
+    ``reason`` is non-empty ONLY when the heuristic CHANGED the flag — it
+    carries the first matched trigger keyword so a red/grey fact promoted by
+    the keyword classifier never lands without an explanation. When the flag is
+    unchanged (LLM already produced it), ``reason`` is "" and the caller keeps
+    the LLM-supplied rationale.
     """
     norm = text.lower()
 
-    if any(t in norm for t in _GREY_TRIGGERS):
-        return "grey"
+    grey_kw = next((t for t in _GREY_TRIGGERS if t in norm), None)
+    if grey_kw is not None:
+        if llm_flag != "grey":
+            return "grey", f"авто-классификатор: ключевое слово «{grey_kw}» (пробел/неизвестно)"
+        return "grey", ""
 
-    if llm_flag == "green" and any(t in norm for t in _RED_TRIGGERS):
-        return "red"
+    if llm_flag == "green":
+        red_kw = next((t for t in _RED_TRIGGERS if t in norm), None)
+        if red_kw is not None:
+            return "red", f"авто-классификатор: ключевое слово «{red_kw}» (риск/споры/негатив)"
 
-    return llm_flag
+    return llm_flag, ""
+
+
+def apply_heuristics(text: str, llm_flag: str) -> str:
+    """Return the final flag, applying safety-net heuristics.
+
+    Thin wrapper over :func:`classify_with_reason` kept for existing callers
+    and tests that only need the flag.
+    """
+    return classify_with_reason(text, llm_flag)[0]

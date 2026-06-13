@@ -498,7 +498,7 @@ def extract_facts_from_llm_report(
 
     Falls back to empty list if no API key configured (prototype mode).
     """
-    from .ingest.classifiers.flag_heuristics import apply_heuristics
+    from .ingest.classifiers.flag_heuristics import classify_with_reason
 
     if not section_paragraphs:
         return []
@@ -559,7 +559,8 @@ def extract_facts_from_llm_report(
         if llm_flag not in ("green", "red", "grey"):
             llm_flag = "green"
         # Apply safety-net heuristics (grey/red override)
-        final_flag = apply_heuristics(text, llm_flag)
+        final_flag, heur_reason = classify_with_reason(text, llm_flag)
+        rationale = (item.get("rationale") or "").strip() or heur_reason
         results.append(ExtractedFact(
             text=text[:400],
             subsection_id=sid,
@@ -567,17 +568,25 @@ def extract_facts_from_llm_report(
             cite_ids=[int(c) for c in (item.get("cite_ids") or []) if str(c).isdigit()],
             confidence=max(0.0, min(1.0, float(item.get("confidence", 0.5)))),
             raw_paraphrase=(item.get("raw_paraphrase") or text)[:400],
-            rationale=_normalize_rationale(final_flag, item.get("rationale")),
+            rationale=_normalize_rationale(final_flag, rationale),
         ))
 
     return results
 
 
 def _normalize_rationale(flag: str, raw: Any) -> str:
-    """Clip + sanity-check LLM rationale. Green silently drops; red/grey keep."""
+    """Clip + sanity-check rationale. Green silently drops; red/grey keep.
+
+    Belt-and-suspenders: a red/grey fact must never surface without a concern
+    string. If both the LLM rationale and the heuristic reason are empty, fall
+    back to a placeholder so the UI always shows *something* to the analyst.
+    The real reason (LLM or heuristic) always takes priority over the placeholder.
+    """
     text = (raw or "").strip() if isinstance(raw, str) else ""
     if flag == "green":
         return ""
+    if not text:
+        return "(требует уточнения экспертом)"
     return text[:600]
 
 
@@ -588,7 +597,7 @@ def _stub_extract(
 ) -> List["ExtractedFact"]:
     """Deterministic stub when no LLM key is configured."""
     from .ingest.classifiers.section_to_layer import suggest_subsection
-    from .ingest.classifiers.flag_heuristics import apply_heuristics
+    from .ingest.classifiers.flag_heuristics import classify_with_reason
 
     sid = suggest_subsection(heading)
     # If heading not in synonym map, use first available subsection as fallback
@@ -602,7 +611,7 @@ def _stub_extract(
         text = para.strip()
         if len(text) < 20:
             continue
-        flag = apply_heuristics(text, "green")
+        flag, heur_reason = classify_with_reason(text, "green")
         results.append(ExtractedFact(
             text=text[:400],
             subsection_id=sid,
@@ -610,6 +619,7 @@ def _stub_extract(
             cite_ids=[],
             confidence=0.3,
             raw_paraphrase=text[:400],
+            rationale=_normalize_rationale(flag, heur_reason),
         ))
     return results
 
@@ -627,7 +637,7 @@ def extract_facts_from_full_document(
     sections: list of (heading, paragraphs) tuples (meta/conclusions already filtered out).
     Falls back to per-section stub if no LLM key.
     """
-    from .ingest.classifiers.flag_heuristics import apply_heuristics
+    from .ingest.classifiers.flag_heuristics import classify_with_reason
 
     if not sections:
         return []
@@ -700,7 +710,8 @@ def extract_facts_from_full_document(
         llm_flag = item.get("flag", "green")
         if llm_flag not in ("green", "red", "grey"):
             llm_flag = "green"
-        final_flag = apply_heuristics(text, llm_flag)
+        final_flag, heur_reason = classify_with_reason(text, llm_flag)
+        rationale = (item.get("rationale") or "").strip() or heur_reason
 
         seg_start = item.get("segment_idx_start")
         seg_end = item.get("segment_idx_end")
@@ -712,7 +723,7 @@ def extract_facts_from_full_document(
             cite_ids=[int(c) for c in (item.get("cite_ids") or []) if str(c).isdigit()],
             confidence=max(0.0, min(1.0, float(item.get("confidence", 0.5)))),
             raw_paraphrase=(item.get("raw_paraphrase") or text)[:400],
-            rationale=_normalize_rationale(final_flag, item.get("rationale")),
+            rationale=_normalize_rationale(final_flag, rationale),
             segment_idx_start=int(seg_start) if seg_start is not None else None,
             segment_idx_end=int(seg_end) if seg_end is not None else None,
             layer_warning=bool(item.get("layer_warning", False)),
@@ -794,7 +805,7 @@ def extract_facts_from_transcript(
         {"chunk_start_min": int, "chunk_end_min": int, "reason": str, "detail": str}
     Reasons: "empty_llm_response" (LLM returned ""), "invalid_json" (parse failed).
     """
-    from .ingest.classifiers.flag_heuristics import apply_heuristics
+    from .ingest.classifiers.flag_heuristics import classify_with_reason
 
     if not segments:
         return [], []
@@ -942,7 +953,8 @@ def extract_facts_from_transcript(
                         global_start = chunk_indices[ls]
                         global_end = chunk_indices[le]
 
-                        final_flag = apply_heuristics(primary, llm_flag)
+                        final_flag, heur_reason = classify_with_reason(primary, llm_flag)
+                        rationale = (item.get("rationale") or "").strip() or heur_reason
                         all_facts.append(ExtractedFact(
                             text=primary[:400],
                             subsection_id=sid,
@@ -950,7 +962,7 @@ def extract_facts_from_transcript(
                             cite_ids=[1],
                             confidence=max(0.0, min(1.0, float(item.get("confidence", 0.7)))),
                             raw_paraphrase=text_en[:400],
-                            rationale=_normalize_rationale(final_flag, item.get("rationale")),
+                            rationale=_normalize_rationale(final_flag, rationale),
                             segment_idx_start=global_start,
                             segment_idx_end=global_end,
                             text_ru=text_ru[:400],
@@ -1137,7 +1149,7 @@ def extract_facts_from_research_text(
     Returns [] silently on any LLM/parse failure — Research tab surfaces
     "0 facts" to the user, which is the meaningful signal.
     """
-    from .ingest.classifiers.flag_heuristics import apply_heuristics
+    from .ingest.classifiers.flag_heuristics import classify_with_reason
 
     text = (text or "").strip()
     if not text:
@@ -1194,7 +1206,8 @@ def extract_facts_from_research_text(
             llm_flag = item.get("flag", "green")
             if llm_flag not in ("green", "red", "grey"):
                 llm_flag = "green"
-            final_flag = apply_heuristics(fact_text, llm_flag)
+            final_flag, heur_reason = classify_with_reason(fact_text, llm_flag)
+            rationale = (item.get("rationale") or "").strip() or heur_reason
             results.append(ExtractedFact(
                 text=fact_text[:400],
                 subsection_id=sid,
@@ -1202,7 +1215,7 @@ def extract_facts_from_research_text(
                 cite_ids=[],
                 confidence=max(0.0, min(1.0, float(item.get("confidence", 0.6)))),
                 raw_paraphrase=(item.get("raw_paraphrase") or fact_text)[:400],
-                rationale=_normalize_rationale(final_flag, item.get("rationale")),
+                rationale=_normalize_rationale(final_flag, rationale),
             ))
         except (ValueError, TypeError, AttributeError):
             continue

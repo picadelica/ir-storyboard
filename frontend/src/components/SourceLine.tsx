@@ -10,6 +10,8 @@ interface SourceLineProps {
   client_id: string;
   captured_at?: string;
   timestamp_sec?: number;
+  /** When set, the timecode renders as a button that seeks an audio player. */
+  onSeek?: (sec: number) => void;
 }
 
 type Kind = "web" | "llm_report" | "offline" | "none";
@@ -52,8 +54,27 @@ export default function SourceLine(props: SourceLineProps) {
   const kind = pickKind(props);
   const {
     source_url, source_title, source_archive_url, ingest_audit_id,
-    client_id, captured_at, timestamp_sec, channel,
+    client_id, captured_at, timestamp_sec, channel, onSeek,
   } = props;
+
+  const hasTimecode = typeof timestamp_sec === "number" && timestamp_sec >= 0;
+  const Timecode = () =>
+    hasTimecode ? (
+      onSeek ? (
+        <button
+          type="button"
+          onClick={() => onSeek(timestamp_sec as number)}
+          className="text-violet-600 font-mono hover:underline hover:text-violet-700"
+          title="Перемотать плеер к этому месту"
+        >
+          ▶ {fmtTime(timestamp_sec as number)}
+        </button>
+      ) : (timestamp_sec as number) > 0 ? (
+        <span className="text-violet-600 font-mono" title="Timestamp anchor">
+          ▶ {fmtTime(timestamp_sec as number)}
+        </span>
+      ) : null
+    ) : null;
 
   const capturedDate = (captured_at ?? "").slice(0, 10);
   const archiving =
@@ -87,11 +108,7 @@ export default function SourceLine(props: SourceLineProps) {
           {archiving && (
             <span className="text-amber-500" title="Archiving in background…">⏳</span>
           )}
-          {typeof timestamp_sec === "number" && timestamp_sec > 0 && (
-            <span className="text-violet-600 font-mono" title="Timestamp anchor">
-              ▶ {fmtTime(timestamp_sec)}
-            </span>
-          )}
+          <Timecode />
         </>
       )}
 
@@ -118,7 +135,17 @@ export default function SourceLine(props: SourceLineProps) {
       )}
 
       {kind === "none" && (
-        <span className="text-amber-600">⚠ no source</span>
+        onSeek && hasTimecode ? (
+          <>
+            <ChannelBadge channel={channel} />
+            {source_title && (
+              <span className="truncate max-w-[18rem]" title={source_title}>{source_title}</span>
+            )}
+            <Timecode />
+          </>
+        ) : (
+          <span className="text-amber-600">⚠ no source</span>
+        )
       )}
 
       {capturedDate && (

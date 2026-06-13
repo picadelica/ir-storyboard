@@ -5,6 +5,7 @@ import type { Layer, YouTubePreviewResult } from "../types";
 import {
   FactCard, SkippedCard, fmtDuration, editIsEmpty, type FactEdit,
 } from "./IngestYouTube";
+import AudioSourcePanel, { type AudioSourceHandle } from "./AudioSourcePanel";
 
 const ALLOWED_EXT = [".m4a", ".mp3", ".wav", ".ogg", ".aac"];
 const MAX_BYTES = 500 * 1024 * 1024;
@@ -36,7 +37,10 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
   const [, forceTick] = useState(0); // тикер для elapsed-счётчика
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioPanelRef = useRef<AudioSourceHandle | null>(null);
   const qc = useQueryClient();
+
+  const seekTo = (sec: number) => audioPanelRef.current?.seek(sec);
 
   // Секундный тик, пока идёт обработка — чтобы elapsed обновлялся
   useEffect(() => {
@@ -266,6 +270,9 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
 
   if (!preview) return null;
 
+  // canonical_url is "file://<sha[:16]>" — strip the scheme to get the sha prefix.
+  const sourceSha = (preview.meta.canonical_url || "").replace(/^file:\/\//, "");
+
   return (
     <div className="p-5 max-w-4xl space-y-6">
       <div className="flex items-baseline justify-between">
@@ -293,6 +300,19 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
             ` · ~$${preview.transcribe_cost_usd.toFixed(2)} (OpenAI Whisper)`}
         </div>
         <div className="text-xs text-slate-400 font-mono">{preview.meta.canonical_url}</div>
+        {sourceSha && (
+          <div className="pt-2">
+            <AudioSourcePanel
+              ref={audioPanelRef}
+              clientId={clientId}
+              sha={sourceSha}
+              title={preview.meta.title}
+            />
+            <div className="text-[10px] text-slate-400 mt-1">
+              Клик по таймкоду факта перематывает плеер к этому месту.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Orientation brief */}
@@ -376,6 +396,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
               onEdit={(patch) => updateEdit(setFactEdits, idx, patch)}
               clientId={clientId}
               sourceTitle={preview.meta.title}
+              onSeek={sourceSha ? seekTo : undefined}
             />
           ))}
         </div>
@@ -403,6 +424,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
                   return next;
                 })}
                 onEdit={(patch) => updateEdit(setSkippedEdits, idx, patch)}
+                onSeek={sourceSha ? seekTo : undefined}
               />
             ))}
           </div>

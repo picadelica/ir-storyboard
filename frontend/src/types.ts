@@ -279,6 +279,18 @@ export interface YouTubeHistoryRow {
   confirmed_at: string | null;
 }
 
+export interface TranscriptSegment {
+  text: string;
+  start: number;
+  end: number;
+}
+
+export interface AudioTranscript {
+  title: string;
+  duration_sec: number;
+  segments: TranscriptSegment[];
+}
+
 export interface CellSummary {
   subsection_id: string;
   subsection_name: string;

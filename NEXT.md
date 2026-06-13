@@ -8,62 +8,67 @@
 
 ---
 
-**Последнее обновление:** 2026-06-12
+**Последнее обновление:** 2026-06-13
 **Ветка:** `feat/v2`
-**Working tree:** clean (audio ingest закоммичен 0db4628 и выкачен на прод 2026-06-13 через оркестратор; deploy_ir_storyboard: build+up+health зелёные). Коммитить после
-зелёного `pytest tests/` + `npm run build`.
+**Working tree:** UNCOMMITTED — две правки (concern у red flags + плеер/транскрипт
+для аудио-источника). НЕ закоммичено по просьбе. Коммитить после зелёного
+`pytest tests/` + `npm run build`.
 **HEAD:** `0db4628 feat: audio file ingest (m4a/mp3/wav)`
 **Прод:** перекатан 2026-06-13 (audio ingest + polish series), TRANSCRIBER=openai
 
-## Что сделано за сессию 2026-06-12 — Audio file Ingest (uncommitted)
+## Что сделано за сессию 2026-06-13 (uncommitted)
 
-Ingest аудиофайлов (.m4a/.mp3/.wav/.ogg/.aac) по образцу YouTube Ingest.
-Начато одной сессией (рефакторинг общего ядра), достроено другой:
+### A. Concern (rationale) у ВСЕХ red/grey фактов
 
-1. **Рефакторинг общего ядра** (начат предыдущей сессией, дофиксен):
-   - `loaders/transcriber.py`: `transcribe_audio_chunks()` (split → transcribe
-     → shift → dedup, общий для YouTube и файлов), таблица `audio_transcripts`
-     (кэш по sha256 файла) + `get_or_transcribe_audio_file()`.
-   - `youtube_pipeline.py`: `run_transcript_preview()` — общий preview-кор
-     (extract → anchor → guard → dedup → brief → ingest_audit). Дофиксено:
-     INSERT использовал несуществующий `transcriber.name` и хардкод
-     `'youtube'` → теперь параметры `transcriber_name` / `ingest_kind`;
-     `run_youtube_commit` берёт channel из `preview_json["channel"]`
-     (fallback `online_interview`).
+Проблема: эвристика `apply_heuristics` могла поднять флаг green→red/grey по
+ключевому слову, но возвращала только флаг — concern оставался пустым (LLM считал
+факт green). Красный флаг без объяснения.
 
-2. **`ingest/audio_pipeline.py`** — `AudioFileMeta` (duck-typed под
-   YouTubeVideoMeta, `video_id`=sha256[:16], `canonical_url`=file://sha16,
-   `channel_name`='audio upload'), `run_audio_preview()` (ffprobe-длительность,
-   sha-кэш транскрипта, `ingest_kind='audio_file'`, факты без per-fact URL —
-   `fact_source_urls=False`), `run_audio_commit()` (делегат общего commit).
-   Канал — `online_interview` (как YouTube), LayerGuard блокирует L5/L6/L8.
+- `ir_storyboard/ingest/classifiers/flag_heuristics.py`: новая
+  `classify_with_reason(text, llm_flag) -> (flag, reason)`. reason непустой
+  ТОЛЬКО когда эвристика сменила флаг (несёт сматчившийся kw). Старая
+  `apply_heuristics` — тонкая обёртка `classify_with_reason(...)[0]` (совместимость).
+- `ir_storyboard/llm.py`: все 5 вызовов переведены на `classify_with_reason`;
+  rationale = LLM-rationale ИЛИ heur_reason. Плюс belt-and-suspenders в
+  `_normalize_rationale`: red/grey с пустым итогом → `(требует уточнения экспертом)`.
+- `tests/test_flag_concern.py` (новый) — classify_with_reason + нормализация +
+  e2e через `_stub_extract` (red-триггер на green → red с непустым rationale).
 
-3. **`backend/main.py`** — POST `/api/clients/{id}/ingest/audio/preview`
-   (multipart, лимит 500MB, дедуп файла по sha256 в `data/audio_uploads/`
-   (env `AUDIO_UPLOADS_DIR`), form-поле `title` опц.) → 202 `{job_id}`;
-   GET `.../audio/preview/{job_id}` (общий `_job_status_out` с YouTube);
-   POST `.../audio/commit`. Job store общий (`_yt_jobs`).
+### B. Доступ к источнику-файлу (плеер + транскрипт) на экране PREVIEW
 
-4. **Frontend** — `IngestAudio.tsx` (file input + title → джоб-поллинг →
-   preview с edit/drop/override → commit), переиспользует экспортированные
-   `FactCard`/`SkippedCard`/`FactEditForm`-логику из `IngestYouTube.tsx`.
-   Таб "Audio" в `App.tsx`, `api.audioPreviewStart/Status/Commit`.
-
-5. **`tests/test_audio_ingest.py`** — 8 тестов, всё внешнее замокано
-   (ffprobe/ffmpeg/whisper): sha-кэш (повтор → from_cache, transcribe один
-   раз), audit kind `audio_file`, commit пишет факты + идемпотентный replay,
-   API job-flow (202 → poll → done), отказ по расширению/пустому файлу,
-   sha-дедуп файлов на диске, commit endpoint.
+- `backend/main.py`: два эндпоинта (рядом с audio preview/commit) +
+  `FileResponse` import:
+  - `GET /api/clients/{client_id}/ingest/audio/source/{sha}` — стримит исходный
+    файл (глоб `{sha}*` в `_audio_uploads_dir()`, 16-символьный префикс ИЛИ полный
+    sha), Range/206 через FileResponse, media_type по расширению.
+  - `GET /api/clients/{client_id}/ingest/audio/transcript/{sha}` —
+    `{title, duration_sec, segments[]}` из `audio_transcripts` (LIKE '<sha>%'),
+    pydantic-модели `AudioTranscriptOut`/`TranscriptSegmentOut`.
+- `frontend/src/api.ts`: `audioSourceUrl(clientId, sha)` (URL) +
+  `audioTranscript(clientId, sha)` (fetch). Тип `AudioTranscript`/`TranscriptSegment`
+  в `types.ts`.
+- `frontend/src/components/AudioSourcePanel.tsx` (новый) — компактный
+  `<audio controls>` + раскрывающийся транскрипт; imperative `seek(sec)` через ref,
+  клик по сегменту перематывает, активный сегмент подсвечивается и скроллится.
+- `SourceLine.tsx`: проп `onSeek?` — таймкод рендерится кликабельной кнопкой
+  (для YouTube/web поведение без onSeek не изменилось).
+- `FactCard`/`SkippedCard` (в `IngestYouTube.tsx`): проп `onSeek?` проброшен в
+  SourceLine; SkippedCard теперь показывает таймкод и без source_url, если есть onSeek.
+- `IngestAudio.tsx`: на preview-экране sha из `meta.canonical_url` (срез
+  `file://`), плеер под шапкой источника, `onSeek=seekTo` на все факты и skipped.
 
 ## Open / следующие шаги
 
-1. **Прогнать `python -m pytest tests/ -q` и `npm run build`** — в сессии
-   2026-06-12 pytest был заблокирован permission-настройками агентского
-   окружения (запуск из cwd вне проекта); код не прогонялся локально.
-   `tsc -b` (часть build) прошёл.
-2. Закоммитить серию (`audio-1: ...`) после зелёных тестов.
-3. Baseline 9 failed тестов (LLM Report + 2 youtube_api) — предсуществующие,
-   ортогональны (см. сессию 2026-06-09).
-4. Audio history endpoint/таб не делали (preview-by-id и history покрывают
-   только youtube kind) — добавить при необходимости.
-5. Диаризация — см. `DIARIZATION_PLAN.md` (untracked, план).
+1. **ВЕРИФИКАЦИЯ НЕ ПРОГНАНА В СЕССИИ** — Bash-запуск pytest/npm был
+   заблокирован permission-настройками агентского окружения. ОБЯЗАТЕЛЬНО
+   прогнать вручную перед коммитом:
+   `/Library/Frameworks/Python.framework/Versions/3.13/bin/pytest tests/test_audio_ingest.py tests/test_flag_concern.py -q`
+   и `cd frontend && npm run build`. Базовые ~10 падений (llm_report-семейство +
+   youtube: ключи/сеть/фикстуры) — не регрессия.
+2. Закоммитить серию после зелёных тестов.
+3. **Плеер/транскрипт в МАТРИЦЕ (после commit)** — в этой итерации сделан только
+   PREVIEW-экран триажа. Следующий шаг: тот же AudioSourcePanel + кликабельные
+   таймкоды в `CellDrawer.tsx`/матрице для уже закоммиченных аудио-фактов
+   (canonical_url = file://sha16 уже лежит в sources).
+4. Audio history endpoint/таб — по необходимости.
+5. Диаризация — см. `DIARIZATION_PLAN.md`.

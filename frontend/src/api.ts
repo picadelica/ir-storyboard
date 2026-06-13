@@ -1,4 +1,5 @@
 import type {
+  AudioTranscript,
   Artifact, ArtifactSummary, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
   ClientMethodologyCell, Layer, MethodologyCell, TonePreset,
@@ -216,6 +217,14 @@ export const api = {
 
   audioPreviewStatus: (clientId: string, jobId: string): Promise<YouTubeJobOut> =>
     call<YouTubeJobOut>(`/clients/${clientId}/ingest/audio/preview/${jobId}`),
+
+  /** Absolute URL of the original uploaded audio file, for <audio src>. */
+  audioSourceUrl: (clientId: string, sha: string): string =>
+    `${API_BASE}/clients/${clientId}/ingest/audio/source/${sha}`,
+
+  /** Fetch the cached transcript (segments) for an uploaded audio file. */
+  audioTranscript: (clientId: string, sha: string): Promise<AudioTranscript> =>
+    call<AudioTranscript>(`/clients/${clientId}/ingest/audio/transcript/${sha}`),
 
   audioCommit: (
     clientId: string,
