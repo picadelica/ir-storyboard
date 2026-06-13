@@ -1,6 +1,6 @@
 import type {
   AudioTranscript,
-  Artifact, ArtifactSummary, CellSummary, Client, CycleKind,
+  Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
   ClientMethodologyCell, Layer, MethodologyCell, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
@@ -36,7 +36,18 @@ export const api = {
   patchClient: (id: string, patch: Partial<Omit<Client, "id" | "created_at" | "created_by">>) =>
     call<Client>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   clearClientData: (id: string) =>
-    call<{ deleted: Record<string, number> }>(`/clients/${id}/data`, { method: "DELETE" }),
+    call<{
+      deleted: Record<string, number>;
+      backup?: BackupMeta;
+      full_db_backup?: string;
+    }>(`/clients/${id}/data`, { method: "DELETE" }),
+  listBackups: (clientId: string) =>
+    call<BackupMeta[]>(`/clients/${clientId}/backups`),
+  restoreClient: (clientId: string, backupId: string) =>
+    call<{ restored: Record<string, number> }>(`/clients/${clientId}/restore`, {
+      method: "POST",
+      body: JSON.stringify({ backup_id: backupId }),
+    }),
   seedAccumulator: () =>
     call<{ ok: boolean; client_id: string }>("/clients/accumulator/seed-accumulator", {
       method: "POST", body: "{}",

@@ -63,6 +63,36 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
       qc.invalidateQueries({ queryKey: ["scorecard", initial!.id] });
       qc.invalidateQueries({ queryKey: ["facts", initial!.id] });
       qc.invalidateQueries({ queryKey: ["work-items", initial!.id] });
+      qc.invalidateQueries({ queryKey: ["backups", initial!.id] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  // Backups: list + restore (danger-zone recovery).
+  const backupsQ = useQuery({
+    queryKey: ["backups", initial?.id],
+    queryFn: () => api.listBackups(initial!.id),
+    enabled: isEdit && !!initial,
+  });
+  const [restoreConfirmId, setRestoreConfirmId] = useState<string | null>(null);
+  const restoreMut = useMutation({
+    mutationFn: (backupId: string) => api.restoreClient(initial!.id, backupId),
+    onSuccess: (res) => {
+      const r = res.restored || {};
+      const parts = Object.entries(r)
+        .filter(([, v]) => (v as number) > 0)
+        .map(([k, v]) => `${k}: ${v}`);
+      setClearMsg(
+        parts.length
+          ? `Данные восстановлены из бэкапа — ${parts.join(", ")}.`
+          : "Бэкап восстановлен (был пустым).",
+      );
+      setRestoreConfirmId(null);
+      qc.invalidateQueries({ queryKey: ["matrix", initial!.id] });
+      qc.invalidateQueries({ queryKey: ["punch", initial!.id] });
+      qc.invalidateQueries({ queryKey: ["scorecard", initial!.id] });
+      qc.invalidateQueries({ queryKey: ["facts", initial!.id] });
+      qc.invalidateQueries({ queryKey: ["work-items", initial!.id] });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -213,7 +243,10 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
                     Удалить все данные клиента: факты, источники, ingest-историю,
                     work-items, планы, артефакты и заметки. Матрица сбрасывается
                     в пустую. Сам клиент остаётся. Кэши транскриптов (общие между
-                    клиентами) не трогаются. Действие необратимо.
+                    клиентами) не трогаются.
+                  </p>
+                  <p className="text-xs text-emerald-700 leading-snug">
+                    Будет создан автоматический бэкап — данные можно восстановить.
                   </p>
                   <button
                     type="button"
@@ -254,6 +287,70 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
                       Отмена
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* Backups: list + restore */}
+              {backupsQ.data && backupsQ.data.length > 0 && (
+                <div className="pt-2 mt-2 border-t border-red-200 space-y-1.5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-ink-mute">
+                    Бэкапы
+                  </div>
+                  <ul className="space-y-1.5">
+                    {backupsQ.data.map((b) => {
+                      const factCount = b.counts?.facts ?? 0;
+                      const total = Object.values(b.counts || {}).reduce(
+                        (a, v) => a + (v as number), 0,
+                      );
+                      const when = b.created_at
+                        ? new Date(b.created_at).toLocaleString()
+                        : b.id;
+                      return (
+                        <li
+                          key={b.id}
+                          className="flex items-center justify-between gap-2 text-xs bg-white border border-ink-line rounded px-2 py-1.5"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-mono text-[11px] truncate">{when}</div>
+                            <div className="text-ink-mute">
+                              {factCount} фактов · {total} строк всего
+                            </div>
+                          </div>
+                          {restoreConfirmId === b.id ? (
+                            <div className="flex gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => restoreMut.mutate(b.id)}
+                                disabled={restoreMut.isPending}
+                                className="px-2 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50"
+                              >
+                                {restoreMut.isPending ? "Восстанавливаю…" : "Точно?"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRestoreConfirmId(null)}
+                                className="px-2 py-1 border border-ink-line rounded hover:bg-slate-50"
+                              >
+                                Нет
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => { setRestoreConfirmId(b.id); setClearMsg(""); }}
+                              className="shrink-0 px-2 py-1 border border-amber-400 text-amber-700 rounded hover:bg-amber-50"
+                            >
+                              Восстановить
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="text-[11px] text-ink-mute leading-snug">
+                    Восстановление сначала очистит текущие данные клиента, затем
+                    зальёт снимок из выбранного бэкапа.
+                  </p>
                 </div>
               )}
             </div>

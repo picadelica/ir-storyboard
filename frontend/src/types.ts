@@ -189,6 +189,16 @@ export interface LLMIngestAuditRow {
   confirmed_at: string;
 }
 
+// ── Client data backups ──────────────────────────────────────────────────────
+
+export interface BackupMeta {
+  id: string;
+  created_at: string | null;
+  path: string;
+  counts: Record<string, number>;
+  size_bytes: number;
+}
+
 // ── YouTube Ingest ────────────────────────────────────────────────────────────
 
 export interface YouTubeJobOut {

@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ir_storyboard import db, matrix, outputs, seed
+from ir_storyboard import backup, db, matrix, outputs, seed
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
 from ir_storyboard.llm import web_search, classify_facts_batch
@@ -555,6 +555,15 @@ def patch_client(client_id: str, u: ClientPatch, conn=Depends(get_conn)):
 
 class ClearClientDataOut(BaseModel):
     deleted: dict
+    backup: Optional[dict] = None
+    full_db_backup: Optional[str] = None
+
+
+def _backups_dir() -> Path:
+    """Backups root, overridable via IR_BACKUPS_DIR (defaults to data/backups)."""
+    import os
+    override = os.environ.get("IR_BACKUPS_DIR")
+    return Path(override) if override else backup.default_backups_dir()
 
 
 @app.delete(
@@ -562,116 +571,78 @@ class ClearClientDataOut(BaseModel):
     response_model=ClearClientDataOut,
     summary="Wipe all client-scoped data (facts, sources, ingest, work, plans, "
             "artifacts, notes) and reset the matrix to empty cells. Keeps the "
-            "client row and the shared (sha/video-keyed) transcript caches.",
+            "client row and the shared (sha/video-keyed) transcript caches. "
+            "Takes an automatic per-client JSON backup AND a full-DB gzip "
+            "snapshot before deleting — the backup is mandatory, the wipe is "
+            "aborted if it fails.",
 )
 def clear_client_data(client_id: str, conn=Depends(get_conn)):
     _check_client(client_id, conn)
 
-    # Everything in one transaction. SQLite with sqlite3 is in an implicit
-    # transaction since the first statement; commit only at the very end.
-    deleted: dict[str, int] = {}
+    backups_dir = _backups_dir()
 
-    def _count(sql: str, params: tuple = ()) -> int:
-        row = conn.execute(sql, params).fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
-
+    # ── Mandatory backup BEFORE any destructive work ──────────────────────────
+    # If either the per-client JSON snapshot or the full-DB snapshot fails, abort
+    # the whole operation — never delete without a recovery path.
     try:
-        # ── facts (live in this client's cells) ───────────────────────────────
-        deleted["facts"] = _count(
-            "SELECT COUNT(*) FROM facts WHERE cell_id IN "
-            "(SELECT id FROM cells WHERE client_id=?)",
-            (client_id,),
+        snapshot = backup.snapshot_client(conn, client_id)
+        backup_meta = backup.write_backup(client_id, snapshot, backups_dir)
+        full_db_path = backup.backup_full_db(
+            db.DEFAULT_DB_PATH, backups_dir, client_id=client_id
+        )
+    except Exception as e:
+        raise HTTPException(
+            500, f"Backup failed — clear aborted (no data was deleted): {e}"
         )
 
-        # sources have no client_id — they are reachable only through this
-        # client's facts. Capture the ids BEFORE deleting facts, then delete
-        # only those sources that aren't referenced by any OTHER client's facts.
-        src_ids = [
-            r[0] for r in conn.execute(
-                "SELECT DISTINCT f.source_id FROM facts f "
-                "JOIN cells c ON c.id = f.cell_id "
-                "WHERE c.client_id=? AND f.source_id IS NOT NULL",
-                (client_id,),
-            ).fetchall()
-        ]
-
-        # Delete facts via cells (ON DELETE CASCADE on cells would also drop
-        # facts, but we delete facts explicitly so we can recreate cells after).
-        conn.execute(
-            "DELETE FROM facts WHERE cell_id IN "
-            "(SELECT id FROM cells WHERE client_id=?)",
-            (client_id,),
-        )
-
-        # ── sources (only those now orphaned for this client) ─────────────────
-        sources_deleted = 0
-        for sid in src_ids:
-            still_used = conn.execute(
-                "SELECT 1 FROM facts WHERE source_id=? LIMIT 1", (sid,)
-            ).fetchone()
-            if still_used is None:
-                conn.execute("DELETE FROM sources WHERE id=?", (sid,))
-                sources_deleted += 1
-        deleted["sources"] = sources_deleted
-
-        # ── ingest_audit (client_id scoped) ───────────────────────────────────
-        deleted["ingest_audit"] = _count(
-            "SELECT COUNT(*) FROM ingest_audit WHERE client_id=?", (client_id,)
-        )
-        conn.execute("DELETE FROM ingest_audit WHERE client_id=?", (client_id,))
-
-        # ── work_items (client_id scoped) ─────────────────────────────────────
-        deleted["work_items"] = _count(
-            "SELECT COUNT(*) FROM work_items WHERE client_id=?", (client_id,)
-        )
-        conn.execute("DELETE FROM work_items WHERE client_id=?", (client_id,))
-
-        # ── narrative_tracks (scoped via plans, no direct client_id) ──────────
-        deleted["narrative_tracks"] = _count(
-            "SELECT COUNT(*) FROM narrative_tracks WHERE plan_id IN "
-            "(SELECT id FROM plans WHERE client_id=?)",
-            (client_id,),
-        )
-        conn.execute(
-            "DELETE FROM narrative_tracks WHERE plan_id IN "
-            "(SELECT id FROM plans WHERE client_id=?)",
-            (client_id,),
-        )
-
-        # ── plans (client_id scoped) ──────────────────────────────────────────
-        deleted["plans"] = _count(
-            "SELECT COUNT(*) FROM plans WHERE client_id=?", (client_id,)
-        )
-        conn.execute("DELETE FROM plans WHERE client_id=?", (client_id,))
-
-        # ── artifacts (client_id scoped) ──────────────────────────────────────
-        deleted["artifacts"] = _count(
-            "SELECT COUNT(*) FROM artifacts WHERE client_id=?", (client_id,)
-        )
-        conn.execute("DELETE FROM artifacts WHERE client_id=?", (client_id,))
-
-        # ── client_subsection_notes (client_id scoped) ───────────────────────
-        deleted["client_subsection_notes"] = _count(
-            "SELECT COUNT(*) FROM client_subsection_notes WHERE client_id=?",
-            (client_id,),
-        )
-        conn.execute(
-            "DELETE FROM client_subsection_notes WHERE client_id=?", (client_id,)
-        )
-
-        # ── cells: drop then recreate the empty 24-cell grid ──────────────────
-        deleted["cells"] = _count(
-            "SELECT COUNT(*) FROM cells WHERE client_id=?", (client_id,)
-        )
-        conn.execute("DELETE FROM cells WHERE client_id=?", (client_id,))
-        matrix.ensure_full_grid(conn, client_id)
-
+    # ── Purge in one transaction (commit only at the very end) ─────────────────
+    try:
+        deleted = backup._purge_client(conn, client_id)
         conn.commit()
     except Exception as e:  # pragma: no cover - defensive rollback
         conn.rollback()
         raise HTTPException(500, f"Failed to clear client data: {e}")
 
-    return ClearClientDataOut(deleted=deleted)
+    return ClearClientDataOut(
+        deleted=deleted,
+        backup=backup_meta,
+        full_db_backup=str(full_db_path),
+    )
+
+
+class BackupMeta(BaseModel):
+    id: str
+    created_at: Optional[str] = None
+    path: str
+    counts: dict
+    size_bytes: int
+
+
+@app.get("/api/clients/{client_id}/backups", response_model=List[BackupMeta])
+def list_client_backups(client_id: str, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    return backup.list_backups(client_id, _backups_dir())
+
+
+class RestoreIn(BaseModel):
+    backup_id: str
+
+
+class RestoreOut(BaseModel):
+    restored: dict
+
+
+@app.post("/api/clients/{client_id}/restore", response_model=RestoreOut)
+def restore_client_data(client_id: str, body: RestoreIn, conn=Depends(get_conn)):
+    _check_client(client_id, conn)
+    snapshot = backup.read_backup(client_id, body.backup_id, _backups_dir())
+    if snapshot is None:
+        raise HTTPException(404, f"Backup '{body.backup_id}' not found")
+    try:
+        restored = backup.restore_client(conn, client_id, snapshot)
+    except Exception as e:  # pragma: no cover - defensive rollback inside restore
+        raise HTTPException(500, f"Restore failed (rolled back): {e}")
+    return RestoreOut(restored=restored)
 
 
 def _do_import_seed(conn, client_id: str, seed: ClientSeedIn) -> SeedImportResult:
