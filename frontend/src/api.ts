@@ -29,8 +29,19 @@ export const api = {
   layers: () => call<Layer[]>("/layers"),
   channels: () => call<string[]>("/channels"),
 
+  authMe: () => call<{ name: string; tid: number; auth: boolean }>("/auth/me"),
+  authStart: () => call<{ token: string; bot_username: string; deep_link: string }>(
+    "/auth/start", { method: "POST" }),
+  authStatus: (token: string) => call<{ status: string; user?: { name: string; tid: number } }>(
+    `/auth/status?token=${encodeURIComponent(token)}`),
+  authLogout: () => call<{ ok: boolean }>("/auth/logout", { method: "POST" }),
+
   listClients: () => call<Client[]>("/clients"),
   clientsPortfolio: () => call<PortfolioRow[]>("/clients/portfolio"),
+  setClientMine: (id: string, on: boolean) =>
+    call<{ ok: boolean; mine: boolean }>(`/clients/${id}/mine`, {
+      method: "PUT", body: JSON.stringify({ on }),
+    }),
   getClient: (id: string) => call<Client>(`/clients/${id}`),
   upsertClient: (c: Client) =>
     call<Client>("/clients", { method: "POST", body: JSON.stringify(c) }),

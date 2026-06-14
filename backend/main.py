@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 import yaml
-from fastapi import FastAPI, File, Form, HTTPException, Depends, Query, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Depends, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
 # Make sure the ir_storyboard package is importable when running from repo root
@@ -41,6 +41,67 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from backend import auth  # noqa: E402
+
+_AUTH_PUBLIC = {"/api/health"}
+
+
+@app.on_event("startup")
+def _start_auth_poller():
+    auth.start_poller()
+
+
+@app.middleware("http")
+async def _auth_gate(request: Request, call_next):
+    """Gate /api/* behind a Telegram-group session when auth is configured.
+    /api/health and /api/auth/* stay open; everything else needs a valid cookie."""
+    if auth.enabled():
+        p = request.url.path
+        if p.startswith("/api/") and p not in _AUTH_PUBLIC and not p.startswith("/api/auth/"):
+            if not auth.verify_session(request.cookies.get(auth.COOKIE, "")):
+                return JSONResponse({"detail": "auth required"}, status_code=401)
+    return await call_next(request)
+
+
+@app.post("/api/auth/start")
+def auth_start():
+    if not auth.enabled():
+        raise HTTPException(400, "auth not configured")
+    token = auth.create_login_token()
+    bu = auth.bot_username()
+    return {"token": token, "bot_username": bu, "deep_link": f"https://t.me/{bu}?start={token}"}
+
+
+@app.get("/api/auth/status")
+def auth_status(token: str, response: Response):
+    tok = auth.get_login_token(token)
+    if not tok:
+        return {"status": "expired"}
+    if tok["status"] == "approved":
+        auth.consume_login_token(token)
+        response.set_cookie(
+            auth.COOKIE, auth.issue_session(tok["tid"], tok["name"]),
+            httponly=True, samesite="lax", max_age=auth.SESSION_TTL, path="/",
+        )
+        return {"status": "approved", "user": {"name": tok["name"], "tid": tok["tid"]}}
+    return {"status": tok["status"]}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(response: Response):
+    response.delete_cookie(auth.COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    if not auth.enabled():
+        return {"name": "dev", "tid": 0, "auth": False}
+    data = auth.verify_session(request.cookies.get(auth.COOKIE, ""))
+    if not data:
+        raise HTTPException(401, "not authenticated")
+    return {**data, "auth": True}
 
 
 # ---------- DB dependency ----------
@@ -383,12 +444,35 @@ class PortfolioRow(BaseModel):
     sector: Optional[str] = None
     covered: int
     total: int
+    mine: bool = False
+
+
+def current_tid(request: Request) -> Optional[int]:
+    """Telegram id of the logged-in user, or None when auth is disabled."""
+    if not auth.enabled():
+        return None
+    data = auth.verify_session(request.cookies.get(auth.COOKIE, ""))
+    return data.get("tid") if data else None
 
 
 # NB: must precede /api/clients/{client_id} so "portfolio" isn't read as an id.
 @app.get("/api/clients/portfolio", response_model=List[PortfolioRow])
-def clients_portfolio(conn=Depends(get_conn)):
-    return [PortfolioRow(**r) for r in matrix.portfolio_summary(conn)]
+def clients_portfolio(conn=Depends(get_conn), tid: Optional[int] = Depends(current_tid)):
+    mine = matrix.my_client_ids(conn, tid) if tid is not None else set()
+    return [PortfolioRow(**r, mine=(r["id"] in mine)) for r in matrix.portfolio_summary(conn)]
+
+
+class MineIn(BaseModel):
+    on: bool
+
+
+@app.put("/api/clients/{client_id}/mine")
+def set_client_mine(client_id: str, body: MineIn, conn=Depends(get_conn),
+                    tid: Optional[int] = Depends(current_tid)):
+    if tid is None:
+        raise HTTPException(400, "personal lists require Telegram login")
+    matrix.set_client_member(conn, client_id, tid, body.on)
+    return {"ok": True, "mine": body.on}
 
 
 @app.get("/api/clients/{client_id}", response_model=ClientOut)

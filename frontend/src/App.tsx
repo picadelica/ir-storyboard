@@ -4,6 +4,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate, useParams } from "react-
 import { api } from "./api";
 import type { CellSummary, Layer } from "./types";
 import Sidebar from "./components/Sidebar";
+import UserMenu from "./components/UserMenu";
 import MatrixGrid from "./components/MatrixGrid";
 import CellDrawer from "./components/CellDrawer";
 import CycleRunner from "./components/CycleRunner";
@@ -243,6 +244,7 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
               className="px-3 py-1.5 text-ink-mute hover:text-ink transition"
             >Present</button>
           </div>
+          <UserMenu />
         </div>
       </div>
 

@@ -434,6 +434,24 @@ def portfolio_summary(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     return out
 
 
+def my_client_ids(conn: sqlite3.Connection, telegram_id: int) -> set:
+    """Client ids the given user has marked as 'mine'."""
+    return {r[0] for r in conn.execute(
+        "SELECT client_id FROM client_members WHERE telegram_id=?", (telegram_id,))}
+
+
+def set_client_member(conn: sqlite3.Connection, client_id: str, telegram_id: int, on: bool) -> None:
+    if on:
+        conn.execute(
+            "INSERT OR IGNORE INTO client_members(client_id, telegram_id) VALUES(?, ?)",
+            (client_id, telegram_id))
+    else:
+        conn.execute(
+            "DELETE FROM client_members WHERE client_id=? AND telegram_id=?",
+            (client_id, telegram_id))
+    conn.commit()
+
+
 def empty_cells(conn: sqlite3.Connection, client_id: str) -> List[Dict[str, Any]]:
     """Subsections with NO facts at all (no green, no red, no grey).
     These are 'untouched' cells — the channel hasn't been run yet."""

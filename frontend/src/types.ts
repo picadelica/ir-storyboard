@@ -307,6 +307,7 @@ export interface PortfolioRow {
   sector?: string | null;
   covered: number;
   total: number;
+  mine?: boolean;
 }
 
 export interface CellSummary {

@@ -9,6 +9,7 @@ interface Props {
 }
 
 const COLLAPSE_KEY = "ir-sidebar-collapsed";
+const SCOPE_KEY = "ir-client-scope";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
@@ -411,6 +412,16 @@ export default function Sidebar({ clientId }: Props) {
   const clients = useQuery({ queryKey: ["clients"], queryFn: api.listClients });
   const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: api.clientsPortfolio });
   const covMap = new Map((portfolio.data ?? []).map(p => [p.id, p]));
+  const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
+  const [scope, setScope] = useState<"mine" | "all">(() => {
+    try { return localStorage.getItem(SCOPE_KEY) === "mine" ? "mine" : "all"; } catch { return "all"; }
+  });
+  useEffect(() => { try { localStorage.setItem(SCOPE_KEY, scope); } catch { /* noop */ } }, [scope]);
+
+  const mineMut = useMutation({
+    mutationFn: ({ id, on }: { id: string; on: boolean }) => api.setClientMine(id, on),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }),
+  });
 
   const seedAcc = useMutation({
     mutationFn: api.seedAccumulator,
@@ -453,6 +464,21 @@ export default function Sidebar({ clientId }: Props) {
           </div>
         </div>
 
+        {me.data?.auth && (clients.data?.length ?? 0) > 0 && (
+          <div className="px-3 py-2 border-b border-ink-line">
+            <div className="flex items-center rounded-lg border border-ink-line overflow-hidden text-[11px]">
+              <button
+                onClick={() => setScope("mine")}
+                className={`flex-1 py-1 transition ${scope === "mine" ? "bg-ink text-white font-medium" : "text-ink-mute hover:text-ink"}`}
+              >Мои</button>
+              <button
+                onClick={() => setScope("all")}
+                className={`flex-1 py-1 transition ${scope === "all" ? "bg-ink text-white font-medium" : "text-ink-mute hover:text-ink"}`}
+              >Все</button>
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto px-2 py-2">
           {clients.isLoading && <div className="text-xs text-ink-mute px-1 py-1">Loading…</div>}
           {clients.data && clients.data.length === 0 && (
@@ -461,43 +487,64 @@ export default function Sidebar({ clientId }: Props) {
               className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-slate-100 text-blue-600"
             >+ Загрузить пилот (Accumulator)</button>
           )}
-          <ul className="space-y-1">
-            {clients.data?.map(c => {
-              const active = clientId === c.id;
-              const p = covMap.get(c.id);
-              const pct = p && p.total ? Math.round((p.covered / p.total) * 100) : 0;
-              return (
-                <li key={c.id} className="group relative">
-                  <Link
-                    to={`/clients/${c.id}/${tab ?? "matrix"}`}
-                    className={`flex items-center gap-2.5 px-2 py-2 pr-7 rounded-lg transition
-                      ${active ? "bg-ink/[0.06]" : "hover:bg-ink/[0.03]"}`}
-                    title={c.name}
-                  >
-                    <span className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-[11px] font-semibold select-none
-                      ${active ? "bg-ink text-white" : "bg-ink/[0.06] text-ink"}`}>
-                      {monogram(c.name)}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className={`text-[13px] truncate text-ink ${active ? "font-medium" : ""}`}>{c.name}</div>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <div className="h-1 flex-1 rounded-full bg-ink/[0.07] overflow-hidden">
-                          <div className="h-full rounded-full bg-flag-green" style={{ width: `${pct}%` }} />
+          {(() => {
+            const list = (clients.data ?? []).filter(
+              c => scope === "all" || !me.data?.auth || covMap.get(c.id)?.mine);
+            if (me.data?.auth && scope === "mine" && list.length === 0 && (clients.data?.length ?? 0) > 0) {
+              return <div className="text-xs text-ink-mute px-2 py-2 leading-snug">
+                Пока нет «моих». Отметь компанию звёздочкой ★ (наведи на строку) или переключись на «Все».
+              </div>;
+            }
+            return (
+              <ul className="space-y-1">
+                {list.map(c => {
+                  const active = clientId === c.id;
+                  const p = covMap.get(c.id);
+                  const pct = p && p.total ? Math.round((p.covered / p.total) * 100) : 0;
+                  const mine = !!p?.mine;
+                  return (
+                    <li key={c.id} className="group relative">
+                      <Link
+                        to={`/clients/${c.id}/${tab ?? "matrix"}`}
+                        className={`flex items-center gap-2.5 px-2 py-2 pr-12 rounded-lg transition
+                          ${active ? "bg-ink/[0.06]" : "hover:bg-ink/[0.03]"}`}
+                        title={c.name}
+                      >
+                        <span className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-[11px] font-semibold select-none
+                          ${active ? "bg-ink text-white" : "bg-ink/[0.06] text-ink"}`}>
+                          {monogram(c.name)}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className={`text-[13px] truncate text-ink ${active ? "font-medium" : ""}`}>{c.name}</div>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <div className="h-1 flex-1 rounded-full bg-ink/[0.07] overflow-hidden">
+                              <div className="h-full rounded-full bg-flag-green" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-[10px] text-ink-mute tabular-nums w-7 text-right">{pct}%</span>
+                          </div>
                         </div>
-                        <span className="text-[10px] text-ink-mute tabular-nums w-7 text-right">{pct}%</span>
-                      </div>
-                    </div>
-                  </Link>
-                  <button
-                    onClick={(e) => { e.preventDefault(); setEditingClient(c); }}
-                    className="absolute right-1 top-2 opacity-0 group-hover:opacity-100 transition px-1.5 py-0.5 text-ink-mute hover:text-ink rounded hover:bg-white"
-                    title="Edit client"
-                    aria-label={`Edit ${c.name}`}
-                  >✎</button>
-                </li>
-              );
-            })}
-          </ul>
+                      </Link>
+                      {me.data?.auth && (
+                        <button
+                          onClick={(e) => { e.preventDefault(); mineMut.mutate({ id: c.id, on: !mine }); }}
+                          className={`absolute right-7 top-2 transition px-1 py-0.5 rounded hover:bg-white
+                            ${mine ? "text-amber-500 opacity-100" : "text-ink-mute opacity-0 group-hover:opacity-100 hover:text-ink"}`}
+                          title={mine ? "Убрать из моих" : "В мои компании"}
+                          aria-label={mine ? "Unstar" : "Star"}
+                        >{mine ? "★" : "☆"}</button>
+                      )}
+                      <button
+                        onClick={(e) => { e.preventDefault(); setEditingClient(c); }}
+                        className="absolute right-1 top-2 opacity-0 group-hover:opacity-100 transition px-1.5 py-0.5 text-ink-mute hover:text-ink rounded hover:bg-white"
+                        title="Edit client"
+                        aria-label={`Edit ${c.name}`}
+                      >✎</button>
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+          })()}
         </div>
       </aside>
 

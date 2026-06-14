@@ -98,6 +98,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "facts", "rationale", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "facts", "created_by", "TEXT")
     _add_column_if_missing(conn, "clients", "created_by", "TEXT")
+    # auth: per-user "my companies" membership (telegram_id ↔ client)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS client_members (
+            client_id    TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            telegram_id  INTEGER NOT NULL,
+            PRIMARY KEY (client_id, telegram_id)
+        )
+    """)
     conn.commit()
 
 
