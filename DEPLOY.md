@@ -324,6 +324,61 @@ dcp up -d --build
 
 ---
 
+## Часть 5. Тесты и CI через оркестратор
+
+### 5.1 Локальный прогон
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -m "not network" -q     # 180 passed
+```
+
+`requirements-dev.txt` ставит только то, что нужно для unit/e2e без сети —
+тяжёлые ML-пакеты транскрипции (`faster-whisper`, `openai`, `yt-dlp` из
+`backend/requirements.txt`) не требуются. Тесты с маркером `network`
+(реальный Whisper / сеть) деселектятся через `-m "not network"`.
+
+### 5.2 CI-workflow в Conductor
+
+Проект подключён к оркестратору (см. глобальный `~/.claude/CLAUDE.md`).
+Тестовый workflow — **`test_ir_storyboard`** (определение:
+`conductor-orchestrator/workflows/test_ir_storyboard.json`):
+
+```
+git_pull  →  run_tests  →  notify (callback + Telegram)
+```
+
+- `git_pull` — `git pull origin <branch>` на сервере в `/opt/ir-storyboard`.
+- `run_tests` — гоняет `pytest -m "not network"` в **одноразовом контейнере из
+  backend-образа** (`docker compose run --rm --no-deps backend …`). Репо
+  монтируется read-only и копируется в `/tmp`, поэтому прод-БД
+  (`storyboard-data`) и рабочая копия не задеваются. Зависимости берутся из
+  уже собранного образа — на сервере доустанавливается только `pytest`.
+- Ненулевой код pytest → таск `FAILED` → срабатывает `send_failure_notification`
+  (алерт в Telegram). Зелёный прогон → `notify` с `passed=true`.
+
+Запуск (скилл `/conductor` или напрямую через gateway):
+```bash
+source ~/.config/conductor-orchestrator/credentials
+curl -s -u "$GATEWAY_AUTH" -X POST "$GATEWAY_URL/workflow" \
+  -H 'Content-Type: application/json' -d '{
+    "name": "test_ir_storyboard", "version": 1,
+    "correlationId": "claudecode-ci",
+    "input": {
+      "projectId": "ir-storyboard",
+      "repo_path": "/opt/ir-storyboard",
+      "branch": "feat/v2"
+    }
+  }'
+```
+`input.projectId` обязателен. Статус — `GET $GATEWAY_URL/workflow/<id>`.
+
+> Workflow гоняет код из `origin/<branch>` на сервере — сначала запушить ветку,
+> потом запускать, иначе тесты проверят старый код.
+
+---
+
 ## Чек-лист готовности перед сдачей агентству
 
 Прогнать каждый пункт явно, не пропускать.

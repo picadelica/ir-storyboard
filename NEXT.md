@@ -8,67 +8,68 @@
 
 ---
 
-**Последнее обновление:** 2026-06-13
-**Ветка:** `feat/v2`
-**Working tree:** UNCOMMITTED — две правки (concern у red flags + плеер/транскрипт
-для аудио-источника). НЕ закоммичено по просьбе. Коммитить после зелёного
-`pytest tests/` + `npm run build`.
-**HEAD:** `0db4628 feat: audio file ingest (m4a/mp3/wav)`
-**Прод:** перекатан 2026-06-13 (audio ingest + polish series), TRANSCRIBER=openai
+**Последнее обновление:** 2026-06-14
+**Ветка:** `feat/v2` (мои 2 коммита ребейзнуты поверх audio-ingest серии
+параллельной сессии 2026-06-13 — audio file ingest, очистка клиента, плеер/
+транскрипт, safety-тесты).
+**Working tree:** изменения этой сессии закоммичены и **запушены в origin**.
+**Тесты:** `pytest -m "not network"` → **200 passed**.
+**Прод:** перекатан 2026-06-13 (audio ingest); после фиксов тестов этой сессии
+переката не было — некритично (правки тестов + section-mapping + idempotency).
 
-## Что сделано за сессию 2026-06-13 (uncommitted)
+## Что сделано за сессию 2026-06-14
 
-### A. Concern (rationale) у ВСЕХ red/grey фактов
+### 1. Починены 9 «вечных» красных тестов → **200 passed** (`fix:` commit)
 
-Проблема: эвристика `apply_heuristics` могла поднять флаг green→red/grey по
-ключевому слову, но возвращала только флаг — concern оставался пустым (LLM считал
-факт green). Красный флаг без объяснения.
+Все 9 были в baseline и валились на чистом коде. Корни и фиксы:
 
-- `ir_storyboard/ingest/classifiers/flag_heuristics.py`: новая
-  `classify_with_reason(text, llm_flag) -> (flag, reason)`. reason непустой
-  ТОЛЬКО когда эвристика сменила флаг (несёт сматчившийся kw). Старая
-  `apply_heuristics` — тонкая обёртка `classify_with_reason(...)[0]` (совместимость).
-- `ir_storyboard/llm.py`: все 5 вызовов переведены на `classify_with_reason`;
-  rationale = LLM-rationale ИЛИ heur_reason. Плюс belt-and-suspenders в
-  `_normalize_rationale`: red/grey с пустым итогом → `(требует уточнения экспертом)`.
-- `tests/test_flag_concern.py` (новый) — classify_with_reason + нормализация +
-  e2e через `_stub_extract` (red-триггер на green → red с непустым rationale).
+- **docx-лоадер** (`ingest/loaders/docx_loader.py`) — экспорт ChatGPT Deep
+  Research не имеет блока «Источники»; цитаты `[N]` — инлайн-гиперссылки в теле.
+  Добавлен `_extract_inline_citations` (харвест URL прямо с маркеров).
+- **stub-экстрактор** (`llm.py::_stub_extract`) — без API-ключа ставил
+  `cite_ids=[]`, поэтому `preview.sources` всегда пустой. Теперь вытаскивает
+  `[N]` из текста параграфа (`_RE_CITE_MARKER`).
+- **идемпотентность коммита** (`ingest/pipeline.py`) — дедуп сравнивал
+  `_normalize_fact_text()` с сырым SQL `lower(trim())` → факты с числами в
+  скобках дублировались. Нормализую обе стороны в Python. `INSERT OR IGNORE`
+  на `ingest_audit` → повторный коммит того же preview идемпотентен.
+- **preview-эндпоинт** (`backend/main.py`) — открывал свой `db.connect()` к
+  дефолтной БД, игнорируя инъекцию `get_conn` (404 в тестах + побочно ломал
+  e2e sqlite). Переведён на `Depends(get_conn)`.
+- **section→layer** (`classifiers/section_to_layer.py`) — generic-хинт
+  «контекст» (8.1) перебивал «регуляторный и социальный» (8.3). Теперь
+  выигрывает самый длинный матчащийся хинт.
+- **YouTube preview-тесты** (`tests/test_youtube_api.py`) — эндпоинт стал
+  асинхронным (job_id + поллинг), тесты ждали синхронный ответ. Обновлены
+  под async-флоу (`_drive_preview` хелпер).
 
-### B. Доступ к источнику-файлу (плеер + транскрипт) на экране PREVIEW
+### 2. Интеграция с оркестратором — CI-workflow + документация
 
-- `backend/main.py`: два эндпоинта (рядом с audio preview/commit) +
-  `FileResponse` import:
-  - `GET /api/clients/{client_id}/ingest/audio/source/{sha}` — стримит исходный
-    файл (глоб `{sha}*` в `_audio_uploads_dir()`, 16-символьный префикс ИЛИ полный
-    sha), Range/206 через FileResponse, media_type по расширению.
-  - `GET /api/clients/{client_id}/ingest/audio/transcript/{sha}` —
-    `{title, duration_sec, segments[]}` из `audio_transcripts` (LIKE '<sha>%'),
-    pydantic-модели `AudioTranscriptOut`/`TranscriptSegmentOut`.
-- `frontend/src/api.ts`: `audioSourceUrl(clientId, sha)` (URL) +
-  `audioTranscript(clientId, sha)` (fetch). Тип `AudioTranscript`/`TranscriptSegment`
-  в `types.ts`.
-- `frontend/src/components/AudioSourcePanel.tsx` (новый) — компактный
-  `<audio controls>` + раскрывающийся транскрипт; imperative `seek(sec)` через ref,
-  клик по сегменту перематывает, активный сегмент подсвечивается и скроллится.
-- `SourceLine.tsx`: проп `onSeek?` — таймкод рендерится кликабельной кнопкой
-  (для YouTube/web поведение без onSeek не изменилось).
-- `FactCard`/`SkippedCard` (в `IngestYouTube.tsx`): проп `onSeek?` проброшен в
-  SourceLine; SkippedCard теперь показывает таймкод и без source_url, если есть onSeek.
-- `IngestAudio.tsx`: на preview-экране sha из `meta.canonical_url` (срез
-  `file://`), плеер под шапкой источника, `onSeek=seekTo` на все факты и skipped.
+- **`test_ir_storyboard`** — новый workflow в Conductor (`git_pull → run_tests
+  → notify`). Определение: `conductor-orchestrator/workflows/test_ir_storyboard.json`,
+  добавлен в `scripts/register-workflows.sh`. Зарегистрирован через gateway,
+  привязан к паспорту (`workflows: [deploy_ir_storyboard, test_ir_storyboard]`).
+  `run_tests` гоняет `pytest -m "not network"` в одноразовом контейнере из
+  backend-образа (репо ro-mount + копия в /tmp, прод-БД не задета).
+- **`requirements-dev.txt`** — воспроизводимый локальный тест-env (в
+  `requirements.txt` не было pytest/pyyaml/fastapi).
+- **DEPLOY.md** — новая «Часть 5. Тесты и CI через оркестратор».
 
-## Open / следующие шаги
+## Следующие разумные шаги
 
-1. **ВЕРИФИКАЦИЯ НЕ ПРОГНАНА В СЕССИИ** — Bash-запуск pytest/npm был
-   заблокирован permission-настройками агентского окружения. ОБЯЗАТЕЛЬНО
-   прогнать вручную перед коммитом:
-   `/Library/Frameworks/Python.framework/Versions/3.13/bin/pytest tests/test_audio_ingest.py tests/test_flag_concern.py -q`
-   и `cd frontend && npm run build`. Базовые ~10 падений (llm_report-семейство +
-   youtube: ключи/сеть/фикстуры) — не регрессия.
-2. Закоммитить серию после зелёных тестов.
-3. **Плеер/транскрипт в МАТРИЦЕ (после commit)** — в этой итерации сделан только
-   PREVIEW-экран триажа. Следующий шаг: тот же AudioSourcePanel + кликабельные
-   таймкоды в `CellDrawer.tsx`/матрице для уже закоммиченных аудио-фактов
-   (canonical_url = file://sha16 уже лежит в sources).
-4. Audio history endpoint/таб — по необходимости.
-5. Диаризация — см. `DIARIZATION_PLAN.md`.
+1. **Запушить `feat/v2` в origin** (нужно явное «да») — без этого
+   `test_ir_storyboard` проверит старый код на сервере.
+2. **Прогнать `test_ir_storyboard`** после пуша — должно быть зелено
+   (180 passed). Команда — в DEPLOY.md §5.2 или скилл `/conductor`.
+3. **Перекат прода** — `dcp up -d --build` (или deploy-workflow). Миграция
+   SQLite идемпотентная, без downtime.
+4. **Паспорт:** milestones пустые — можно засеять роадмап (по запросу).
+   docPercent=40 (после доков по CI можно поднять).
+5. **Хвосты из прошлой polish-серии:** YouTube `FactEditForm` rationale-поле
+   (требует расширения `FactEdit`); бэкфилл rationale для legacy red фактов.
+
+## Открытое наблюдение
+
+- Воркер оркестратора реализует `git_pull` как `git pull origin <branch>`, а
+  онбординг требует `fetch + reset --hard`. Расхождение в репо
+  `conductor-orchestrator` (не критично, деплой работает), но стоит выровнять.
