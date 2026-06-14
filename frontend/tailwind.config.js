@@ -17,14 +17,16 @@ export default {
           empty: "#cbd5e1",
           "empty-bg": "#f1f5f9",
         },
+        // warm "paper" ink + hairline (editorial direction, harvested from Stitch tokens)
         ink: {
-          DEFAULT: "#111827",
-          mute: "#6b7280",
-          line: "#e5e7eb",
+          DEFAULT: "#1c1b1b",
+          mute: "#5d5f5d",
+          line: "#e7e3e0",
         },
+        canvas: "#fdf8f8",
       },
       fontFamily: {
-        sans: ["-apple-system", "BlinkMacSystemFont", "Inter", "system-ui", "sans-serif"],
+        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "system-ui", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
     },

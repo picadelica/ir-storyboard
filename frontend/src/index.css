@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -7,7 +9,8 @@ html, body, #root {
 }
 
 body {
-  @apply bg-slate-50 text-ink antialiased;
+  @apply text-ink antialiased;
+  background: #fdf8f8;
   font-feature-settings: "ss01", "cv11";
 }
 
