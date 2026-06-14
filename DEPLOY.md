@@ -355,6 +355,10 @@ git_pull  →  run_tests  →  notify (callback + Telegram)
   монтируется read-only и копируется в `/tmp`, поэтому прод-БД
   (`storyboard-data`) и рабочая копия не задеваются. Зависимости берутся из
   уже собранного образа — на сервере доустанавливается только `pytest`.
+  API-ключи (`ANTHROPIC/OPENAI/TAVILY/DEEPGRAM_API_KEY`) заглушены через
+  `-e KEY=` → тесты идут в детерминированном stub-режиме: офлайн, без затрат на
+  API и без LLM-недетерминизма (с живым ключом e2e на coverage/идемпотентность
+  плывут от прогона к прогону).
 - Ненулевой код pytest → таск `FAILED` → срабатывает `send_failure_notification`
   (алерт в Telegram). Зелёный прогон → `notify` с `passed=true`.
 

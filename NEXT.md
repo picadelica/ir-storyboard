@@ -50,22 +50,29 @@
   добавлен в `scripts/register-workflows.sh`. Зарегистрирован через gateway,
   привязан к паспорту (`workflows: [deploy_ir_storyboard, test_ir_storyboard]`).
   `run_tests` гоняет `pytest -m "not network"` в одноразовом контейнере из
-  backend-образа (репо ro-mount + копия в /tmp, прод-БД не задета).
+  backend-образа (репо ro-mount + копия в /tmp, прод-БД не задета). API-ключи
+  заглушены (`-e KEY=`) → детерминированный офлайн stub-режим.
+  **Прогон на сервере зелёный** (`passed=true`, exit 0) — провалидировано.
 - **`requirements-dev.txt`** — воспроизводимый локальный тест-env (в
   `requirements.txt` не было pytest/pyyaml/fastapi).
 - **DEPLOY.md** — новая «Часть 5. Тесты и CI через оркестратор».
+- Доп. фикс при валидации CI: `test_e2e_process::_reset` вызывал
+  `DELETE FROM work_items` без `init_schema` → падал на свежей БД в контейнере.
+  Добавлен `init_schema` (commit `fix: init_schema in test_e2e_process reset`).
+
+> Состояние оркестратор-репы: коммит `test_ir_storyboard` лежит в ветке
+> `feat/test-ir-storyboard-ci` (НЕ запушена). Workflow уже зарегистрирован
+> вживую через gateway — repo-коммит это source-of-truth, по желанию → push/PR.
 
 ## Следующие разумные шаги
 
-1. **Запушить `feat/v2` в origin** (нужно явное «да») — без этого
-   `test_ir_storyboard` проверит старый код на сервере.
-2. **Прогнать `test_ir_storyboard`** после пуша — должно быть зелено
-   (180 passed). Команда — в DEPLOY.md §5.2 или скилл `/conductor`.
-3. **Перекат прода** — `dcp up -d --build` (или deploy-workflow). Миграция
+1. **Перекат прода** — `dcp up -d --build` (или deploy-workflow). Миграция
    SQLite идемпотентная, без downtime.
-4. **Паспорт:** milestones пустые — можно засеять роадмап (по запросу).
+2. **Запушить ветку оркестратора** `feat/test-ir-storyboard-ci` (по желанию —
+   workflow уже живой на сервере).
+3. **Паспорт:** milestones пустые — можно засеять роадмап (по запросу).
    docPercent=40 (после доков по CI можно поднять).
-5. **Хвосты из прошлой polish-серии:** YouTube `FactEditForm` rationale-поле
+4. **Хвосты из прошлой polish-серии:** YouTube `FactEditForm` rationale-поле
    (требует расширения `FactEdit`); бэкфилл rationale для legacy red фактов.
 
 ## Открытое наблюдение
