@@ -1383,8 +1383,9 @@ def llm_report_ingest_preview(
     client_id: str,
     file: UploadFile = File(...),
     agent_hint: Optional[str] = Form(None),
+    conn=Depends(get_conn),
 ):
-    """Preview endpoint opens its own DB connection to avoid SQLite thread issues."""
+    """Preview runs synchronously in-request, so it uses the request-scoped conn."""
     from ir_storyboard.ingest.pipeline import preview_llm_report
     import tempfile, shutil
 
@@ -1392,28 +1393,21 @@ def llm_report_ingest_preview(
     if suffix not in _ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type: {suffix}. Allowed: {_ALLOWED_EXTENSIONS}")
 
-    conn = db.connect()
-    db.init_schema(conn)
-    matrix.seed_layers(conn)
+    client = conn.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
+    if not client:
+        raise HTTPException(404, f"Client '{client_id}' not found")
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = Path(tmp.name)
 
     try:
-        client = conn.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
-        if not client:
-            raise HTTPException(404, f"Client '{client_id}' not found")
-
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            shutil.copyfileobj(file.file, tmp)
-            tmp_path = Path(tmp.name)
-
-        try:
-            preview = preview_llm_report(tmp_path, client_id, conn, agent_hint=agent_hint)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            tmp_path.unlink(missing_ok=True)
-            raise HTTPException(422, f"Failed to parse document: {exc}")
-    finally:
-        conn.close()
+        preview = preview_llm_report(tmp_path, client_id, conn, agent_hint=agent_hint)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(422, f"Failed to parse document: {exc}")
 
     return IngestPreviewOut(
         audit_id=preview.audit_id,

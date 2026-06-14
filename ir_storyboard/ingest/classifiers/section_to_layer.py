@@ -102,7 +102,7 @@ SKIP_SECTION_HINTS: list[str] = [
 def suggest_subsection(heading: str) -> str | None:
     """Return the best-matching subsection_id for a section heading, or None.
 
-    Case-insensitive substring match; first match wins.
+    Case-insensitive substring match; the longest matching hint wins.
     Returns None for meta/editorial sections (Conclusions, Open Questions, …).
     """
     norm = heading.lower().strip()
@@ -111,10 +111,15 @@ def suggest_subsection(heading: str) -> str | None:
     if any(skip in norm for skip in SKIP_SECTION_HINTS):
         return None
 
-    # Match against synonym lists
+    # Match against synonym lists. The most specific (longest) matching hint
+    # wins — otherwise a generic hint like "контекст" (8.1) would shadow a
+    # specific one like "регуляторный и социальный" (8.3) just by dict order.
+    best_sid: str | None = None
+    best_len = 0
     for sid, hints in SECTION_HINTS.items():
         for hint in hints:
-            if hint in norm:
-                return sid
+            if hint in norm and len(hint) > best_len:
+                best_sid = sid
+                best_len = len(hint)
 
-    return None
+    return best_sid

@@ -23,6 +23,9 @@ from typing import TYPE_CHECKING, Any, Callable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Inline [N] citation marker (used by the keyword stub to attribute provenance).
+_RE_CITE_MARKER = re.compile(r"\[(\d+)\]")
+
 from .models import LAYERS, SubsectionSpec
 
 if TYPE_CHECKING:
@@ -612,11 +615,14 @@ def _stub_extract(
         if len(text) < 20:
             continue
         flag, heur_reason = classify_with_reason(text, "green")
+        # Harvest inline [N] citation markers so stub-extracted facts still
+        # carry provenance (matches the inline-hyperlink docx format).
+        cite_ids = [int(n) for n in _RE_CITE_MARKER.findall(text)]
         results.append(ExtractedFact(
             text=text[:400],
             subsection_id=sid,
             flag=flag,
-            cite_ids=[],
+            cite_ids=sorted(set(cite_ids)),
             confidence=0.3,
             raw_paraphrase=text[:400],
             rationale=_normalize_rationale(flag, heur_reason),

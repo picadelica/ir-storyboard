@@ -87,6 +87,43 @@ def _get_para_url(para) -> str:
     return m.group(0) if m else ""
 
 
+_REL_ID_ATTR = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+
+
+def _extract_inline_citations(para, out: dict[int, RawCitation]) -> None:
+    """Harvest inline ``[N]`` citation markers that are themselves hyperlinks.
+
+    ChatGPT Deep Research (and similar) exports attach the source URL directly
+    to the ``[N]`` marker run in the body — there is no trailing Sources block.
+    Each such hyperlink whose text matches ``[N]`` maps cite_id N → its URL.
+    First URL seen for a given id wins (markers repeat across the body).
+    """
+    for child in para._element.iter():
+        if not child.tag.endswith("}hyperlink"):
+            continue
+        r_id = child.get(_REL_ID_ATTR)
+        if not r_id or r_id not in para.part.rels:
+            continue
+        link_text = "".join(
+            t.text or "" for t in child.iter() if t.tag.endswith("}t")
+        )
+        m = _RE_BRACKET_N.search(link_text)
+        if not m:
+            continue
+        cite_id = int(m.group(1))
+        if cite_id in out and out[cite_id].url:
+            continue
+        url = (para.part.rels[r_id]._target or "").rstrip(".,)>")
+        if not url:
+            continue
+        out[cite_id] = RawCitation(
+            cite_id=cite_id,
+            raw_marker=f"[{cite_id}]",
+            url=url,
+            title=out[cite_id].title if cite_id in out else "",
+        )
+
+
 # ── section heading detection ────────────────────────────────────────────────
 
 _OPEN_QUESTIONS_HINTS = [
@@ -143,6 +180,10 @@ def load(path: Path) -> LLMReportIR:
         text = _para_text(para).strip()
         if not text:
             continue
+
+        # Inline ``[N]`` hyperlink markers can appear anywhere in the body
+        # (ChatGPT Deep Research style — no trailing Sources block).
+        _extract_inline_citations(para, citations_raw)
 
         is_hd, level = _is_heading(para)
 

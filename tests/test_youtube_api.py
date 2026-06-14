@@ -1,5 +1,6 @@
 """Tests for YouTube Ingest backend endpoints and pipeline."""
 import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -139,20 +140,45 @@ def _make_preview_result_with_l5(video_id="testVID"):
 
 # ── tests ──────────────────────────────────────────────────────────────────────
 
+def _drive_preview(client, url, client_id="test_client", timeout=5.0):
+    """Drive the async preview job: POST to start, then poll until done.
+
+    Returns the YouTubePreviewOut payload (the job's ``result``). Must be called
+    while the run_youtube_preview patch is still active — the background thread
+    resolves that symbol lazily when it runs.
+    """
+    resp = client.post(
+        f"/api/clients/{client_id}/ingest/youtube/preview",
+        json={"url": url},
+    )
+    assert resp.status_code == 200, resp.text
+    job_id = resp.json()["job_id"]
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        status = client.get(
+            f"/api/clients/{client_id}/ingest/youtube/preview/{job_id}"
+        )
+        assert status.status_code == 200, status.text
+        body = status.json()
+        if body["status"] == "done":
+            assert body["result"] is not None
+            return body["result"]
+        if body["status"] == "error":
+            raise AssertionError(f"preview job errored: {body.get('error')}")
+        time.sleep(0.02)
+    raise AssertionError("preview job did not complete within timeout")
+
+
 def test_preview_returns_facts_with_anchors(client, tmp_path):
     with patch(
         "ir_storyboard.ingest.youtube_pipeline.run_youtube_preview",
         return_value=_make_preview_result(),
     ):
-        resp = client.post(
-            "/api/clients/test_client/ingest/youtube/preview",
-            json={"url": "https://www.youtube.com/watch?v=testVID"},
-        )
+        result = _drive_preview(client, "https://www.youtube.com/watch?v=testVID")
 
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert len(data["facts"]) == 2
-    for fact in data["facts"]:
+    assert len(result["facts"]) == 2
+    for fact in result["facts"]:
         assert "&t=" in fact["source_url"]
         assert len(fact["evidence_snippet"]) >= 20
 
@@ -162,16 +188,11 @@ def test_preview_separates_skipped_l5_facts(client, tmp_path):
         "ir_storyboard.ingest.youtube_pipeline.run_youtube_preview",
         return_value=_make_preview_result_with_l5(),
     ):
-        resp = client.post(
-            "/api/clients/test_client/ingest/youtube/preview",
-            json={"url": "https://www.youtube.com/watch?v=testVID"},
-        )
+        result = _drive_preview(client, "https://www.youtube.com/watch?v=testVID")
 
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert len(data["facts"]) == 1
-    assert len(data["skipped"]) == 1
-    assert "L5" in data["skipped"][0]["reason"] or "5.1" in data["skipped"][0]["reason"]
+    assert len(result["facts"]) == 1
+    assert len(result["skipped"]) == 1
+    assert "L5" in result["skipped"][0]["reason"] or "5.1" in result["skipped"][0]["reason"]
 
 
 def _seed_preview_audit(tmp_path, preview_result, client_id="test_client"):

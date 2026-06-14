@@ -266,19 +266,20 @@ def commit_llm_report(
                 url_to_source_id[canon] = source_id
                 committed_sources += 1
 
-        # Check for duplicate fact
+        # Check for duplicate fact. Both sides must pass through
+        # _normalize_fact_text — SQL lower(trim(...)) alone does not collapse
+        # whitespace or strip parenthetical numbers, so comparing a normalized
+        # value against raw stored text would miss real duplicates.
         norm_text = _normalize_fact_text(rf.text)
-        existing_fact = conn.execute(
-            """SELECT f.id FROM facts f
+        existing_texts = conn.execute(
+            """SELECT f.text FROM facts f
                 JOIN cells c ON c.id = f.cell_id
                 WHERE c.client_id = ?
-                  AND c.subsection_id = ?
-                  AND lower(trim(f.text)) = ?
-                LIMIT 1""",
-            (client_id, rf.subsection_id, norm_text),
-        ).fetchone()
+                  AND c.subsection_id = ?""",
+            (client_id, rf.subsection_id),
+        ).fetchall()
 
-        if existing_fact:
+        if any(_normalize_fact_text(row["text"]) == norm_text for row in existing_texts):
             skipped_facts += 1
             continue
 
@@ -307,7 +308,7 @@ def commit_llm_report(
     now = datetime.now(timezone.utc).isoformat()
     _ensure_audit_table(conn)
     conn.execute(
-        """INSERT INTO ingest_audit
+        """INSERT OR IGNORE INTO ingest_audit
             (id, client_id, ingest_kind, source_artifact, agent, cite_format,
              parsed_at, facts_emitted, facts_committed, greys_emitted,
              channel_warnings, expert_email, confirmed_at, preview_json)
