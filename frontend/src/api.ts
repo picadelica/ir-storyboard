@@ -2,7 +2,7 @@ import type {
   AudioTranscript,
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
-  ClientMethodologyCell, Layer, MethodologyCell, TonePreset,
+  ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem,
@@ -30,6 +30,7 @@ export const api = {
   channels: () => call<string[]>("/channels"),
 
   listClients: () => call<Client[]>("/clients"),
+  clientsPortfolio: () => call<PortfolioRow[]>("/clients/portfolio"),
   getClient: (id: string) => call<Client>(`/clients/${id}`),
   upsertClient: (c: Client) =>
     call<Client>("/clients", { method: "POST", body: JSON.stringify(c) }),

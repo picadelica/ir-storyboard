@@ -12,6 +12,10 @@ const COLLAPSE_KEY = "ir-sidebar-collapsed";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
+function monogram(name: string): string {
+  return name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+}
+
 interface ClientDrawerProps {
   mode: "create" | "edit";
   initial?: Client;
@@ -405,6 +409,8 @@ export default function Sidebar({ clientId }: Props) {
   }, [collapsed]);
 
   const clients = useQuery({ queryKey: ["clients"], queryFn: api.listClients });
+  const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: api.clientsPortfolio });
+  const covMap = new Map((portfolio.data ?? []).map(p => [p.id, p]));
 
   const seedAcc = useMutation({
     mutationFn: api.seedAccumulator,
@@ -455,25 +461,42 @@ export default function Sidebar({ clientId }: Props) {
               className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-slate-100 text-blue-600"
             >+ Загрузить пилот (Accumulator)</button>
           )}
-          <ul className="space-y-0.5">
-            {clients.data?.map(c => (
-              <li key={c.id} className="group relative">
-                <Link
-                  to={`/clients/${c.id}/${tab ?? "matrix"}`}
-                  className={`block px-2 py-1.5 pr-7 rounded text-sm truncate
-                    ${clientId === c.id ? "bg-slate-100 font-medium" : "hover:bg-slate-50"}`}
-                  title={c.name}
-                >
-                  {c.name}
-                </Link>
-                <button
-                  onClick={(e) => { e.preventDefault(); setEditingClient(c); }}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition px-1.5 text-ink-mute hover:text-ink rounded hover:bg-white"
-                  title="Edit client"
-                  aria-label={`Edit ${c.name}`}
-                >✎</button>
-              </li>
-            ))}
+          <ul className="space-y-1">
+            {clients.data?.map(c => {
+              const active = clientId === c.id;
+              const p = covMap.get(c.id);
+              const pct = p && p.total ? Math.round((p.covered / p.total) * 100) : 0;
+              return (
+                <li key={c.id} className="group relative">
+                  <Link
+                    to={`/clients/${c.id}/${tab ?? "matrix"}`}
+                    className={`flex items-center gap-2.5 px-2 py-2 pr-7 rounded-lg transition
+                      ${active ? "bg-ink/[0.06]" : "hover:bg-ink/[0.03]"}`}
+                    title={c.name}
+                  >
+                    <span className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-[11px] font-semibold select-none
+                      ${active ? "bg-ink text-white" : "bg-ink/[0.06] text-ink"}`}>
+                      {monogram(c.name)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className={`text-[13px] truncate text-ink ${active ? "font-medium" : ""}`}>{c.name}</div>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <div className="h-1 flex-1 rounded-full bg-ink/[0.07] overflow-hidden">
+                          <div className="h-full rounded-full bg-flag-green" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-[10px] text-ink-mute tabular-nums w-7 text-right">{pct}%</span>
+                      </div>
+                    </div>
+                  </Link>
+                  <button
+                    onClick={(e) => { e.preventDefault(); setEditingClient(c); }}
+                    className="absolute right-1 top-2 opacity-0 group-hover:opacity-100 transition px-1.5 py-0.5 text-ink-mute hover:text-ink rounded hover:bg-white"
+                    title="Edit client"
+                    aria-label={`Edit ${c.name}`}
+                  >✎</button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </aside>

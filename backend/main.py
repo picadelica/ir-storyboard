@@ -377,6 +377,20 @@ def list_clients(conn=Depends(get_conn)):
     return [_row_to_client(r) for r in matrix.list_clients(conn)]
 
 
+class PortfolioRow(BaseModel):
+    id: str
+    name: str
+    sector: Optional[str] = None
+    covered: int
+    total: int
+
+
+# NB: must precede /api/clients/{client_id} so "portfolio" isn't read as an id.
+@app.get("/api/clients/portfolio", response_model=List[PortfolioRow])
+def clients_portfolio(conn=Depends(get_conn)):
+    return [PortfolioRow(**r) for r in matrix.portfolio_summary(conn)]
+
+
 @app.get("/api/clients/{client_id}", response_model=ClientOut)
 def get_client(client_id: str, conn=Depends(get_conn)):
     row = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()

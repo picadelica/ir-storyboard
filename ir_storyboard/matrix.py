@@ -412,6 +412,28 @@ def cell_summary(conn: sqlite3.Connection, client_id: str) -> List[Dict[str, Any
     return out
 
 
+def portfolio_summary(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+    """One row per client with covered/total subsection counts — for the
+    sidebar portfolio health bars. `covered` = subsections with >=1 green fact."""
+    total = conn.execute("SELECT COUNT(*) FROM subsections").fetchone()[0]
+    rows = conn.execute("""
+        SELECT cl.id, cl.name, cl.sector,
+               COUNT(DISTINCT CASE WHEN f.flag='green' THEN c.subsection_id END) AS covered
+        FROM clients cl
+        LEFT JOIN cells c ON c.client_id = cl.id
+        LEFT JOIN facts f ON f.cell_id = c.id
+        GROUP BY cl.id
+        ORDER BY cl.name
+    """).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["total"] = total
+        d["covered"] = d.get("covered") or 0
+        out.append(d)
+    return out
+
+
 def empty_cells(conn: sqlite3.Connection, client_id: str) -> List[Dict[str, Any]]:
     """Subsections with NO facts at all (no green, no red, no grey).
     These are 'untouched' cells — the channel hasn't been run yet."""

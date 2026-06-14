@@ -301,6 +301,14 @@ export interface AudioTranscript {
   segments: TranscriptSegment[];
 }
 
+export interface PortfolioRow {
+  id: string;
+  name: string;
+  sector?: string | null;
+  covered: number;
+  total: number;
+}
+
 export interface CellSummary {
   subsection_id: string;
   subsection_name: string;
