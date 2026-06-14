@@ -385,22 +385,31 @@ def list_artifacts(conn: sqlite3.Connection, *, client_id: str,
 # ---------- matrix views ----------
 
 def cell_summary(conn: sqlite3.Connection, client_id: str) -> List[Dict[str, Any]]:
-    """Return one row per subsection with green/red/grey counts and last update."""
+    """Return one row per subsection with green/red/grey counts, last update,
+    and the distinct source channels feeding the cell (for matrix infographics)."""
     rows = conn.execute("""
         SELECT s.id AS subsection_id, s.layer_id, s.name AS subsection_name,
                L.name AS layer_name, L.intimacy,
                SUM(CASE WHEN f.flag='green' THEN 1 ELSE 0 END) AS n_green,
                SUM(CASE WHEN f.flag='red'   THEN 1 ELSE 0 END) AS n_red,
                SUM(CASE WHEN f.flag='grey'  THEN 1 ELSE 0 END) AS n_grey,
-               MAX(f.captured_at) AS last_update
+               MAX(f.captured_at) AS last_update,
+               GROUP_CONCAT(DISTINCT src.channel) AS channels
         FROM subsections s
         JOIN layers L ON L.id = s.layer_id
         LEFT JOIN cells c ON c.subsection_id = s.id AND c.client_id = ?
         LEFT JOIN facts f ON f.cell_id = c.id
+        LEFT JOIN sources src ON src.id = f.source_id
         GROUP BY s.id
         ORDER BY L.intimacy, s.sort_order
     """, (client_id,)).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        raw = d.pop("channels", None)
+        d["channels"] = sorted({c for c in (raw.split(",") if raw else []) if c})
+        out.append(d)
+    return out
 
 
 def empty_cells(conn: sqlite3.Connection, client_id: str) -> List[Dict[str, Any]]:

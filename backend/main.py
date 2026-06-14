@@ -187,6 +187,7 @@ class CellSummaryOut(BaseModel):
     n_red: int
     n_grey: int
     last_update: Optional[str] = None
+    channels: List[str] = []
 
 
 class FactOut(BaseModel):

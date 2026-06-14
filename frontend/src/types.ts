@@ -311,6 +311,7 @@ export interface CellSummary {
   n_red: number;
   n_grey: number;
   last_update?: string | null;
+  channels?: Channel[];
 }
 
 export interface Fact {
