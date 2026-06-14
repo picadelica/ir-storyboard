@@ -2,6 +2,7 @@ import type {
   AudioTranscript,
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
+  BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
@@ -42,6 +43,16 @@ export const api = {
     call<{ ok: boolean; mine: boolean }>(`/clients/${id}/mine`, {
       method: "PUT", body: JSON.stringify({ on }),
     }),
+
+  briefTemplates: () => call<BriefTemplate[]>("/brief-templates"),
+  createBriefTemplate: (b: { name: string; material_type: string; body: string }) =>
+    call<BriefTemplate>("/brief-templates", { method: "POST", body: JSON.stringify(b) }),
+  updateBriefTemplate: (id: number, b: Partial<{ name: string; material_type: string; body: string }>) =>
+    call<BriefTemplate>(`/brief-templates/${id}`, { method: "PUT", body: JSON.stringify(b) }),
+  deleteBriefTemplate: (id: number) =>
+    call<{ ok: boolean }>(`/brief-templates/${id}`, { method: "DELETE" }),
+  composeBrief: (clientId: string, b: { template_id: number; analyst_prompt: string; flags?: string[] | null; layer_ids?: number[] | null }) =>
+    call<BriefComposeResult>(`/clients/${clientId}/brief`, { method: "POST", body: JSON.stringify(b) }),
   getClient: (id: string) => call<Client>(`/clients/${id}`),
   upsertClient: (c: Client) =>
     call<Client>("/clients", { method: "POST", body: JSON.stringify(c) }),

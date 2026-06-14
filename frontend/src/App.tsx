@@ -19,6 +19,7 @@ import IngestYouTube from "./components/IngestYouTube";
 import IngestAudio from "./components/IngestAudio";
 import MethodologyView from "./components/MethodologyView";
 import PlanView from "./components/PlanView";
+import BriefComposer from "./components/BriefComposer";
 
 export default function App() {
   return (
@@ -126,6 +127,9 @@ function ClientPage() {
           {activeTab === "plan" && (
             <PlanView clientId={clientId!} quarter={quarter} layers={layers.data} />
           )}
+          {activeTab === "brief" && (
+            <BriefComposer clientId={clientId!} layers={layers.data} />
+          )}
         </div>
 
         {present && <PresentFooter clientId={clientId!} />}
@@ -203,6 +207,7 @@ const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
   },
   {
     id: "deliver", label: "Deliver", tabs: [
+      { id: "brief", label: "Brief" },
       { id: "artifacts", label: "Artifacts" },
       { id: "plan", label: "Plan" },
     ],

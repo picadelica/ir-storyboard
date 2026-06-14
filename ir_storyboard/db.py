@@ -106,6 +106,17 @@ def init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (client_id, telegram_id)
         )
     """)
+    # brief composer: analyst-editable prompt templates for external-LLM materials
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS brief_templates (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            name          TEXT NOT NULL,
+            material_type TEXT NOT NULL DEFAULT '',
+            body          TEXT NOT NULL DEFAULT '',
+            created_by    TEXT,
+            updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
 
 

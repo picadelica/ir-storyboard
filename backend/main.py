@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ir_storyboard import backup, db, matrix, outputs, seed
+from ir_storyboard import backup, brief, db, matrix, outputs, seed
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
 from ir_storyboard.llm import web_search, classify_facts_batch
@@ -478,6 +478,90 @@ def set_client_mine(client_id: str, body: MineIn, conn=Depends(get_conn),
         raise HTTPException(400, "personal lists require Telegram login")
     matrix.set_client_member(conn, client_id, tid, body.on)
     return {"ok": True, "mine": body.on}
+
+
+# ---------- brief composer: factology + analyst prompt -> MD/JSON for external LLM ----------
+
+class BriefTemplateOut(BaseModel):
+    id: int
+    name: str
+    material_type: str = ""
+    body: str = ""
+    created_by: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class BriefTemplateIn(BaseModel):
+    name: str
+    material_type: str = ""
+    body: str = ""
+
+
+class BriefTemplatePatch(BaseModel):
+    name: Optional[str] = None
+    material_type: Optional[str] = None
+    body: Optional[str] = None
+
+
+class BriefComposeIn(BaseModel):
+    template_id: int
+    analyst_prompt: str = ""
+    flags: Optional[List[str]] = None       # subset of green/red/grey; None = all
+    layer_ids: Optional[List[int]] = None   # subset of 1..8; None = all
+
+
+class BriefComposeOut(BaseModel):
+    md: str
+    json_bundle: dict
+    fact_count: int
+
+
+@app.get("/api/brief-templates", response_model=List[BriefTemplateOut])
+def list_brief_templates(conn=Depends(get_conn)):
+    return [BriefTemplateOut(**t) for t in brief.list_templates(conn)]
+
+
+@app.post("/api/brief-templates", response_model=BriefTemplateOut)
+def create_brief_template(body: BriefTemplateIn, conn=Depends(get_conn),
+                          user: Optional[dict] = Depends(current_user)):
+    t = brief.create_template(conn, body.name, body.material_type, body.body,
+                              created_by=(user.get("name") if user else None))
+    return BriefTemplateOut(**t)
+
+
+@app.put("/api/brief-templates/{tid}", response_model=BriefTemplateOut)
+def update_brief_template(tid: int, body: BriefTemplatePatch, conn=Depends(get_conn)):
+    t = brief.update_template(conn, tid, name=body.name,
+                              material_type=body.material_type, body=body.body)
+    if not t:
+        raise HTTPException(404, "template not found")
+    return BriefTemplateOut(**t)
+
+
+@app.delete("/api/brief-templates/{tid}")
+def delete_brief_template(tid: int, conn=Depends(get_conn)):
+    brief.delete_template(conn, tid)
+    return {"ok": True}
+
+
+@app.post("/api/clients/{client_id}/brief", response_model=BriefComposeOut)
+def compose_brief(client_id: str, body: BriefComposeIn, conn=Depends(get_conn)):
+    client_row = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+    if not client_row:
+        raise HTTPException(404, "client not found")
+    template = brief.get_template(conn, body.template_id)
+    if not template:
+        raise HTTPException(404, "template not found")
+
+    client = {"id": client_row["id"], "name": client_row["name"],
+              "sector": client_row["sector"] if "sector" in client_row.keys() else None}
+    factology = brief.collect_factology(conn, client_id, flags=body.flags, layer_ids=body.layer_ids)
+    fact_count = sum(len(s["facts"]) for L in factology for s in L["subsections"])
+    return BriefComposeOut(
+        md=brief.render_md(client, template, body.analyst_prompt, factology),
+        json_bundle=brief.render_json(client, template, body.analyst_prompt, factology),
+        fact_count=fact_count,
+    )
 
 
 @app.get("/api/clients/{client_id}", response_model=ClientOut)

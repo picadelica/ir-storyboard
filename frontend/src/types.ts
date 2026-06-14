@@ -301,6 +301,21 @@ export interface AudioTranscript {
   segments: TranscriptSegment[];
 }
 
+export interface BriefTemplate {
+  id: number;
+  name: string;
+  material_type: string;
+  body: string;
+  created_by?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BriefComposeResult {
+  md: string;
+  json_bundle: unknown;
+  fact_count: number;
+}
+
 export interface PortfolioRow {
   id: string;
   name: string;
