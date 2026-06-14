@@ -447,12 +447,17 @@ class PortfolioRow(BaseModel):
     mine: bool = False
 
 
-def current_tid(request: Request) -> Optional[int]:
-    """Telegram id of the logged-in user, or None when auth is disabled."""
+def current_user(request: Request) -> Optional[dict]:
+    """Session {tid, name} of the logged-in user, or None when auth is disabled."""
     if not auth.enabled():
         return None
-    data = auth.verify_session(request.cookies.get(auth.COOKIE, ""))
-    return data.get("tid") if data else None
+    return auth.verify_session(request.cookies.get(auth.COOKIE, ""))
+
+
+def current_tid(request: Request) -> Optional[int]:
+    """Telegram id of the logged-in user, or None when auth is disabled."""
+    u = current_user(request)
+    return u.get("tid") if u else None
 
 
 # NB: must precede /api/clients/{client_id} so "portfolio" isn't read as an id.
@@ -844,7 +849,7 @@ def get_cell_facts(client_id: str, subsection_id: str, conn=Depends(get_conn)):
 @app.post("/api/clients/{client_id}/cells/{subsection_id}/facts",
           response_model=FactOut)
 def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
-                  conn=Depends(get_conn)):
+                  conn=Depends(get_conn), user: Optional[dict] = Depends(current_user)):
     # sync Wayback lookup for online channels
     archive_url = None
     if f.source_url and f.channel in ("online_research", "online_interview", "archival"):
@@ -860,6 +865,7 @@ def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
             text=f.text, flag=f.flag, source_id=src_id, confidence=f.confidence,
             evidence_snippet=f.evidence_snippet,
             rationale=f.rationale,
+            created_by=(user.get("name") if user else None),
         )
     except ValueError as e:
         raise HTTPException(422, str(e))

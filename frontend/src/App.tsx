@@ -127,6 +127,8 @@ function ClientPage() {
             <PlanView clientId={clientId!} quarter={quarter} layers={layers.data} />
           )}
         </div>
+
+        {present && <PresentFooter clientId={clientId!} />}
       </main>
 
       {selectedSid && activeTab === "matrix" && (
@@ -281,6 +283,22 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function PresentFooter({ clientId }: { clientId: string }) {
+  const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.getClient(clientId) });
+  const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
+  const name = client.data?.name ?? clientId;
+  const analyst = me.data?.auth ? me.data.name : null;
+  return (
+    <div className="flex items-center justify-between border-t border-ink-line bg-white px-6 py-2.5 text-[11px] text-ink-mute">
+      <span>Конфиденциально · {name} Investor Relations</span>
+      <span className="flex items-center gap-2.5">
+        {analyst && <span>Аналитик: {analyst}</span>}
+        <span className="px-2 py-0.5 rounded-md bg-ink text-white text-[10px] tracking-wide">LIVE</span>
+      </span>
     </div>
   );
 }

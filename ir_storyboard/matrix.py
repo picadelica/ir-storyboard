@@ -238,7 +238,8 @@ def add_source(conn: sqlite3.Connection, channel: str, title: str = "",
 def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
              text: str, flag: str, source_id: Optional[int] = None,
              confidence: float = 1.0, valid_until: Optional[str] = None,
-             evidence_snippet: str = "", rationale: Optional[str] = None) -> int:
+             evidence_snippet: str = "", rationale: Optional[str] = None,
+             created_by: Optional[str] = None) -> int:
     if flag not in (FLAG_GREEN, FLAG_RED, FLAG_GREY):
         raise ValueError(f"bad flag {flag}")
     rationale = validate_rationale(flag, rationale)
@@ -255,10 +256,10 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
     cell_id = get_or_create_cell(conn, client_id, subsection_id)
     cur = conn.execute(
         """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until,
-                              evidence_snippet, rationale)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                              evidence_snippet, rationale, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (cell_id, text, flag, source_id, confidence, valid_until,
-         evidence_snippet, rationale),
+         evidence_snippet, rationale, created_by),
     )
     conn.commit()
     fact_id = cur.lastrowid
