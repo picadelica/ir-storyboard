@@ -18,6 +18,7 @@ def _reset():
     """Delete dummy-test client if it exists to start clean."""
     from ir_storyboard import db
     conn = db.connect()
+    db.init_schema(conn)  # self-contained: tables may not exist yet on a fresh DB
     conn.execute("DELETE FROM work_items WHERE client_id='dummy-test'")
     conn.execute("DELETE FROM facts WHERE cell_id IN "
                  "(SELECT id FROM cells WHERE client_id='dummy-test')")
