@@ -40,6 +40,10 @@ frontend/.vite/
 frontend/npm-debug.log*
 frontend/.env.local
 frontend/.env.*.local
+# tsc -b composite build artifacts
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 
 # --- Backups ---
 backups/
