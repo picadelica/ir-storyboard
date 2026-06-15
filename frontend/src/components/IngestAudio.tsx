@@ -10,6 +10,16 @@ import AudioSourcePanel, { type AudioSourceHandle } from "./AudioSourcePanel";
 const ALLOWED_EXT = [".m4a", ".mp3", ".wav", ".ogg", ".aac"];
 const MAX_BYTES = 500 * 1024 * 1024;
 
+// localStorage: per-client активный аудио-джоб, чтобы переживать unmount при
+// смене вкладки и перезагрузку страницы. Чистится при done/error/404.
+const audioJobKey = (clientId: string) => `audio_job:${clientId}`;
+type StoredAudioJob = {
+  job_id: string;
+  started_at: number;
+  title: string;
+  file_name: string;
+};
+
 interface Props {
   clientId: string;
   onJumpToCell: (sid: string) => void;
@@ -54,6 +64,69 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
   }
   useEffect(() => () => stopPolling(), []);
 
+  // Запускает polling статуса джоба (общий код для свежезапущенного
+  // и восстановленного из localStorage). Очищает localStorage на done/error/404.
+  function startPolling(jobId: string) {
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await api.audioPreviewStatus(clientId, jobId);
+        setJobStatus(status.status);
+        if (status.stage) setJobStage(status.stage);
+        if (status.status === "done" && status.result) {
+          stopPolling();
+          localStorage.removeItem(audioJobKey(clientId));
+          setPreview(status.result);
+          setDropped(new Set());
+          setOverrides(new Set());
+          setFactEdits({});
+          setSkippedEdits({});
+          setScreen("preview");
+        } else if (status.status === "error") {
+          stopPolling();
+          localStorage.removeItem(audioJobKey(clientId));
+          setJobError(status.error || "что-то пошло не так");
+        }
+      } catch (e) {
+        // 404 = бэк потерял джоб (рестарт контейнера). Сбрасываем UI в input.
+        stopPolling();
+        localStorage.removeItem(audioJobKey(clientId));
+        setJobStatus("");
+        setJobError(
+          e instanceof Error && /404/.test(e.message)
+            ? "Задача потеряна (backend перезапустился). Загрузите файл заново."
+            : "Связь с сервером прервана. Попробуйте ещё раз."
+        );
+      }
+    }, 5000);
+  }
+
+  // Восстановление активного джоба при mount (включая после reload и
+  // после смены вкладки, т.к. в App.tsx стоит key={clientId} → каждый
+  // клиент получает свой lifecycle и свой ключ в localStorage).
+  useEffect(() => {
+    const raw = localStorage.getItem(audioJobKey(clientId));
+    if (!raw) return;
+    let saved: StoredAudioJob;
+    try {
+      saved = JSON.parse(raw) as StoredAudioJob;
+    } catch {
+      localStorage.removeItem(audioJobKey(clientId));
+      return;
+    }
+    if (!saved.job_id) {
+      localStorage.removeItem(audioJobKey(clientId));
+      return;
+    }
+    setJobStatus("processing");
+    setJobError("");
+    setJobStage("восстановление состояния…");
+    setJobStartedAt(saved.started_at || Date.now());
+    if (saved.title) setTitle(saved.title);
+    startPolling(saved.job_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fileError = (() => {
     if (!file) return "";
     const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
@@ -68,29 +141,18 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
       return api.audioPreviewStart(clientId, file, title.trim() || undefined);
     },
     onSuccess: (job) => {
+      const startedAt = Date.now();
       setJobStatus("processing");
       setJobError("");
       setJobStage("загрузка принята, запуск пайплайна…");
-      setJobStartedAt(Date.now());
-      pollRef.current = setInterval(async () => {
-        try {
-          const status = await api.audioPreviewStatus(clientId, job.job_id);
-          setJobStatus(status.status);
-          if (status.stage) setJobStage(status.stage);
-          if (status.status === "done" && status.result) {
-            stopPolling();
-            setPreview(status.result);
-            setDropped(new Set());
-            setOverrides(new Set());
-            setFactEdits({});
-            setSkippedEdits({});
-            setScreen("preview");
-          } else if (status.status === "error") {
-            stopPolling();
-            setJobError(status.error || "что-то пошло не так");
-          }
-        } catch { stopPolling(); }
-      }, 5000);
+      setJobStartedAt(startedAt);
+      localStorage.setItem(audioJobKey(clientId), JSON.stringify({
+        job_id: job.job_id,
+        started_at: startedAt,
+        title: title.trim() || (file?.name ?? ""),
+        file_name: file?.name ?? "",
+      } satisfies StoredAudioJob));
+      startPolling(job.job_id);
     },
     onError: (e) => setJobError(e instanceof Error ? e.message : String(e)),
   });
@@ -254,6 +316,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
               setJobStatus("");
               setJobError("");
               stopPolling();
+              localStorage.removeItem(audioJobKey(clientId));
               previewMut.reset();
               commitMut.reset();
             }}

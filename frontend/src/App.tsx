@@ -119,7 +119,7 @@ function ClientPage() {
             <IngestYouTube clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
           )}
           {activeTab === "audio" && (
-            <IngestAudio clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
+            <IngestAudio key={clientId} clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
           )}
           {activeTab === "methodology" && (
             <MethodologyView key={clientId} clientId={clientId!} />
