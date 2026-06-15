@@ -122,7 +122,7 @@ function ClientPage() {
             <IngestAudio clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
           )}
           {activeTab === "methodology" && (
-            <MethodologyView clientId={clientId!} />
+            <MethodologyView key={clientId} clientId={clientId!} />
           )}
           {activeTab === "plan" && (
             <PlanView clientId={clientId!} quarter={quarter} layers={layers.data} />
