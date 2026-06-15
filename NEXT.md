@@ -8,75 +8,63 @@
 
 ---
 
-**Последнее обновление:** 2026-06-14
-**Ветка:** `feat/v2` (мои 2 коммита ребейзнуты поверх audio-ingest серии
-параллельной сессии 2026-06-13 — audio file ingest, очистка клиента, плеер/
-транскрипт, safety-тесты).
-**Working tree:** изменения этой сессии закоммичены и **запушены в origin**.
-**Тесты:** `pytest -m "not network"` → **200 passed**.
-**Прод:** перекатан 2026-06-13 (audio ingest); после фиксов тестов этой сессии
-переката не было — некритично (правки тестов + section-mapping + idempotency).
+**Последнее обновление:** 2026-06-15
+**Ветка:** `feat/v2`
+**HEAD:** `1815e4f feat: аудио-джоб переживает смену вкладки (per-client localStorage)`
+**Прод:** перекатан 2026-06-15 22:10 MSK (workflow `cecd810e-…`, health 200)
+**Working tree:** чисто (только untracked: 12.jpeg, DIARIZATION_PLAN.md, frontend tsbuildinfo/vite.config артефакты)
 
-## Что сделано за сессию 2026-06-14
+## Что сделано за сессию 2026-06-15
 
-### 1. Починены 9 «вечных» красных тестов → **200 passed** (`fix:` commit)
+Контекст: параллельная сессия за 14 июня запушила 13 коммитов в `feat/v2`
+(Telegram-auth, zone-based навигация Map/Build/Health/Deliver, редизайн матрицы,
+brief composer, Present mode). Мы заходим поверх и закрываем два фронтовых
+бага, которые там не пофикшены.
 
-Все 9 были в baseline и валились на чистом коде. Корни и фиксы:
+### Bug A — стейл-драфты в Methodology при смене клиента
 
-- **docx-лоадер** (`ingest/loaders/docx_loader.py`) — экспорт ChatGPT Deep
-  Research не имеет блока «Источники»; цитаты `[N]` — инлайн-гиперссылки в теле.
-  Добавлен `_extract_inline_citations` (харвест URL прямо с маркеров).
-- **stub-экстрактор** (`llm.py::_stub_extract`) — без API-ключа ставил
-  `cite_ids=[]`, поэтому `preview.sources` всегда пустой. Теперь вытаскивает
-  `[N]` из текста параграфа (`_RE_CITE_MARKER`).
-- **идемпотентность коммита** (`ingest/pipeline.py`) — дедуп сравнивал
-  `_normalize_fact_text()` с сырым SQL `lower(trim())` → факты с числами в
-  скобках дублировались. Нормализую обе стороны в Python. `INSERT OR IGNORE`
-  на `ingest_audit` → повторный коммит того же preview идемпотентен.
-- **preview-эндпоинт** (`backend/main.py`) — открывал свой `db.connect()` к
-  дефолтной БД, игнорируя инъекцию `get_conn` (404 в тестах + побочно ломал
-  e2e sqlite). Переведён на `Depends(get_conn)`.
-- **section→layer** (`classifiers/section_to_layer.py`) — generic-хинт
-  «контекст» (8.1) перебивал «регуляторный и социальный» (8.3). Теперь
-  выигрывает самый длинный матчащийся хинт.
-- **YouTube preview-тесты** (`tests/test_youtube_api.py`) — эндпоинт стал
-  асинхронным (job_id + поллинг), тесты ждали синхронный ответ. Обновлены
-  под async-флоу (`_drive_preview` хелпер).
+Симптом: открываешь Methodology у клиента A, печатаешь в client-mode/global/tone-preset,
+переключаешь клиента в сайдбаре — draft из A остаётся в textarea, бейдж "unsaved"
+горит. Save с новым clientId в замыкании → текст A пишется в ноут B.
 
-### 2. Интеграция с оркестратором — CI-workflow + документация
+Корень: `CellRow useState(currentValue)` инициализируется один раз; пропс
+`currentValue` обновляется, локальный `draft` нет. Между клиентами CellRow
+реиспользуется по `key={subsection_id}` — стейт переживает смену клиента.
 
-- **`test_ir_storyboard`** — новый workflow в Conductor (`git_pull → run_tests
-  → notify`). Определение: `conductor-orchestrator/workflows/test_ir_storyboard.json`,
-  добавлен в `scripts/register-workflows.sh`. Зарегистрирован через gateway,
-  привязан к паспорту (`workflows: [deploy_ir_storyboard, test_ir_storyboard]`).
-  `run_tests` гоняет `pytest -m "not network"` в одноразовом контейнере из
-  backend-образа (репо ro-mount + копия в /tmp, прод-БД не задета). API-ключи
-  заглушены (`-e KEY=`) → детерминированный офлайн stub-режим.
-  **Прогон на сервере зелёный** (`passed=true`, exit 0) — провалидировано.
-- **`requirements-dev.txt`** — воспроизводимый локальный тест-env (в
-  `requirements.txt` не было pytest/pyyaml/fastapi).
-- **DEPLOY.md** — новая «Часть 5. Тесты и CI через оркестратор».
-- Доп. фикс при валидации CI: `test_e2e_process::_reset` вызывал
-  `DELETE FROM work_items` без `init_schema` → падал на свежей БД в контейнере.
-  Добавлен `init_schema` (commit `fix: init_schema in test_e2e_process reset`).
+Фикс: `<MethodologyView key={clientId} ... />` в App.tsx → при смене клиента
+вся ветка ремаунтится, все useState (draft, picked, mode) обнуляются.
+Коммит `a400c30`.
 
-> Состояние оркестратор-репы: коммит `test_ir_storyboard` лежит в ветке
-> `feat/test-ir-storyboard-ci` (НЕ запушена). Workflow уже зарегистрирован
-> вживую через gateway — repo-коммит это source-of-truth, по желанию → push/PR.
+### Bug B — аудио-джоб «исчезает» при уходе с вкладки
 
-## Следующие разумные шаги
+Симптом: загрузил аудио → ушёл на другую вкладку → вернулся → пустой input-экран,
+хотя бэк продолжает считать.
 
-1. **Перекат прода** — `dcp up -d --build` (или deploy-workflow). Миграция
-   SQLite идемпотентная, без downtime.
-2. **Запушить ветку оркестратора** `feat/test-ir-storyboard-ci` (по желанию —
-   workflow уже живой на сервере).
-3. **Паспорт:** milestones пустые — можно засеять роадмап (по запросу).
-   docPercent=40 (после доков по CI можно поднять).
-4. **Хвосты из прошлой polish-серии:** YouTube `FactEditForm` rationale-поле
-   (требует расширения `FactEdit`); бэкфилл rationale для legacy red фактов.
+Корень: всё состояние джоба (`jobStatus`, `jobStage`, `preview`, `pollRef`) — в
+локальных useState `IngestAudio`. При unmount всё рушится; `pollRef`
+гасится в cleanup useEffect. Возврат на вкладку — fresh state, никаких намёков
+на существующий джоб.
 
-## Открытое наблюдение
+Фикс: при старте джоба `{job_id, started_at, title, file_name}` сохраняется в
+`localStorage` под ключом `audio_job:<clientId>`. На mount компонент читает
+ключ и доподключается к polling через общий хелпер `startPolling(jobId)`.
+404 от status (бэк потерял джоб после рестарта) — чистый сброс с понятным
+сообщением. `<IngestAudio key={clientId} ... />` для чистого per-client lifecycle.
+Preview-данные намеренно НЕ персистим (как было решено в `7d48fb0`).
+Коммит `1815e4f`.
 
-- Воркер оркестратора реализует `git_pull` как `git pull origin <branch>`, а
-  онбординг требует `fetch + reset --hard`. Расхождение в репо
-  `conductor-orchestrator` (не критично, деплой работает), но стоит выровнять.
+### Заодно — расчистка git-репо
+
+В `.git/refs/heads/feat/` и `refs/remotes/origin/feat/` лежали macOS-дубли
+`v2 2` + `.lock` (Finder/iCloud), ломали `git fetch` и `pre-push` hook.
+Удалены — push прошёл, divergence видна корректно.
+
+## Open / следующие шаги
+
+1. **Bug B аналог для YouTube:** та же проблема возможна в `IngestYouTube.tsx`
+   (унаследован тот же `pollRef`-в-useState паттерн). Не проверял.
+   Если повторится — тот же localStorage-паттерн (ключ `youtube_job:<clientId>`).
+2. Audio history endpoint/таб — было в очереди ещё с 13 июня.
+3. Диаризация — см. `DIARIZATION_PLAN.md`.
+4. Из milestones реестра в работе: id 5 (Brief-шаблоны), id 6 (Identity → created_by),
+   id 7 (test-гигиена).
