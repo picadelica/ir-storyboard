@@ -1081,6 +1081,32 @@ def restore_fact(fact_id: int, conn=Depends(get_conn)):
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
+class ReviewFactOut(BaseModel):
+    id: int
+    subsection_id: str = ""
+    text: str = ""
+    flag: str = ""
+    verification: str = ""
+    verification_note: str = ""
+    entity: str = ""
+
+
+@app.get("/api/clients/{client_id}/review-queue", response_model=List[ReviewFactOut])
+def review_queue(client_id: str, conn=Depends(get_conn)):
+    """Facts held by the ingest gate (state='review') — awaiting promote/reject."""
+    return [ReviewFactOut(**r) for r in matrix.review_facts(conn, client_id)]
+
+
+@app.post("/api/facts/{fact_id}/promote", response_model=FactOut)
+def promote_fact(fact_id: int, conn=Depends(get_conn)):
+    """Promote a quarantined fact into the matrix (review → active, verified)."""
+    if matrix.get_fact(conn, fact_id) is None:
+        raise HTTPException(404, "fact not found")
+    matrix.set_fact_verification(conn, fact_id, verification="verified")
+    matrix.set_fact_state(conn, fact_id, "active")
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
 # ---------- identity anchor: company / founder cards (fact-trust phase 1) ----------
 
 class EntityFactOut(BaseModel):
@@ -1734,6 +1760,7 @@ class IngestCommitOut(BaseModel):
     committed_sources: int
     skipped_facts: int
     ingested_at: str
+    held_facts: int = 0   # gated to review against the identity anchor
 
 
 class IngestAuditOut(BaseModel):
@@ -1893,6 +1920,7 @@ def llm_report_ingest_commit(
         committed_sources=result.committed_sources,
         skipped_facts=result.skipped_facts,
         ingested_at=result.ingested_at,
+        held_facts=result.held_facts,
     )
 
 

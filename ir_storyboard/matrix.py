@@ -337,9 +337,10 @@ def set_fact_verification(conn: sqlite3.Connection, fact_id: int, *,
 
 
 def set_fact_state(conn: sqlite3.Connection, fact_id: int, state: str) -> None:
-    """Soft lifecycle: 'active' (in matrix + generators) or 'rejected' (kept for
-    audit, excluded from everything). Restorable."""
-    if state not in ("active", "rejected"):
+    """Lifecycle: 'active' (in matrix + generators), 'review' (quarantine — held
+    at the ingest gate, NOT in the matrix, awaiting human promote/reject), or
+    'rejected' (kept for audit, excluded from everything). All restorable."""
+    if state not in ("active", "review", "rejected"):
         raise ValueError(f"bad state {state}")
     conn.execute("UPDATE facts SET state=? WHERE id=?", (state, fact_id))
     conn.commit()
@@ -434,6 +435,35 @@ def add_entity_fact(conn: sqlite3.Connection, *, entity_id: int, key: str = "",
 def delete_entity_fact(conn: sqlite3.Connection, fact_id: int) -> None:
     conn.execute("DELETE FROM entity_facts WHERE id=?", (fact_id,))
     conn.commit()
+
+
+def entity_anchor(conn: sqlite3.Connection, client_id: str) -> dict:
+    """The identity anchor for verification: {company, founders[], decoys[]}.
+    Prefers confirmed entities; falls back to drafts if nothing confirmed."""
+    rows = conn.execute(
+        "SELECT kind, name, confirmed FROM entities WHERE client_id=? ORDER BY sort_order, id",
+        (client_id,),
+    ).fetchall()
+    any_confirmed = any(r["confirmed"] for r in rows)
+    use = [r for r in rows if (r["confirmed"] or not any_confirmed)]
+    company = next((r["name"] for r in use if r["kind"] == "company"), "")
+    founders = [r["name"] for r in use if r["kind"] == "founder"]
+    decoys = [r["name"] for r in use if r["kind"] == "decoy"]
+    return {"company": company, "founders": founders, "decoys": decoys}
+
+
+def review_facts(conn: sqlite3.Connection, client_id: str) -> List[dict]:
+    """Facts held in the ingest-gate quarantine (state='review') — for the
+    triage screen to promote (→ active) or reject."""
+    rows = conn.execute(
+        """SELECT f.id, c.subsection_id AS subsection_id, f.text, f.flag,
+                  f.verification, f.verification_note, f.entity
+            FROM facts f JOIN cells c ON c.id = f.cell_id
+            WHERE c.client_id=? AND f.state='review'
+            ORDER BY f.id DESC""",
+        (client_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def bootstrap_entities(conn: sqlite3.Connection, client_id: str, canonical: dict) -> List[int]:

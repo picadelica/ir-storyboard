@@ -62,6 +62,7 @@ class CommitResult:
     committed_sources: int
     skipped_facts: int
     ingested_at: str
+    held_facts: int = 0   # gated to review (state='review') against the identity anchor
 
 
 # ── URL normalisation (same as citations.py, duplicated to avoid circular import) ─
@@ -217,6 +218,15 @@ def commit_llm_report(
     committed_sources = 0
     committed_facts = 0
     skipped_facts = 0
+    held_facts = 0
+
+    # Ingest gate: verify candidates against the identity anchor BEFORE writing.
+    # Suspect/refuted facts are committed but quarantined (state='review'), kept
+    # out of the matrix until a human promotes them. No-anchor/stub → all pass.
+    from .. import verification as _verif
+    anchor = matrix.entity_anchor(conn, client_id)
+    verdicts = _verif.verify_candidates(
+        [{"text": rf.text, "subsection_id": rf.subsection_id} for rf in facts_to_commit], anchor)
 
     # Cache: canonical_url → source_id (to avoid duplicate sources in same commit)
     url_to_source_id: dict[str, int] = {}
@@ -241,7 +251,7 @@ def commit_llm_report(
     url_to_source_id[report_source_key] = report_source_id
     committed_sources += 1
 
-    for rf in facts_to_commit:
+    for idx, rf in enumerate(facts_to_commit):
         # Find citation for this fact
         cit: ResolvedCitation | None = None
         for cid in rf.cite_ids:
@@ -300,7 +310,14 @@ def commit_llm_report(
                 "UPDATE facts SET ingest_audit_id = ? WHERE id = ?",
                 (preview.audit_id, fact_id),
             )
-            committed_facts += 1
+            v = verdicts[idx] if idx < len(verdicts) else {"verdict": "ok"}
+            if v.get("verdict") in ("suspect", "refuted"):
+                matrix.set_fact_verification(conn, fact_id, verification=v["verdict"],
+                                             note=v.get("reason", ""), entity=v.get("entity", ""))
+                matrix.set_fact_state(conn, fact_id, "review")
+                held_facts += 1
+            else:
+                committed_facts += 1
         except ValueError:
             skipped_facts += 1
 
@@ -339,6 +356,7 @@ def commit_llm_report(
         committed_sources=committed_sources,
         skipped_facts=skipped_facts,
         ingested_at=now,
+        held_facts=held_facts,
     )
 
 

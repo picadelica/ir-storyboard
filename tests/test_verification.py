@@ -86,3 +86,25 @@ def test_verify_claims_no_hits_unavailable(monkeypatch):
     monkeypatch.setattr(llm, "web_search", lambda q, n=6: [])
     out = verification.verify_claims([{"id": "C1", "claim": "x", "query": "x"}])
     assert out["available"] is False
+
+
+def test_gate_no_anchor_passes_all():
+    out = verification.verify_candidates([{"text": "x", "subsection_id": "2.1"}], {})
+    assert out == [{"verdict": "ok", "entity": "", "reason": ""}]
+
+
+def test_gate_stub_passes_all(monkeypatch):
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "")
+    out = verification.verify_candidates([{"text": "x", "subsection_id": "2.1"}], {"company": "C"})
+    assert out[0]["verdict"] == "ok"  # degrade open — don't block ingest
+
+
+def test_gate_flags_decoy_against_anchor(monkeypatch):
+    canned = {"facts": [{"i": 0, "verdict": "refuted", "entity": "Khachuyan", "reason": "двойник"}]}
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: json.dumps(canned, ensure_ascii=False))
+    out = verification.verify_candidates(
+        [{"text": "Khachuyan is CEO", "subsection_id": "2.1"},
+         {"text": "Founded by Liberman", "subsection_id": "2.1"}],
+        {"company": "Gonka", "founders": ["Liberman"], "decoys": ["Khachuyan"]})
+    assert out[0]["verdict"] == "refuted" and out[0]["entity"] == "Khachuyan"
+    assert out[1]["verdict"] == "ok"  # clean candidate passes the gate

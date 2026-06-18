@@ -212,6 +212,11 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
             {r.committed_sources} source{r.committed_sources !== 1 ? "s" : ""} ·{" "}
             {r.skipped_facts} skipped (already existed)
           </div>
+          {(r.held_facts ?? 0) > 0 && (
+            <div className="text-sm text-amber-700 mt-1">
+              {r.held_facts} придержано воротами — см. Health → «Проверка фактов»
+            </div>
+          )}
         </div>
         <div className="flex gap-3">
           <button

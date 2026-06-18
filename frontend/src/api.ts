@@ -2,7 +2,7 @@ import type {
   AudioTranscript,
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
-  AuditResult, Entity, EntityFact,
+  AuditResult, Entity, EntityFact, ReviewFact,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
@@ -311,6 +311,10 @@ export const api = {
     call<Fact>(`/facts/${factId}/reject`, { method: "POST" }),
   restoreFact: (factId: number): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/restore`, { method: "POST" }),
+  reviewQueue: (clientId: string): Promise<ReviewFact[]> =>
+    call<ReviewFact[]>(`/clients/${clientId}/review-queue`),
+  promoteFact: (factId: number): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/promote`, { method: "POST" }),
 
   // identity anchor
   entities: (clientId: string): Promise<Entity[]> =>

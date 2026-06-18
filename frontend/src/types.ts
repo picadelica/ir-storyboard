@@ -172,6 +172,17 @@ export interface LLMIngestCommitOut {
   committed_sources: number;
   skipped_facts: number;
   ingested_at: string;
+  held_facts?: number;
+}
+
+export interface ReviewFact {
+  id: number;
+  subsection_id: string;
+  text: string;
+  flag: string;
+  verification: string;
+  verification_note: string;
+  entity: string;
 }
 
 export interface LLMIngestAuditRow {

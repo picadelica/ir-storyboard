@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { AuditResult, Entity } from "../types";
+import type { AuditResult, Entity, ReviewFact } from "../types";
 
 interface Props {
   clientId: string;
@@ -17,13 +17,21 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     queryKey: ["entities", clientId],
     queryFn: () => api.entities(clientId),
   });
+  const review = useQuery<ReviewFact[]>({
+    queryKey: ["review-queue", clientId],
+    queryFn: () => api.reviewQueue(clientId),
+  });
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["facts", clientId] });
     qc.invalidateQueries({ queryKey: ["matrix", clientId] });
     qc.invalidateQueries({ queryKey: ["scorecard", clientId] });
     qc.invalidateQueries({ queryKey: ["entities", clientId] });
+    qc.invalidateQueries({ queryKey: ["review-queue", clientId] });
   };
+
+  const promote = useMutation({ mutationFn: (id: number) => api.promoteFact(id), onSuccess: invalidate });
+  const rejectReview = useMutation({ mutationFn: (id: number) => api.rejectFact(id), onSuccess: invalidate });
 
   const run = useMutation({
     mutationFn: () => api.runAudit(clientId),
@@ -82,6 +90,36 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
         onConfirm={(id) => confirmEntity.mutate(id)}
         onRemove={(id) => removeEntity.mutate(id)}
       />
+
+      {(review.data?.length ?? 0) > 0 && (
+        <section className="bg-white rounded-lg border border-amber-300 p-4 space-y-2">
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-sm font-semibold text-amber-800">
+              На ревью с ингеста <span className="font-normal text-ink-mute">({review.data!.length})</span>
+            </h3>
+            <span className="text-[11px] text-ink-mute">придержано воротами, не в матрице</span>
+          </div>
+          <ul className="space-y-2">
+            {review.data!.map(f => (
+              <li key={f.id} className="border border-ink-line rounded p-3">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  {f.entity && <span className="text-[11px] font-mono text-ink-mute border border-ink-line rounded px-1.5">≠ {f.entity}</span>}
+                  <button onClick={() => onJumpToCell(f.subsection_id)}
+                    className="text-[11px] text-blue-600 hover:underline ml-auto">{f.subsection_id} →</button>
+                </div>
+                <div className="text-sm leading-snug">{f.text}</div>
+                {f.verification_note && <div className="mt-1 text-xs text-ink-mute border-l-2 border-ink-line pl-2">{f.verification_note}</div>}
+                <div className="mt-2 flex gap-2">
+                  <button onClick={() => promote.mutate(f.id)}
+                    className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50">в матрицу</button>
+                  <button onClick={() => rejectReview.mutate(f.id)}
+                    className="text-[11px] px-2 py-1 rounded border border-flag-red/40 text-flag-red hover:bg-flag-red-bg">снять</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {audit && !audit.available && (
         <div className="bg-flag-grey-bg border border-flag-grey/40 rounded p-3 text-sm text-ink-mute">

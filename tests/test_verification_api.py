@@ -100,6 +100,27 @@ def test_audit_bootstraps_identity_anchor(ctx, monkeypatch):
     assert all(not e["confirmed"] for e in ents)  # draft until analyst confirms
 
 
+def test_review_queue_and_promote(ctx, tmp_path):
+    client, fid, clean = ctx
+    # quarantine fid the way the ingest gate would (state='review')
+    c = db.connect(tmp_path / "verif_api.db")
+    matrix.set_fact_verification(c, fid, verification="suspect", note="двойник", entity="Khachuyan")
+    matrix.set_fact_state(c, fid, "review")
+    c.close()
+
+    # review-queue lists it; matrix aggregate excludes it (held out of the matrix)
+    rq = client.get("/api/clients/co/review-queue").json()
+    assert any(r["id"] == fid and r["entity"] == "Khachuyan" for r in rq)
+    mx = client.get("/api/clients/co/matrix").json()
+    assert next(c["n_green"] for c in mx if c["subsection_id"] == "2.1") == 1  # only `clean`
+
+    # promote → enters the matrix as verified
+    assert client.post(f"/api/facts/{fid}/promote").json()["verification"] == "verified"
+    mx = client.get("/api/clients/co/matrix").json()
+    assert next(c["n_green"] for c in mx if c["subsection_id"] == "2.1") == 2
+    assert client.get("/api/clients/co/review-queue").json() == []
+
+
 def test_entities_crud(ctx):
     client, _, _ = ctx
     e = client.post("/api/clients/co/entities",

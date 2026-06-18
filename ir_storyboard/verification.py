@@ -174,6 +174,52 @@ def verify_claims(claims: List[Dict[str, str]], *, model: Optional[str] = None,
     return {"available": True, "results": results}
 
 
+_GATE_SYSTEM = """Ты — фильтр на входе IR-матрицы. Дан ЯКОРЬ идентичности (кто реальная компания/фаундеры и кто ДВОЙНИКИ — другие люди/компании с пересекающимися именами) и список новых фактов-кандидатов, извлечённых из веб-документа. Пропусти в матрицу только то, что согласуется с якорем; флагни кандидатов, которые относятся к ДВОЙНИКУ, противоречат якорю или выглядят выдумкой.
+
+Верни СТРОГО валидный JSON (без markdown):
+{"facts": [{"i": <индекс кандидата>, "verdict": "suspect|refuted", "entity": "<кому относится, если не компании>", "reason": "<коротко>"}]}
+
+Включай в "facts" ТОЛЬКО проблемные (suspect/refuted). Чистые — не перечисляй. Если якорь пустой/слабый — флагни только явную выдумку. Опирайся на якорь и тексты, не на общие знания."""
+
+
+def verify_candidates(candidates: List[Dict[str, str]], anchor: Dict[str, Any],
+                      *, model: Optional[str] = None) -> List[Dict[str, str]]:
+    """Gate new extracted facts against a client's identity anchor BEFORE commit.
+
+    candidates: [{text, subsection_id}]. anchor: {company, founders[], decoys[]}.
+    Returns a list aligned by index: [{verdict: ok|suspect|refuted, entity, reason}].
+    Stub-safe / no-anchor: returns all 'ok' (nothing held — the matrix re-audit
+    still catches the first, anchor-less batch)."""
+    out = [{"verdict": "ok", "entity": "", "reason": ""} for _ in candidates]
+    if not candidates:
+        return out
+    has_anchor = bool(anchor and (anchor.get("company") or anchor.get("founders") or anchor.get("decoys")))
+    if not has_anchor:
+        return out
+
+    anchor_txt = (
+        f"Компания: {anchor.get('company') or '?'}\n"
+        f"Фаундеры: {', '.join(anchor.get('founders') or []) or '?'}\n"
+        f"Двойники (НЕ относятся к компании): {', '.join(anchor.get('decoys') or []) or '—'}"
+    )
+    lines = [f"[{i}|{c.get('subsection_id','')}] {(c.get('text') or '')[:240]}" for i, c in enumerate(candidates)]
+    user = f"ЯКОРЬ:\n{anchor_txt}\n\nКАНДИДАТЫ:\n" + "\n".join(lines)
+    raw = llm.generate(_GATE_SYSTEM, user, max_tokens=4000, model=model or _audit_model())
+    data = _parse_json(raw) if raw else None
+    if data is None:
+        return out  # LLM unavailable → don't block ingest (degrade open)
+    for it in data.get("facts", []) or []:
+        try:
+            i = int(it.get("i"))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < len(out):
+            verdict = it.get("verdict") if it.get("verdict") in ("suspect", "refuted") else "suspect"
+            out[i] = {"verdict": verdict, "entity": (it.get("entity") or "").strip()[:200],
+                      "reason": (it.get("reason") or "").strip()[:600]}
+    return out
+
+
 def _parse_json(raw: str) -> Optional[dict]:
     raw = (raw or "").strip()
     if raw.startswith("```"):
