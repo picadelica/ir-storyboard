@@ -2,7 +2,7 @@ import type {
   AudioTranscript,
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
-  AuditResult, Entity, EntityFact, ReviewFact,
+  AuditResult, Entity, EntityFact, ReviewFact, DuplicatesResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
@@ -315,6 +315,10 @@ export const api = {
     call<ReviewFact[]>(`/clients/${clientId}/review-queue`),
   promoteFact: (factId: number): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/promote`, { method: "POST" }),
+  findDuplicates: (clientId: string): Promise<DuplicatesResult> =>
+    call<DuplicatesResult>(`/clients/${clientId}/find-duplicates`, { method: "POST" }),
+  mergeFacts: (keepId: number, mergeIds: number[]): Promise<Fact> =>
+    call<Fact>(`/facts/merge`, { method: "POST", body: JSON.stringify({ keep_id: keepId, merge_ids: mergeIds }) }),
 
   // identity anchor
   entities: (clientId: string): Promise<Entity[]> =>

@@ -210,6 +210,9 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                     {f.verification_note && <span className="text-[11px] text-ink-mute">{f.verification_note}</span>}
                   </div>
                 )}
+                {(f.n_sources ?? 1) > 1 && (
+                  <div className="mb-1.5 text-[11px] text-emerald-700">✓ {f.n_sources} независимых источника</div>
+                )}
                 {f.flag === "red" && (
                   f.rationale
                     ? <div className="mt-2 text-xs border-l-2 pl-2 leading-snug border-flag-red/60 text-flag-red">

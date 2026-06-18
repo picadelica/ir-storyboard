@@ -272,6 +272,7 @@ class FactOut(BaseModel):
     verification_note: str = ""
     entity: str = ""
     state: str = "active"
+    n_sources: int = 1   # corroboration: 1 (primary) + folded-in sources
 
 
 class FactCreate(BaseModel):
@@ -427,6 +428,7 @@ def _row_to_fact(row) -> FactOut:
         verification_note=(row["verification_note"] if "verification_note" in keys else "") or "",
         entity=(row["entity"] if "entity" in keys else "") or "",
         state=(row["state"] if "state" in keys else "active") or "active",
+        n_sources=1 + (row["extra_sources"] if "extra_sources" in keys and row["extra_sources"] else 0),
     )
 
 
@@ -1105,6 +1107,48 @@ def promote_fact(fact_id: int, conn=Depends(get_conn)):
     matrix.set_fact_verification(conn, fact_id, verification="verified")
     matrix.set_fact_state(conn, fact_id, "active")
     return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
+# ---------- dedup / merge (fact-trust phase 3) ----------
+
+class DupFactOut(BaseModel):
+    id: int
+    text: str = ""
+
+
+class DupGroupOut(BaseModel):
+    subsection_id: str = ""
+    keep: int
+    ids: List[int] = []
+    reason: str = ""
+    facts: List[DupFactOut] = []
+
+
+class DuplicatesOut(BaseModel):
+    available: bool
+    groups: List[DupGroupOut] = []
+
+
+class MergeIn(BaseModel):
+    keep_id: int
+    merge_ids: List[int]
+
+
+@app.post("/api/clients/{client_id}/find-duplicates", response_model=DuplicatesOut)
+def find_duplicates(client_id: str, conn=Depends(get_conn)):
+    res = verification.find_duplicate_groups(conn, client_id)
+    return DuplicatesOut(available=res.get("available", False),
+                         groups=[DupGroupOut(**g) for g in res.get("groups", [])])
+
+
+@app.post("/api/facts/merge", response_model=FactOut)
+def merge_facts_ep(body: MergeIn, conn=Depends(get_conn)):
+    """Merge duplicates into keep_id: fold their sources into keep's corroboration,
+    soft-reject the rest. Returns the canonical fact with updated n_sources."""
+    if matrix.get_fact(conn, body.keep_id) is None:
+        raise HTTPException(404, "keep fact not found")
+    matrix.merge_facts(conn, body.keep_id, body.merge_ids)
+    return _row_to_fact(matrix.get_fact(conn, body.keep_id))
 
 
 # ---------- identity anchor: company / founder cards (fact-trust phase 1) ----------

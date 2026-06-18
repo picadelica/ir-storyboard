@@ -121,6 +121,18 @@ def test_review_queue_and_promote(ctx, tmp_path):
     assert client.get("/api/clients/co/review-queue").json() == []
 
 
+def test_merge_facts(ctx):
+    client, fid, clean = ctx
+    # both fid & clean are green in 2.1; merge clean into fid
+    r = client.post("/api/facts/merge", json={"keep_id": fid, "merge_ids": [clean]}).json()
+    assert r["id"] == fid and r["n_sources"] == 2 and r["state"] == "active"
+    # the merged duplicate left the matrix
+    mx = client.get("/api/clients/co/matrix").json()
+    assert next(c["n_green"] for c in mx if c["subsection_id"] == "2.1") == 1
+    keep = next(f for f in client.get("/api/clients/co/cells/2.1/facts").json() if f["id"] == fid)
+    assert keep["n_sources"] == 2
+
+
 def test_entities_crud(ctx):
     client, _, _ = ctx
     e = client.post("/api/clients/co/entities",

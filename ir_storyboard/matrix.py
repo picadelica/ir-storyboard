@@ -280,6 +280,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
+                  (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
                   s.archive_url AS source_archive_url,
@@ -303,6 +304,7 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
+                  (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
                   s.archive_url AS source_archive_url,
@@ -450,6 +452,52 @@ def entity_anchor(conn: sqlite3.Connection, client_id: str) -> dict:
     founders = [r["name"] for r in use if r["kind"] == "founder"]
     decoys = [r["name"] for r in use if r["kind"] == "decoy"]
     return {"company": company, "founders": founders, "decoys": decoys}
+
+
+def fact_corroboration(conn: sqlite3.Connection, fact_id: int) -> int:
+    """How many independent sources back a fact: 1 (primary) + folded-in sources."""
+    n = conn.execute("SELECT COUNT(*) FROM fact_sources WHERE fact_id=?", (fact_id,)).fetchone()[0]
+    return 1 + int(n)
+
+
+def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int]) -> int:
+    """Merge duplicate facts into `keep_id`: fold each duplicate's source into
+    keep's corroboration (fact_sources) and soft-reject the duplicate (kept for
+    audit, note points to the canonical). Returns keep's new corroboration count."""
+    for mid in merge_ids:
+        if mid == keep_id:
+            continue
+        row = conn.execute(
+            """SELECT f.source_id AS source_id, s.channel AS channel, s.title AS title,
+                      COALESCE(NULLIF(f.source_url, ''), s.url) AS url
+                FROM facts f LEFT JOIN sources s ON s.id = f.source_id WHERE f.id=?""",
+            (mid,)).fetchone()
+        if row:
+            conn.execute(
+                "INSERT INTO fact_sources (fact_id, source_id, channel, title, url) VALUES (?,?,?,?,?)",
+                (keep_id, row["source_id"], row["channel"] or "", row["title"] or "", row["url"] or ""))
+        conn.execute(
+            """UPDATE facts SET state='rejected', verification='refuted',
+                                verification_note=? WHERE id=?""",
+            (f"дубль — слит в #{keep_id}", mid))
+    conn.commit()
+    return fact_corroboration(conn, keep_id)
+
+
+def fact_sources(conn: sqlite3.Connection, fact_id: int) -> List[dict]:
+    """All sources backing a fact: primary (from facts/sources) + folded-in extras."""
+    out: List[dict] = []
+    primary = conn.execute(
+        """SELECT s.channel AS channel, s.title AS title,
+                  COALESCE(NULLIF(f.source_url, ''), s.url) AS url
+            FROM facts f LEFT JOIN sources s ON s.id = f.source_id WHERE f.id=?""",
+        (fact_id,)).fetchone()
+    if primary:
+        out.append({"channel": primary["channel"] or "", "title": primary["title"] or "",
+                    "url": primary["url"] or "", "primary": True})
+    for r in conn.execute("SELECT channel, title, url FROM fact_sources WHERE fact_id=? ORDER BY id", (fact_id,)):
+        out.append({"channel": r["channel"], "title": r["title"], "url": r["url"], "primary": False})
+    return out
 
 
 def review_facts(conn: sqlite3.Connection, client_id: str) -> List[dict]:

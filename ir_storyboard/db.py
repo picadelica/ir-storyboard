@@ -160,6 +160,20 @@ def init_schema(conn: sqlite3.Connection) -> None:
             sort_order   INTEGER NOT NULL DEFAULT 0
         )
     """)
+    # fact-trust (phase 3): extra corroborating sources for a merged fact. The
+    # canonical fact keeps facts.source_id as its primary; duplicates' sources are
+    # folded in here. Corroboration = 1 (primary) + count(fact_sources) — a trust
+    # signal (more independent sources/channels = stronger fact).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fact_sources (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            fact_id   INTEGER NOT NULL REFERENCES facts(id) ON DELETE CASCADE,
+            source_id INTEGER,
+            channel   TEXT NOT NULL DEFAULT '',
+            title     TEXT NOT NULL DEFAULT '',
+            url       TEXT NOT NULL DEFAULT ''
+        )
+    """)
     conn.commit()
 
 

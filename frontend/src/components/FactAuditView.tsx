@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { AuditResult, Entity, ReviewFact } from "../types";
+import type { AuditResult, Entity, ReviewFact, DuplicateGroup } from "../types";
 
 interface Props {
   clientId: string;
@@ -32,6 +32,16 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
 
   const promote = useMutation({ mutationFn: (id: number) => api.promoteFact(id), onSuccess: invalidate });
   const rejectReview = useMutation({ mutationFn: (id: number) => api.rejectFact(id), onSuccess: invalidate });
+
+  const [dups, setDups] = useState<DuplicateGroup[] | null>(null);
+  const findDups = useMutation({
+    mutationFn: () => api.findDuplicates(clientId),
+    onSuccess: (r) => setDups(r.available ? r.groups : []),
+  });
+  const merge = useMutation({
+    mutationFn: (g: DuplicateGroup) => api.mergeFacts(g.keep, g.ids.filter(i => i !== g.keep)),
+    onSuccess: (_d, g) => { setDups(d => (d ?? []).filter(x => x.keep !== g.keep)); invalidate(); },
+  });
 
   const run = useMutation({
     mutationFn: () => api.runAudit(clientId),
@@ -75,14 +85,62 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
             Скептический аудит research-фактов: склейка сущностей, мис-атрибуция, выдумка.
           </p>
         </div>
-        <button
-          onClick={() => run.mutate()}
-          disabled={run.isPending}
-          className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300"
-        >
-          {run.isPending ? "Проверяю…" : "Запустить проверку"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => findDups.mutate()}
+            disabled={findDups.isPending}
+            className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50"
+          >
+            {findDups.isPending ? "Ищу дубли…" : "Найти дубли"}
+          </button>
+          <button
+            onClick={() => run.mutate()}
+            disabled={run.isPending}
+            className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300"
+          >
+            {run.isPending ? "Проверяю…" : "Запустить проверку"}
+          </button>
+        </div>
       </div>
+
+      {dups !== null && (
+        <section className="bg-white rounded-lg border border-ink-line p-4 space-y-3">
+          <h3 className="text-sm font-semibold">
+            Дубли <span className="font-normal text-ink-mute">({dups.length} групп)</span>
+          </h3>
+          {dups.length === 0 ? (
+            <div className="text-xs text-ink-mute italic">Дублей не найдено (или верификатор недоступен).</div>
+          ) : dups.map((g, gi) => (
+            <div key={gi} className="border border-ink-line rounded p-3">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-[11px] font-mono text-ink-mute">{g.subsection_id}</span>
+                {g.reason && <span className="text-xs text-ink-mute">· {g.reason}</span>}
+                <button onClick={() => onJumpToCell(g.subsection_id)}
+                  className="text-[11px] text-blue-600 hover:underline ml-auto">{g.subsection_id} →</button>
+              </div>
+              <ul className="space-y-1 mb-2">
+                {g.facts.map(f => (
+                  <li key={f.id} className="text-sm flex gap-2">
+                    <span className={`text-[10px] mt-0.5 px-1 rounded shrink-0
+                      ${f.id === g.keep ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-ink-mute"}`}>
+                      {f.id === g.keep ? "оставить" : "слить"}
+                    </span>
+                    <span>{f.text}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-2">
+                <button onClick={() => merge.mutate(g)}
+                  className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                  слить в один ({g.ids.length} → 1)
+                </button>
+                <button onClick={() => setDups(d => (d ?? []).filter((_, i) => i !== gi))}
+                  className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* identity anchor */}
       <IdentityAnchor

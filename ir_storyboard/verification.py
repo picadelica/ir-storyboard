@@ -220,6 +220,63 @@ def verify_candidates(candidates: List[Dict[str, str]], anchor: Dict[str, Any],
     return out
 
 
+_DEDUP_SYSTEM = """Ты — дедупликатор фактов IR-матрицы. Дан список фактов `[id|подсекция|текст]`. Найди группы, где факты утверждают ОДНО И ТО ЖЕ (околодубли — та же мысль, возможно иными словами), ТОЛЬКО в пределах одной подсекции.
+
+Верни СТРОГО валидный JSON (без markdown):
+{"groups": [{"subsection_id": "X.Y", "keep": <id с самой полной/точной формулировкой>, "ids": [<все id группы, включая keep>], "reason": "<коротко что общего>"}]}
+
+Группа — минимум 2 id из ОДНОЙ подсекции. Факты с разными деталями/числами НЕ объединяй. Дублей нет → "groups": []."""
+
+
+def _active_facts(conn, client_id: str) -> List[dict]:
+    rows = conn.execute(
+        """SELECT f.id AS id, c.subsection_id AS sid, f.text AS text
+            FROM facts f JOIN cells c ON c.id = f.cell_id
+            WHERE c.client_id=? AND f.state='active' ORDER BY c.subsection_id, f.id""",
+        (client_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) -> Dict[str, Any]:
+    """LLM-cluster same-meaning active facts (per subsection) for merge proposals.
+
+    Returns {available, groups:[{subsection_id, keep, ids:[...], reason, facts:[{id,text}]}]}.
+    Stub-safe."""
+    facts = _active_facts(conn, client_id)
+    by_id = {f["id"]: f for f in facts}
+    if len(facts) < 2:
+        return {"available": True, "groups": []}
+    lines = [f"[{f['id']}|{f['sid']}] {(f['text'] or '')[:200]}" for f in facts]
+    raw = llm.generate(_DEDUP_SYSTEM, "Факты:\n" + "\n".join(lines), max_tokens=6000,
+                       model=model or _audit_model())
+    if not raw:
+        return {"available": False, "groups": []}
+    data = _parse_json(raw)
+    if data is None:
+        return {"available": False, "groups": []}
+
+    groups: List[dict] = []
+    for g in data.get("groups", []) or []:
+        ids = [int(i) for i in (g.get("ids") or []) if isinstance(i, (int, str)) and str(i).isdigit()]
+        ids = [i for i in ids if i in by_id]
+        if len(ids) < 2:
+            continue
+        # all in one subsection
+        sids = {by_id[i]["sid"] for i in ids}
+        if len(sids) != 1:
+            continue
+        keep = g.get("keep")
+        keep = int(keep) if str(keep).isdigit() and int(keep) in ids else ids[0]
+        groups.append({
+            "subsection_id": next(iter(sids)),
+            "keep": keep,
+            "ids": ids,
+            "reason": (g.get("reason") or "").strip()[:300],
+            "facts": [{"id": i, "text": by_id[i]["text"]} for i in ids],
+        })
+    return {"available": True, "groups": groups}
+
+
 def _parse_json(raw: str) -> Optional[dict]:
     raw = (raw or "").strip()
     if raw.startswith("```"):

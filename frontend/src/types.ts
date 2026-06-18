@@ -369,7 +369,21 @@ export interface Fact {
   verification?: string;        // unverified | verified | suspect | refuted
   verification_note?: string;
   entity?: string;              // attributed subject on conflation
-  state?: string;               // active | rejected
+  state?: string;               // active | review | rejected
+  n_sources?: number;           // corroboration count
+}
+
+export interface DuplicateGroup {
+  subsection_id: string;
+  keep: number;
+  ids: number[];
+  reason: string;
+  facts: { id: number; text: string }[];
+}
+
+export interface DuplicatesResult {
+  available: boolean;
+  groups: DuplicateGroup[];
 }
 
 export interface EntityFact {

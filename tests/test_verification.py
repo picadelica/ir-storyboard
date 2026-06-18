@@ -108,3 +108,26 @@ def test_gate_flags_decoy_against_anchor(monkeypatch):
         {"company": "Gonka", "founders": ["Liberman"], "decoys": ["Khachuyan"]})
     assert out[0]["verdict"] == "refuted" and out[0]["entity"] == "Khachuyan"
     assert out[1]["verdict"] == "ok"  # clean candidate passes the gate
+
+
+def test_find_duplicate_groups(conn, monkeypatch):
+    a = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="Raised $50M from Bitfury.", flag="green")
+    b = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="Bitfury invested $50M.", flag="green")
+    d = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="HQ in UAE.", flag="green")
+    canned = {"groups": [
+        {"subsection_id": "2.1", "keep": a, "ids": [a, b], "reason": "тот же раунд"},
+        {"subsection_id": "2.1", "keep": a, "ids": [a]},          # <2 → dropped
+        {"subsection_id": "2.1", "keep": a, "ids": [a, 999999]},  # unknown id collapses to <2 → dropped
+    ]}
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: json.dumps(canned, ensure_ascii=False))
+    res = verification.find_duplicate_groups(conn, "co")
+    assert res["available"] and len(res["groups"]) == 1
+    g = res["groups"][0]
+    assert set(g["ids"]) == {a, b} and g["keep"] == a and d not in g["ids"]
+
+
+def test_find_duplicates_stub(conn, monkeypatch):
+    matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="x", flag="green")
+    matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="y", flag="green")
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "")
+    assert verification.find_duplicate_groups(conn, "co")["available"] is False
