@@ -272,7 +272,8 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
 
 
 def facts_for_cell(conn: sqlite3.Connection, client_id: str,
-                   subsection_id: str) -> List[sqlite3.Row]:
+                   subsection_id: str, *, include_rejected: bool = False) -> List[sqlite3.Row]:
+    state_clause = "" if include_rejected else " AND f.state != 'rejected'"
     return list(conn.execute(
         """SELECT f.id, f.cell_id, f.text, f.flag, f.source_id, f.confidence,
                   f.captured_at, f.valid_until, f.evidence_snippet,
@@ -289,7 +290,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
             JOIN cells c ON c.id = f.cell_id
             LEFT JOIN sources s ON s.id = f.source_id
             LEFT JOIN ingest_audit ia ON ia.id = f.ingest_audit_id
-            WHERE c.client_id=? AND c.subsection_id=? AND f.state != 'rejected'
+            WHERE c.client_id=? AND c.subsection_id=?""" + state_clause + """
             ORDER BY f.captured_at DESC""",
         (client_id, subsection_id),
     ))
@@ -540,7 +541,7 @@ def cell_summary(conn: sqlite3.Connection, client_id: str) -> List[Dict[str, Any
         FROM subsections s
         JOIN layers L ON L.id = s.layer_id
         LEFT JOIN cells c ON c.subsection_id = s.id AND c.client_id = ?
-        LEFT JOIN facts f ON f.cell_id = c.id
+        LEFT JOIN facts f ON f.cell_id = c.id AND f.state = 'active'
         LEFT JOIN sources src ON src.id = f.source_id
         GROUP BY s.id
         ORDER BY L.intimacy, s.sort_order
@@ -563,7 +564,7 @@ def portfolio_summary(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
                COUNT(DISTINCT CASE WHEN f.flag='green' THEN c.subsection_id END) AS covered
         FROM clients cl
         LEFT JOIN cells c ON c.client_id = cl.id
-        LEFT JOIN facts f ON f.cell_id = c.id
+        LEFT JOIN facts f ON f.cell_id = c.id AND f.state = 'active'
         GROUP BY cl.id
         ORDER BY cl.name
     """).fetchall()

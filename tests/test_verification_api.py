@@ -61,15 +61,21 @@ def test_audit_apply_then_reject_restore(ctx, monkeypatch):
     flagged = next(f for f in facts if f["id"] == fid)
     assert flagged["verification"] == "refuted" and "иное лицо" in flagged["entity"]
 
-    # reject → fact drops out of the cell view (excluded from matrix/outputs)
-    assert client.post(f"/api/facts/{fid}/reject").json()["state"] == "rejected"
-    ids = {f["id"] for f in client.get("/api/clients/co/cells/2.1/facts").json()}
-    assert fid not in ids and clean in ids
+    def green_count():
+        mx = client.get("/api/clients/co/matrix").json()
+        return next(c["n_green"] for c in mx if c["subsection_id"] == "2.1")
 
-    # restore brings it back
+    assert green_count() == 2  # both facts green & active
+
+    # reject → still shown in the drawer (struck, restorable) but dropped from aggregates
+    assert client.post(f"/api/facts/{fid}/reject").json()["state"] == "rejected"
+    drawer = client.get("/api/clients/co/cells/2.1/facts").json()
+    assert next(f for f in drawer if f["id"] == fid)["state"] == "rejected"
+    assert green_count() == 1  # rejected fact no longer counted
+
+    # restore brings it back into the matrix
     assert client.post(f"/api/facts/{fid}/restore").json()["state"] == "active"
-    ids = {f["id"] for f in client.get("/api/clients/co/cells/2.1/facts").json()}
-    assert fid in ids
+    assert green_count() == 2
 
 
 def test_set_verification_manual(ctx):

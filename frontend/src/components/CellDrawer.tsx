@@ -90,6 +90,15 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
     onSuccess: invalidate,
   });
 
+  const rejectFact = useMutation({
+    mutationFn: (id: number) => api.rejectFact(id),
+    onSuccess: invalidate,
+  });
+  const restoreFact = useMutation({
+    mutationFn: (id: number) => api.restoreFact(id),
+    onSuccess: invalidate,
+  });
+
   const channelHint = subsection
     ? `Primary channels for L${subsection.layer.id}: ${subsection.layer.primary_channels.join(", ")}`
     : "";
@@ -131,7 +140,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
         )}
 
         {facts.data?.map(f => (
-          <div key={f.id} className={`rounded border p-3 ${flagBg(f.flag)} ${flagBorder(f.flag)}`}>
+          <div key={f.id} className={`rounded border p-3 ${flagBg(f.flag)} ${flagBorder(f.flag)} ${f.state === "rejected" ? "opacity-60" : ""}`}>
             {editingId === f.id ? (
               <div className="space-y-2">
                 <textarea
@@ -169,8 +178,16 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
               <>
                 <div className="flex items-start gap-2 mb-1.5">
                   <FlagDot flag={f.flag} className="mt-1.5" />
-                  <div className="text-sm leading-snug whitespace-pre-wrap flex-1">{f.text}</div>
+                  <div className={`text-sm leading-snug whitespace-pre-wrap flex-1
+                    ${f.state === "rejected" || f.verification === "refuted" ? "line-through text-ink-mute" : ""}`}>{f.text}</div>
                   <div className="flex items-center gap-1 shrink-0">
+                    {f.state === "rejected" ? (
+                      <button onClick={() => restoreFact.mutate(f.id)}
+                        className="text-[11px] text-ink-mute hover:text-ink px-1.5 py-0.5 rounded hover:bg-white">вернуть</button>
+                    ) : (
+                      <button onClick={() => rejectFact.mutate(f.id)}
+                        className="text-[11px] text-red-600 hover:text-red-800 px-1.5 py-0.5 rounded hover:bg-white">снять</button>
+                    )}
                     <button
                       onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); }}
                       className="text-[11px] text-ink-mute hover:text-ink px-1.5 py-0.5 rounded hover:bg-white"
@@ -181,6 +198,18 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                     >delete</button>
                   </div>
                 </div>
+                {f.verification && f.verification !== "unverified" && (
+                  <div className="mb-1.5 flex items-center gap-1.5 flex-wrap">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide
+                      ${f.verification === "verified" ? "bg-emerald-50 text-emerald-700"
+                        : f.verification === "refuted" ? "bg-flag-red-bg text-flag-red"
+                        : "bg-amber-50 text-amber-700"}`}>
+                      {f.verification === "verified" ? "проверено" : f.verification === "refuted" ? "опровергнуто" : "под вопросом"}
+                    </span>
+                    {f.entity && <span className="text-[11px] font-mono text-ink-mute border border-ink-line rounded px-1.5">≠ {f.entity}</span>}
+                    {f.verification_note && <span className="text-[11px] text-ink-mute">{f.verification_note}</span>}
+                  </div>
+                )}
                 {f.flag === "red" && (
                   f.rationale
                     ? <div className="mt-2 text-xs border-l-2 pl-2 leading-snug border-flag-red/60 text-flag-red">

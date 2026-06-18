@@ -935,7 +935,10 @@ def matrix_view(client_id: str, conn=Depends(get_conn)):
 @app.get("/api/clients/{client_id}/cells/{subsection_id}/facts",
          response_model=List[FactOut])
 def get_cell_facts(client_id: str, subsection_id: str, conn=Depends(get_conn)):
-    return [_row_to_fact(r) for r in matrix.facts_for_cell(conn, client_id, subsection_id)]
+    # the cell drawer is the analyst's triage surface — show rejected facts too
+    # (struck-through, restorable); generators read active-only via facts_for_cell default.
+    return [_row_to_fact(r)
+            for r in matrix.facts_for_cell(conn, client_id, subsection_id, include_rejected=True)]
 
 
 @app.post("/api/clients/{client_id}/cells/{subsection_id}/facts",
