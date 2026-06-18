@@ -117,6 +117,49 @@ def init_schema(conn: sqlite3.Connection) -> None:
             updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # fact-trust (phase 1): verification axis — orthogonal to the green/red/grey
+    # flag. `verification` is the verifier verdict; `state` is the lifecycle
+    # (active facts feed the matrix + all generators; rejected is a soft-delete
+    # kept for audit). `entity` holds the attributed subject when a fact is a
+    # conflation (e.g. "Khachuyan — иное лицо").
+    _add_column_if_missing(conn, "facts", "verification", "TEXT NOT NULL DEFAULT 'unverified'")
+    _add_column_if_missing(conn, "facts", "verification_note", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "facts", "verification_sources", "TEXT NOT NULL DEFAULT '[]'")
+    _add_column_if_missing(conn, "facts", "verification_at", "TIMESTAMP")
+    _add_column_if_missing(conn, "facts", "entity", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "facts", "state", "TEXT NOT NULL DEFAULT 'active'")
+    # fact-trust (phase 1): identity anchor outside the narrative matrix — the
+    # company, its founders, and known decoys (different people with overlapping
+    # names). Bare, source-linked facts only; the narrative lives in L1/L2 cells.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entities (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id     TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            kind          TEXT NOT NULL DEFAULT 'founder',
+            name          TEXT NOT NULL,
+            role          TEXT NOT NULL DEFAULT '',
+            canonical_url TEXT NOT NULL DEFAULT '',
+            links         TEXT NOT NULL DEFAULT '{}',
+            note          TEXT NOT NULL DEFAULT '',
+            confirmed     INTEGER NOT NULL DEFAULT 0,
+            sort_order    INTEGER NOT NULL DEFAULT 0,
+            created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CHECK(kind IN ('company','founder','decoy'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entity_facts (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_id    INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+            key          TEXT NOT NULL DEFAULT '',
+            value        TEXT NOT NULL DEFAULT '',
+            source_url   TEXT NOT NULL DEFAULT '',
+            source_title TEXT NOT NULL DEFAULT '',
+            as_of        DATE,
+            verified     INTEGER NOT NULL DEFAULT 0,
+            sort_order   INTEGER NOT NULL DEFAULT 0
+        )
+    """)
     conn.commit()
 
 
