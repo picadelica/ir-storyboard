@@ -1,70 +1,55 @@
 # NEXT — где мы остановились
 
-> Снимок оперативного состояния. Обновлять в конце каждой сессии (overwrite,
-> не append). Цель — за 30 секунд понять, где находимся.
->
-> Стабильная архитектура и инварианты — в `CLAUDE.md`. Сюда — только
-> «здесь и сейчас».
+> Снимок оперативного состояния. Overwrite в конце сессии. Стабильное — в `CLAUDE.md`.
 
 ---
 
-**Последнее обновление:** 2026-06-15
-**Ветка:** `feat/v2`
-**HEAD:** `1815e4f feat: аудио-джоб переживает смену вкладки (per-client localStorage)`
-**Прод:** перекатан 2026-06-15 22:10 MSK (workflow `cecd810e-…`, health 200)
-**Working tree:** чисто (только untracked: 12.jpeg, DIARIZATION_PLAN.md, frontend tsbuildinfo/vite.config артефакты)
+**Последнее обновление:** 2026-06-18
+**Ветка:** `feat/v2` (запушена)
+**HEAD:** `7daf54b feat(trust): in-cell trust badges + correct rejected-exclusion`
+**Прод:** 216.57.108.107, перекатан 2026-06-18 (fact-trust Фаза 1). Тесты: `pytest -m "not network"` → **209 passed**.
 
-## Что сделано за сессию 2026-06-15
+## Что сделано за сессию: верификация фактологии — Фаза 1
 
-Контекст: параллельная сессия за 14 июня запушила 13 коммитов в `feat/v2`
-(Telegram-auth, zone-based навигация Map/Build/Health/Deliver, редизайн матрицы,
-brief composer, Present mode). Мы заходим поверх и закрываем два фронтовых
-бага, которые там не пофикшены.
+Проблема: research/deep-research факты галлюцинируют и склеивают сущности (на gonka
+биографию Хачуяна слепило с Либерманами в одного «фаундера»). YouTube/аудио безопасны
+(цитаты+таймкоды). Построен контур доверия.
 
-### Bug A — стейл-драфты в Methodology при смене клиента
+- **Схема** (`db.init_schema`): facts += `verification` (verdict), `verification_note/_sources/_at`,
+  `entity`, `state` (active|rejected). Новые `entities` + `entity_facts` — якорь идентичности
+  (компания/фаундеры/двойники) вне нарративной матрицы, source-linked.
+- **Движок** `ir_storyboard/verification.py`: `audit_client` (скептический аудит сущностей,
+  per-fact вердикт + предложенный canonical), `verify_claims` (Tavily + grounded-вердикт).
+  Транскриптные факты не проверяются. Stub-safe.
+- **API** (`backend/main.py`): `POST /clients/{id}/audit` (гоняет аудит, проставляет вердикты,
+  бутстрапит черновик якоря), `verify-claims`, `/facts/{id}/verification|reject|restore`,
+  CRUD `/entities`. Rejected исключён из агрегатов/циклов/scorecard/punch; в дровере ячейки
+  показан зачёркнутым + «вернуть».
+- **UI**: вкладка Health → «Проверка фактов» (`FactAuditView`): якорь идентичности (карточки,
+  подтверждение, ссылки) + триаж (снять/оставить, массово по сущности, прыжок в ячейку).
+  Бейджи доверия + чип сущности + снять/вернуть в `CellDrawer`.
+- **Тесты**: `test_verification.py` (5) + `test_verification_api.py` (4), офлайн.
+- **Валидировано на боевой gonka** через задеплоенный модуль: available=True, 23 факта
+  флагнуто из 157 archival, canonical company=`Gonka.ai`. Прототипом ранее подтверждено,
+  что веб-проверка чисто разводит Хачуян↔Либерман.
 
-Симптом: открываешь Methodology у клиента A, печатаешь в client-mode/global/tone-preset,
-переключаешь клиента в сайдбаре — draft из A остаётся в textarea, бейдж "unsaved"
-горит. Save с новым clientId в замыкании → текст A пишется в ноут B.
+## Деплой-нюансы (важно для следующего раза)
 
-Корень: `CellRow useState(currentValue)` инициализируется один раз; пропс
-`currentValue` обновляется, локальный `draft` нет. Между клиентами CellRow
-реиспользуется по `key={subsection_id}` — стейт переживает смену клиента.
+1. **health_url в `deploy_ir_storyboard`** должен быть НЕ `http://localhost/...` — HTTP-таск
+   исполняет JVM Conductor'а внутри своего контейнера, где localhost = он сам. Использовать
+   `http://216.57.108.107/api/health` (публичный IP). В этот раз health_check упал зря —
+   build/deploy прошли, приложение здорово (`curl localhost/api/health`=200 с хоста).
+2. **Миграция на деплое не применилась автоматом**: backend, похоже, под `uvicorn --reload` —
+   git_pull подхватывает код (новые роуты), но `@app.on_event("startup")` (там init_schema)
+   повторно не срабатывает. В этот раз прогнал `db.init_schema` по `/app/data/matrix.db` руками.
+   TODO: в deploy-workflow добавить шаг миграции/честный restart backend.
+3. `audit_client` вернул `available=False` на первом вызове (транзиентно пустой ответ LLM);
+   повтор — ок. TODO: добавить ретрай в audit_client.
 
-Фикс: `<MethodologyView key={clientId} ... />` в App.tsx → при смене клиента
-вся ветка ремаунтится, все useState (draft, picked, mode) обнуляются.
-Коммит `a400c30`.
+## Дальше
 
-### Bug B — аудио-джоб «исчезает» при уходе с вкладки
-
-Симптом: загрузил аудио → ушёл на другую вкладку → вернулся → пустой input-экран,
-хотя бэк продолжает считать.
-
-Корень: всё состояние джоба (`jobStatus`, `jobStage`, `preview`, `pollRef`) — в
-локальных useState `IngestAudio`. При unmount всё рушится; `pollRef`
-гасится в cleanup useEffect. Возврат на вкладку — fresh state, никаких намёков
-на существующий джоб.
-
-Фикс: при старте джоба `{job_id, started_at, title, file_name}` сохраняется в
-`localStorage` под ключом `audio_job:<clientId>`. На mount компонент читает
-ключ и доподключается к polling через общий хелпер `startPolling(jobId)`.
-404 от status (бэк потерял джоб после рестарта) — чистый сброс с понятным
-сообщением. `<IngestAudio key={clientId} ... />` для чистого per-client lifecycle.
-Preview-данные намеренно НЕ персистим (как было решено в `7d48fb0`).
-Коммит `1815e4f`.
-
-### Заодно — расчистка git-репо
-
-В `.git/refs/heads/feat/` и `refs/remotes/origin/feat/` лежали macOS-дубли
-`v2 2` + `.lock` (Finder/iCloud), ломали `git fetch` и `pre-push` hook.
-Удалены — push прошёл, divergence видна корректно.
-
-## Open / следующие шаги
-
-1. **Bug B аналог для YouTube:** та же проблема возможна в `IngestYouTube.tsx`
-   (унаследован тот же `pollRef`-в-useState паттерн). Не проверял.
-   Если повторится — тот же localStorage-паттерн (ключ `youtube_job:<clientId>`).
-2. Audio history endpoint/таб — было в очереди ещё с 13 июня.
-3. Диаризация — см. `DIARIZATION_PLAN.md`.
-4. Из milestones реестра в работе: id 5 (Brief-шаблоны), id 6 (Identity → created_by),
-   id 7 (test-гигиена).
+- Фаза 2: ворота на ингесте (непроверенное не коммитится; раздвоенная кнопка в экране
+  подтверждения отчёта).
+- Фаза 3: дедуп/слияние похожих фактов в единый с несколькими источниками (корроборация = доверие).
+- Затем — грунтованный гайд интервью на чистых фактах (прототип уже сделан, см. сессию).
+- Хвосты реестра: стартовые шаблоны Brief; тест-гигиена (изоляция тестовой БД).
