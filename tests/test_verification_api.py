@@ -77,3 +77,35 @@ def test_set_verification_manual(ctx):
     r = client.post(f"/api/facts/{fid}/verification",
                     json={"verification": "verified", "note": "ok by analyst"})
     assert r.status_code == 200 and r.json()["verification"] == "verified"
+
+
+def test_audit_bootstraps_identity_anchor(ctx, monkeypatch):
+    client, fid, _ = ctx
+    canned = {"canonical": {"company": "RealCo", "founders": ["Daniil Liberman"], "decoys": ["Khachuyan"]},
+              "summary": "", "facts": []}
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: json.dumps(canned, ensure_ascii=False))
+    client.post("/api/clients/co/audit")
+
+    ents = client.get("/api/clients/co/entities").json()
+    by_kind = {e["kind"]: e for e in ents}
+    assert by_kind["company"]["name"] == "RealCo"
+    assert by_kind["founder"]["name"] == "Daniil Liberman"
+    assert by_kind["decoy"]["name"] == "Khachuyan"
+    assert all(not e["confirmed"] for e in ents)  # draft until analyst confirms
+
+
+def test_entities_crud(ctx):
+    client, _, _ = ctx
+    e = client.post("/api/clients/co/entities",
+                    json={"kind": "founder", "name": "Jane Doe", "role": "CTO",
+                          "links": {"x": "https://x.com/jane"}}).json()
+    eid = e["id"]
+    f = client.post(f"/api/entities/{eid}/facts",
+                    json={"key": "prior", "value": "Acme (2019)", "source_url": "https://acme.co",
+                          "verified": True}).json()
+    got = next(x for x in client.get("/api/clients/co/entities").json() if x["id"] == eid)
+    assert got["role"] == "CTO" and got["links"]["x"].endswith("/jane")
+    assert got["facts"][0]["value"] == "Acme (2019)" and got["facts"][0]["verified"]
+    client.delete(f"/api/entity-facts/{f['id']}")
+    client.delete(f"/api/entities/{eid}")
+    assert all(x["id"] != eid for x in client.get("/api/clients/co/entities").json())

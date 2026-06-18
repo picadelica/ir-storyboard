@@ -1040,6 +1040,9 @@ def run_audit(client_id: str, conn=Depends(get_conn)):
         out_facts.append(AuditFactOut(
             id=f["id"], verdict=f["verdict"], entity=f["entity"], reason=f["reason"],
             subsection_id=row["subsection_id"], text=row["text"]))
+    # bootstrap a draft identity anchor (company/founders/decoys) for analyst review
+    if res.get("canonical"):
+        matrix.bootstrap_entities(conn, client_id, res["canonical"])
     return AuditOut(available=res.get("available", False), canonical=res.get("canonical", {}),
                     summary=res.get("summary", ""), facts=out_facts,
                     n_facts=res.get("n_facts", 0), applied=applied)
@@ -1073,6 +1076,105 @@ def restore_fact(fact_id: int, conn=Depends(get_conn)):
         raise HTTPException(404, "fact not found")
     matrix.set_fact_state(conn, fact_id, "active")
     return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
+# ---------- identity anchor: company / founder cards (fact-trust phase 1) ----------
+
+class EntityFactOut(BaseModel):
+    id: int
+    key: str = ""
+    value: str = ""
+    source_url: str = ""
+    source_title: str = ""
+    as_of: Optional[str] = None
+    verified: bool = False
+    sort_order: int = 0
+
+
+class EntityOut(BaseModel):
+    id: int
+    kind: str
+    name: str
+    role: str = ""
+    canonical_url: str = ""
+    links: dict = {}
+    note: str = ""
+    confirmed: bool = False
+    sort_order: int = 0
+    facts: List[EntityFactOut] = []
+
+
+class EntityIn(BaseModel):
+    kind: Literal["company", "founder", "decoy"]
+    name: str
+    role: str = ""
+    canonical_url: str = ""
+    links: dict = {}
+    note: str = ""
+    confirmed: bool = False
+    sort_order: int = 0
+
+
+class EntityPatch(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    canonical_url: Optional[str] = None
+    links: Optional[dict] = None
+    note: Optional[str] = None
+    confirmed: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class EntityFactIn(BaseModel):
+    key: str = ""
+    value: str = ""
+    source_url: str = ""
+    source_title: str = ""
+    as_of: Optional[str] = None
+    verified: bool = False
+    sort_order: int = 0
+
+
+@app.get("/api/clients/{client_id}/entities", response_model=List[EntityOut])
+def list_entities(client_id: str, conn=Depends(get_conn)):
+    return [EntityOut(**e) for e in matrix.entities_for_client(conn, client_id)]
+
+
+@app.post("/api/clients/{client_id}/entities", response_model=EntityOut)
+def create_entity(client_id: str, e: EntityIn, conn=Depends(get_conn)):
+    eid = matrix.add_entity(conn, client_id=client_id, kind=e.kind, name=e.name,
+                            role=e.role, canonical_url=e.canonical_url, links=e.links,
+                            note=e.note, confirmed=e.confirmed, sort_order=e.sort_order)
+    return next(x for x in matrix.entities_for_client(conn, client_id) if x["id"] == eid)
+
+
+@app.patch("/api/entities/{entity_id}", response_model=dict)
+def patch_entity(entity_id: int, p: EntityPatch, conn=Depends(get_conn)):
+    matrix.update_entity(conn, entity_id, **p.model_dump(exclude_none=True))
+    return {"ok": True}
+
+
+@app.delete("/api/entities/{entity_id}")
+def remove_entity(entity_id: int, conn=Depends(get_conn)):
+    matrix.delete_entity(conn, entity_id)
+    return {"ok": True}
+
+
+@app.post("/api/entities/{entity_id}/facts", response_model=EntityFactOut)
+def add_entity_fact_ep(entity_id: int, f: EntityFactIn, conn=Depends(get_conn)):
+    fid = matrix.add_entity_fact(conn, entity_id=entity_id, key=f.key, value=f.value,
+                                 source_url=f.source_url, source_title=f.source_title,
+                                 as_of=f.as_of, verified=f.verified, sort_order=f.sort_order)
+    row = conn.execute("SELECT id, key, value, source_url, source_title, as_of, verified, sort_order "
+                       "FROM entity_facts WHERE id=?", (fid,)).fetchone()
+    d = dict(row); d["verified"] = bool(d["verified"])
+    return EntityFactOut(**d)
+
+
+@app.delete("/api/entity-facts/{fact_id}")
+def remove_entity_fact(fact_id: int, conn=Depends(get_conn)):
+    matrix.delete_entity_fact(conn, fact_id)
+    return {"ok": True}
 
 
 # ---------- plans + tracks ----------

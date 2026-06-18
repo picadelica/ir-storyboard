@@ -344,6 +344,119 @@ def set_fact_state(conn: sqlite3.Connection, fact_id: int, state: str) -> None:
     conn.commit()
 
 
+# ---------- identity anchor: entities + entity_facts (fact-trust phase 1) ----------
+
+import json as _json_ent
+
+
+def entities_for_client(conn: sqlite3.Connection, client_id: str) -> List[dict]:
+    """All identity entities (company / founders / decoys) with their bare facts."""
+    ents = conn.execute(
+        """SELECT id, kind, name, role, canonical_url, links, note, confirmed, sort_order
+            FROM entities WHERE client_id=? ORDER BY
+            CASE kind WHEN 'company' THEN 0 WHEN 'founder' THEN 1 ELSE 2 END,
+            sort_order, id""",
+        (client_id,),
+    ).fetchall()
+    out: List[dict] = []
+    for e in ents:
+        d = dict(e)
+        try:
+            d["links"] = _json_ent.loads(d.get("links") or "{}")
+        except Exception:
+            d["links"] = {}
+        d["confirmed"] = bool(d["confirmed"])
+        d["facts"] = [dict(r) for r in conn.execute(
+            """SELECT id, key, value, source_url, source_title, as_of, verified, sort_order
+                FROM entity_facts WHERE entity_id=? ORDER BY sort_order, id""",
+            (e["id"],),
+        )]
+        for ef in d["facts"]:
+            ef["verified"] = bool(ef["verified"])
+        out.append(d)
+    return out
+
+
+def add_entity(conn: sqlite3.Connection, *, client_id: str, kind: str, name: str,
+               role: str = "", canonical_url: str = "", links: Optional[dict] = None,
+               note: str = "", confirmed: bool = False, sort_order: int = 0) -> int:
+    if kind not in ("company", "founder", "decoy"):
+        raise ValueError(f"bad kind {kind}")
+    cur = conn.execute(
+        """INSERT INTO entities (client_id, kind, name, role, canonical_url, links,
+                                 note, confirmed, sort_order)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+        (client_id, kind, name, role, canonical_url, _json_ent.dumps(links or {}),
+         note, 1 if confirmed else 0, sort_order),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_entity(conn: sqlite3.Connection, entity_id: int, **fields) -> None:
+    cols = {"kind", "name", "role", "canonical_url", "note", "confirmed", "sort_order", "links"}
+    sets, params = [], []
+    for k, v in fields.items():
+        if k not in cols or v is None:
+            continue
+        if k == "links":
+            v = _json_ent.dumps(v)
+        if k == "confirmed":
+            v = 1 if v else 0
+        sets.append(f"{k}=?"); params.append(v)
+    if not sets:
+        return
+    params.append(entity_id)
+    conn.execute(f"UPDATE entities SET {', '.join(sets)} WHERE id=?", params)
+    conn.commit()
+
+
+def delete_entity(conn: sqlite3.Connection, entity_id: int) -> None:
+    conn.execute("DELETE FROM entities WHERE id=?", (entity_id,))
+    conn.commit()
+
+
+def add_entity_fact(conn: sqlite3.Connection, *, entity_id: int, key: str = "",
+                    value: str = "", source_url: str = "", source_title: str = "",
+                    as_of: Optional[str] = None, verified: bool = False,
+                    sort_order: int = 0) -> int:
+    cur = conn.execute(
+        """INSERT INTO entity_facts (entity_id, key, value, source_url, source_title,
+                                     as_of, verified, sort_order)
+            VALUES (?,?,?,?,?,?,?,?)""",
+        (entity_id, key, value, source_url, source_title, as_of, 1 if verified else 0, sort_order),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def delete_entity_fact(conn: sqlite3.Connection, fact_id: int) -> None:
+    conn.execute("DELETE FROM entity_facts WHERE id=?", (fact_id,))
+    conn.commit()
+
+
+def bootstrap_entities(conn: sqlite3.Connection, client_id: str, canonical: dict) -> List[int]:
+    """Create draft identity entities from an audit's proposed anchor
+    {company, founders[], decoys[]}. No-op if the client already has entities."""
+    if conn.execute("SELECT 1 FROM entities WHERE client_id=? LIMIT 1", (client_id,)).fetchone():
+        return []
+    created: List[int] = []
+    company = (canonical.get("company") or "").strip()
+    if company:
+        created.append(add_entity(conn, client_id=client_id, kind="company", name=company))
+    for i, f in enumerate(canonical.get("founders") or []):
+        name = (f or "").strip()
+        if name:
+            created.append(add_entity(conn, client_id=client_id, kind="founder",
+                                      name=name, sort_order=i))
+    for i, d in enumerate(canonical.get("decoys") or []):
+        name = (d or "").strip()
+        if name:
+            created.append(add_entity(conn, client_id=client_id, kind="decoy", name=name,
+                                      note="другой человек/компания — не путать", sort_order=i))
+    return created
+
+
 def update_fact(conn: sqlite3.Connection, fact_id: int, *,
                 text: Optional[str] = None, flag: Optional[str] = None,
                 confidence: Optional[float] = None,
