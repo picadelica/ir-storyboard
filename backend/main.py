@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ir_storyboard import backup, brief, db, matrix, outputs, seed
+from ir_storyboard import backup, brief, db, matrix, outputs, seed, verification
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
 from ir_storyboard.llm import web_search, classify_facts_batch
@@ -268,6 +268,10 @@ class FactOut(BaseModel):
     snippet_start_sec: Optional[float] = None
     ingest_kind: Optional[str] = None
     audio_sha: Optional[str] = None
+    verification: str = "unverified"
+    verification_note: str = ""
+    entity: str = ""
+    state: str = "active"
 
 
 class FactCreate(BaseModel):
@@ -419,6 +423,10 @@ def _row_to_fact(row) -> FactOut:
         snippet_start_sec=snippet_start_sec,
         ingest_kind=ingest_kind,
         audio_sha=audio_sha,
+        verification=(row["verification"] if "verification" in keys else "unverified") or "unverified",
+        verification_note=(row["verification_note"] if "verification_note" in keys else "") or "",
+        entity=(row["entity"] if "entity" in keys else "") or "",
+        state=(row["state"] if "state" in keys else "active") or "active",
     )
 
 
@@ -980,6 +988,91 @@ def delete_fact(fact_id: int, conn=Depends(get_conn)):
         raise HTTPException(404, "fact not found")
     matrix.delete_fact(conn, fact_id)
     return {"ok": True}
+
+
+# ---------- fact verification / trust (phase 1) ----------
+
+class AuditFactOut(BaseModel):
+    id: int
+    verdict: str
+    entity: str = ""
+    reason: str = ""
+    subsection_id: str = ""
+    text: str = ""
+
+
+class AuditOut(BaseModel):
+    available: bool
+    canonical: dict = {}
+    summary: str = ""
+    facts: List[AuditFactOut] = []
+    n_facts: int = 0
+    applied: int = 0
+
+
+class VerificationIn(BaseModel):
+    verification: Literal["unverified", "verified", "suspect", "refuted"]
+    note: str = ""
+    entity: str = ""
+
+
+class ClaimIn(BaseModel):
+    id: str
+    claim: str
+    query: str = ""
+
+
+@app.post("/api/clients/{client_id}/audit", response_model=AuditOut)
+def run_audit(client_id: str, conn=Depends(get_conn)):
+    """Skeptical entity-conflation audit over the client's research/document facts.
+    Applies the verdict (suspect/refuted) onto each flagged fact so the matrix and
+    triage screen show it. Does NOT reject anything — that's a human step."""
+    res = verification.audit_client(conn, client_id)
+    applied = 0
+    out_facts: List[AuditFactOut] = []
+    for f in res.get("facts", []):
+        row = matrix.get_fact(conn, f["id"])
+        if row is None:
+            continue
+        matrix.set_fact_verification(
+            conn, f["id"], verification=f["verdict"], note=f["reason"], entity=f["entity"])
+        applied += 1
+        out_facts.append(AuditFactOut(
+            id=f["id"], verdict=f["verdict"], entity=f["entity"], reason=f["reason"],
+            subsection_id=row["subsection_id"], text=row["text"]))
+    return AuditOut(available=res.get("available", False), canonical=res.get("canonical", {}),
+                    summary=res.get("summary", ""), facts=out_facts,
+                    n_facts=res.get("n_facts", 0), applied=applied)
+
+
+@app.post("/api/clients/{client_id}/verify-claims")
+def verify_claims_ep(client_id: str, claims: List[ClaimIn], conn=Depends(get_conn)):
+    return verification.verify_claims([c.model_dump() for c in claims])
+
+
+@app.post("/api/facts/{fact_id}/verification", response_model=FactOut)
+def set_verification(fact_id: int, v: VerificationIn, conn=Depends(get_conn)):
+    if matrix.get_fact(conn, fact_id) is None:
+        raise HTTPException(404, "fact not found")
+    matrix.set_fact_verification(conn, fact_id, verification=v.verification,
+                                 note=v.note, entity=v.entity)
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
+@app.post("/api/facts/{fact_id}/reject", response_model=FactOut)
+def reject_fact(fact_id: int, conn=Depends(get_conn)):
+    if matrix.get_fact(conn, fact_id) is None:
+        raise HTTPException(404, "fact not found")
+    matrix.set_fact_state(conn, fact_id, "rejected")
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
+@app.post("/api/facts/{fact_id}/restore", response_model=FactOut)
+def restore_fact(fact_id: int, conn=Depends(get_conn)):
+    if matrix.get_fact(conn, fact_id) is None:
+        raise HTTPException(404, "fact not found")
+    matrix.set_fact_state(conn, fact_id, "active")
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
 # ---------- plans + tracks ----------

@@ -278,6 +278,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                   f.captured_at, f.valid_until, f.evidence_snippet,
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
+                  f.verification, f.verification_note, f.entity, f.state,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
                   s.archive_url AS source_archive_url,
@@ -288,7 +289,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
             JOIN cells c ON c.id = f.cell_id
             LEFT JOIN sources s ON s.id = f.source_id
             LEFT JOIN ingest_audit ia ON ia.id = f.ingest_audit_id
-            WHERE c.client_id=? AND c.subsection_id=?
+            WHERE c.client_id=? AND c.subsection_id=? AND f.state != 'rejected'
             ORDER BY f.captured_at DESC""",
         (client_id, subsection_id),
     ))
@@ -300,6 +301,7 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
                   f.captured_at, f.valid_until, f.evidence_snippet,
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
+                  f.verification, f.verification_note, f.entity, f.state,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
                   s.archive_url AS source_archive_url,
@@ -314,6 +316,32 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
             WHERE f.id=?""",
         (fact_id,),
     ).fetchone()
+
+
+def set_fact_verification(conn: sqlite3.Connection, fact_id: int, *,
+                          verification: str, note: str = "", entity: str = "",
+                          sources: Optional[list] = None) -> None:
+    """Set the verifier verdict on a fact (orthogonal to flag). Does not change
+    lifecycle state — rejecting is a separate, human-confirmed step."""
+    import json as _json
+    if verification not in ("unverified", "verified", "suspect", "refuted"):
+        raise ValueError(f"bad verification {verification}")
+    conn.execute(
+        """UPDATE facts SET verification=?, verification_note=?, entity=?,
+                            verification_sources=?, verification_at=CURRENT_TIMESTAMP
+            WHERE id=?""",
+        (verification, note or "", entity or "", _json.dumps(sources or []), fact_id),
+    )
+    conn.commit()
+
+
+def set_fact_state(conn: sqlite3.Connection, fact_id: int, state: str) -> None:
+    """Soft lifecycle: 'active' (in matrix + generators) or 'rejected' (kept for
+    audit, excluded from everything). Restorable."""
+    if state not in ("active", "rejected"):
+        raise ValueError(f"bad state {state}")
+    conn.execute("UPDATE facts SET state=? WHERE id=?", (state, fact_id))
+    conn.commit()
 
 
 def update_fact(conn: sqlite3.Connection, fact_id: int, *,
