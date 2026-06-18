@@ -12,6 +12,7 @@ import ArtifactsView from "./components/ArtifactsView";
 import PunchListView from "./components/PunchListView";
 import InterviewView from "./components/InterviewView";
 import ScorecardView from "./components/ScorecardView";
+import FactAuditView from "./components/FactAuditView";
 import WorkView from "./components/WorkView";
 import ResearchView from "./components/ResearchView";
 import IngestLLMReport from "./components/IngestLLMReport";
@@ -102,6 +103,9 @@ function ClientPage() {
             <PunchListView clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
           {activeTab === "interview" && <InterviewView clientId={clientId!} />}
+          {activeTab === "audit" && (
+            <FactAuditView clientId={clientId!} onJumpToCell={onJumpToCell} />
+          )}
           {activeTab === "scorecard" && <ScorecardView clientId={clientId!} />}
           {activeTab === "artifacts" && (
             <ArtifactsView clientId={clientId!} pickedArtifactId={pickedArtifactId} />
@@ -202,6 +206,7 @@ const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
     id: "health", label: "Health", tabs: [
       { id: "scorecard", label: "Scorecard" },
       { id: "punch", label: "Punch-list" },
+      { id: "audit", label: "Проверка фактов" },
       { id: "interview", label: "Interview Qs" },
     ],
   },

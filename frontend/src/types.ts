@@ -355,6 +355,52 @@ export interface Fact {
   snippet_start_sec?: number | null;
   ingest_kind?: string | null;
   audio_sha?: string | null;
+  verification?: string;        // unverified | verified | suspect | refuted
+  verification_note?: string;
+  entity?: string;              // attributed subject on conflation
+  state?: string;               // active | rejected
+}
+
+export interface EntityFact {
+  id: number;
+  key: string;
+  value: string;
+  source_url: string;
+  source_title: string;
+  as_of?: string | null;
+  verified: boolean;
+  sort_order: number;
+}
+
+export interface Entity {
+  id: number;
+  kind: string;                 // company | founder | decoy
+  name: string;
+  role: string;
+  canonical_url: string;
+  links: Record<string, string>;
+  note: string;
+  confirmed: boolean;
+  sort_order: number;
+  facts: EntityFact[];
+}
+
+export interface AuditFact {
+  id: number;
+  verdict: string;              // suspect | refuted
+  entity: string;
+  reason: string;
+  subsection_id: string;
+  text: string;
+}
+
+export interface AuditResult {
+  available: boolean;
+  canonical: { company?: string; founders?: string[]; decoys?: string[] };
+  summary: string;
+  facts: AuditFact[];
+  n_facts: number;
+  applied: number;
 }
 
 export interface Track {

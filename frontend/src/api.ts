@@ -2,6 +2,7 @@ import type {
   AudioTranscript,
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
+  AuditResult, Entity, EntityFact,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
@@ -299,4 +300,29 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ note }),
     }),
+
+  // fact trust / verification
+  runAudit: (clientId: string): Promise<AuditResult> =>
+    call<AuditResult>(`/clients/${clientId}/audit`, { method: "POST" }),
+  setVerification: (factId: number, body: { verification: string; note?: string; entity?: string }):
+    Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/verification`, { method: "POST", body: JSON.stringify(body) }),
+  rejectFact: (factId: number): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/reject`, { method: "POST" }),
+  restoreFact: (factId: number): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/restore`, { method: "POST" }),
+
+  // identity anchor
+  entities: (clientId: string): Promise<Entity[]> =>
+    call<Entity[]>(`/clients/${clientId}/entities`),
+  createEntity: (clientId: string, body: Partial<Entity> & { kind: string; name: string }): Promise<Entity> =>
+    call<Entity>(`/clients/${clientId}/entities`, { method: "POST", body: JSON.stringify(body) }),
+  patchEntity: (entityId: number, body: Partial<Entity>): Promise<{ ok: boolean }> =>
+    call(`/entities/${entityId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteEntity: (entityId: number): Promise<{ ok: boolean }> =>
+    call(`/entities/${entityId}`, { method: "DELETE" }),
+  addEntityFact: (entityId: number, body: Partial<EntityFact>): Promise<EntityFact> =>
+    call<EntityFact>(`/entities/${entityId}/facts`, { method: "POST", body: JSON.stringify(body) }),
+  deleteEntityFact: (factId: number): Promise<{ ok: boolean }> =>
+    call(`/entity-facts/${factId}`, { method: "DELETE" }),
 };
