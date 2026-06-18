@@ -2,7 +2,7 @@ import type {
   AudioTranscript,
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
-  AuditResult, Entity, EntityFact, ReviewFact, DuplicatesResult,
+  AuditResult, Entity, EntityFact, ReviewFact, DuplicatesResult, InterviewGuide,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
@@ -319,6 +319,8 @@ export const api = {
     call<DuplicatesResult>(`/clients/${clientId}/find-duplicates`, { method: "POST" }),
   mergeFacts: (keepId: number, mergeIds: number[]): Promise<Fact> =>
     call<Fact>(`/facts/merge`, { method: "POST", body: JSON.stringify({ keep_id: keepId, merge_ids: mergeIds }) }),
+  interviewGuide: (clientId: string): Promise<InterviewGuide> =>
+    call<InterviewGuide>(`/clients/${clientId}/interview-guide`, { method: "POST" }),
 
   // identity anchor
   entities: (clientId: string): Promise<Entity[]> =>

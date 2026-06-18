@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ir_storyboard import backup, brief, db, matrix, outputs, seed, verification
+from ir_storyboard import backup, brief, db, matrix, outputs, seed, verification, interview
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
 from ir_storyboard.llm import web_search, classify_facts_batch
@@ -1149,6 +1149,48 @@ def merge_facts_ep(body: MergeIn, conn=Depends(get_conn)):
         raise HTTPException(404, "keep fact not found")
     matrix.merge_facts(conn, body.keep_id, body.merge_ids)
     return _row_to_fact(matrix.get_fact(conn, body.keep_id))
+
+
+# ---------- grounded interview guide ----------
+
+class GuideQuestionOut(BaseModel):
+    question: str
+    targets: List[str] = []
+    know: str = ""
+    close: str = ""
+    followups: List[str] = []
+
+
+class GuideArcOut(BaseModel):
+    title: str = ""
+    questions: List[GuideQuestionOut] = []
+
+
+class GuideDiagnosisOut(BaseModel):
+    covered: str = ""
+    gaps: str = ""
+    priorities: List[str] = []
+
+
+class InterviewGuideOut(BaseModel):
+    available: bool
+    dossier: str = ""
+    diagnosis: GuideDiagnosisOut = GuideDiagnosisOut()
+    arcs: List[GuideArcOut] = []
+    n_facts: int = 0
+
+
+@app.post("/api/clients/{client_id}/interview-guide", response_model=InterviewGuideOut)
+def interview_guide(client_id: str, conn=Depends(get_conn)):
+    """Grounded, per-founder interview guide from the verified matrix."""
+    res = interview.build_guide(conn, client_id)
+    return InterviewGuideOut(
+        available=res.get("available", False),
+        dossier=res.get("dossier", ""),
+        diagnosis=GuideDiagnosisOut(**(res.get("diagnosis") or {})),
+        arcs=[GuideArcOut(**a) for a in res.get("arcs", [])],
+        n_facts=res.get("n_facts", 0),
+    )
 
 
 # ---------- identity anchor: company / founder cards (fact-trust phase 1) ----------

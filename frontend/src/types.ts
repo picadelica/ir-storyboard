@@ -386,6 +386,27 @@ export interface DuplicatesResult {
   groups: DuplicateGroup[];
 }
 
+export interface GuideQuestion {
+  question: string;
+  targets: string[];
+  know: string;
+  close: string;
+  followups: string[];
+}
+
+export interface GuideArc {
+  title: string;
+  questions: GuideQuestion[];
+}
+
+export interface InterviewGuide {
+  available: boolean;
+  dossier: string;
+  diagnosis: { covered: string; gaps: string; priorities: string[] };
+  arcs: GuideArc[];
+  n_facts: number;
+}
+
 export interface EntityFact {
   id: number;
   key: string;

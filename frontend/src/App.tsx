@@ -102,7 +102,9 @@ function ClientPage() {
           {activeTab === "punch" && (
             <PunchListView clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
-          {activeTab === "interview" && <InterviewView clientId={clientId!} />}
+          {activeTab === "interview" && (
+            <InterviewView clientId={clientId!} onJumpToCell={onJumpToCell} />
+          )}
           {activeTab === "audit" && (
             <FactAuditView clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
