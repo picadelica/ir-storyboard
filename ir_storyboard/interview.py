@@ -7,12 +7,12 @@ One strong-model pass → structured JSON {dossier, diagnosis, arcs[]}. Stub-saf
 """
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, Dict, List, Optional
 
-from . import llm
+from . import llm  # noqa: F401  (kept for monkeypatch targets in tests)
 from .models import LAYERS
+from .verification import _generate_json
 
 
 def _guide_model() -> str:
@@ -88,10 +88,7 @@ def build_guide(conn, client_id: str, *, model: Optional[str] = None) -> Dict[st
                       f"НЕ путать с: {', '.join(anchor.get('decoys') or []) or '—'}\n\n")
     user = anchor_txt + "МАТРИЦА ЗНАНИЙ (проверенные факты):\n" + "\n".join(lines)
 
-    raw = llm.generate(_SYSTEM, user, max_tokens=8000, model=model or _guide_model())
-    if not raw:
-        return {"available": False, "dossier": "", "diagnosis": {}, "arcs": [], "n_facts": n_facts}
-    data = _parse(raw)
+    data = _generate_json(_SYSTEM, user, max_tokens=8000, model=model or _guide_model())
     if data is None:
         return {"available": False, "dossier": "", "diagnosis": {}, "arcs": [], "n_facts": n_facts}
 
@@ -135,14 +132,3 @@ def build_guide(conn, client_id: str, *, model: Optional[str] = None) -> Dict[st
         "arcs": arcs_out,
         "n_facts": n_facts,
     }
-
-
-def _parse(raw: str) -> Optional[dict]:
-    raw = (raw or "").strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    try:
-        d = json.loads(raw)
-        return d if isinstance(d, dict) else None
-    except (json.JSONDecodeError, AttributeError):
-        return None

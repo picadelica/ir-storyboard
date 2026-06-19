@@ -56,7 +56,7 @@ export default function InterviewView({ clientId, onJumpToCell }: Props) {
 
       {guide && !guide.available && (
         <div className="bg-flag-grey-bg border border-flag-grey/40 rounded p-3 text-sm text-ink-mute">
-          Не удалось сгенерировать (нет ключа LLM или пустой ответ). Попробуй ещё раз.
+          Не удалось собрать гайд — модель не ответила (бывает при перегрузке). Попробуй ещё раз.
         </div>
       )}
 

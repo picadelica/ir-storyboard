@@ -228,7 +228,8 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
 
       {audit && !audit.available && (
         <div className="bg-flag-grey-bg border border-flag-grey/40 rounded p-3 text-sm text-ink-mute">
-          Верификатор недоступен (нет ключа LLM или пустой ответ). Транскриптные факты не проверяются.
+          Верификатор не вернул результат — модель не ответила (бывает при перегрузке).
+          Нажми «Запустить проверку» ещё раз. Транскриптные факты не проверяются.
         </div>
       )}
 

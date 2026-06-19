@@ -89,6 +89,29 @@ def test_parse_json_tolerates_preamble_and_fences():
     assert verification._parse_json("no json here at all") is None
 
 
+def test_generate_json_retries_on_empty(monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(system, user, **k):
+        calls["n"] += 1
+        return "" if calls["n"] == 1 else '{"ok": true}'
+
+    monkeypatch.setattr(llm, "generate", flaky)
+    out = verification._generate_json("s", "u", max_tokens=100, model="m", attempts=2)
+    assert out == {"ok": True}
+    assert calls["n"] == 2  # first empty reply retried
+
+
+def test_audit_recovers_from_transient_empty(conn, monkeypatch):
+    f_research, _f_clean, _ = _seed_facts(conn)
+    seq = ["", json.dumps({"canonical": {"company": "RealCo"}, "summary": "",
+                           "facts": [{"id": f_research, "verdict": "suspect", "entity": "x", "reason": "y"}]})]
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: seq.pop(0) if seq else "")
+    res = verification.audit_client(conn, "co")
+    assert res["available"] is True
+    assert res["canonical"]["company"] == "RealCo"
+
+
 def test_audit_parses_chatty_model_reply(conn, monkeypatch):
     f_research, _f_clean, _ = _seed_facts(conn)
     reply = (f'Let me check.\n\n```json\n{{"canonical": {{"company": "RealCo"}}, '

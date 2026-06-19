@@ -83,14 +83,9 @@ def audit_client(conn, client_id: str, *, model: Optional[str] = None) -> Dict[s
     lines = [f"[{f['id']}|{f['sid']}|{(f['flag'] or '?')[0]}] {(f['text'] or '')[:240]}" for f in facts]
     user = "Факты компании (id|подсекция|флаг):\n" + "\n".join(lines)
 
-    raw = llm.generate(_AUDIT_SYSTEM, user, max_tokens=8000, model=model or _audit_model())
-    if not raw:
-        return {"available": False, "canonical": {}, "summary": "", "facts": [], "n_facts": len(facts)}
-
-    data = _parse_json(raw)
+    data = _generate_json(_AUDIT_SYSTEM, user, max_tokens=8000, model=model or _audit_model())
     if data is None:
-        return {"available": False, "canonical": {}, "summary": "", "facts": [],
-                "n_facts": len(facts), "error": "unparseable"}
+        return {"available": False, "canonical": {}, "summary": "", "facts": [], "n_facts": len(facts)}
 
     valid_ids = {f["id"] for f in facts}
     out_facts: List[dict] = []
@@ -155,11 +150,8 @@ def verify_claims(claims: List[Dict[str, str]], *, model: Optional[str] = None,
     if not any_hits:
         return {"available": False, "results": []}
 
-    raw = llm.generate(_VERIFY_SYSTEM, "\n".join(evidence_blocks), max_tokens=4000,
-                       model=model or _audit_model())
-    if not raw:
-        return {"available": False, "results": []}
-    data = _parse_json(raw)
+    data = _generate_json(_VERIFY_SYSTEM, "\n".join(evidence_blocks), max_tokens=4000,
+                          model=model or _audit_model())
     if data is None:
         return {"available": False, "results": []}
 
@@ -207,8 +199,7 @@ def verify_candidates(candidates: List[Dict[str, str]], anchor: Dict[str, Any],
     )
     lines = [f"[{i}|{c.get('subsection_id','')}] {(c.get('text') or '')[:240]}" for i, c in enumerate(candidates)]
     user = f"ЯКОРЬ:\n{anchor_txt}\n\nКАНДИДАТЫ:\n" + "\n".join(lines)
-    raw = llm.generate(_GATE_SYSTEM, user, max_tokens=4000, model=model or _audit_model())
-    data = _parse_json(raw) if raw else None
+    data = _generate_json(_GATE_SYSTEM, user, max_tokens=4000, model=model or _audit_model())
     if data is None:
         return out  # LLM unavailable → don't block ingest (degrade open)
     for it in data.get("facts", []) or []:
@@ -250,11 +241,8 @@ def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) 
     if len(facts) < 2:
         return {"available": True, "groups": []}
     lines = [f"[{f['id']}|{f['sid']}] {(f['text'] or '')[:200]}" for f in facts]
-    raw = llm.generate(_DEDUP_SYSTEM, "Факты:\n" + "\n".join(lines), max_tokens=6000,
-                       model=model or _audit_model())
-    if not raw:
-        return {"available": False, "groups": []}
-    data = _parse_json(raw)
+    data = _generate_json(_DEDUP_SYSTEM, "Факты:\n" + "\n".join(lines), max_tokens=6000,
+                          model=model or _audit_model())
     if data is None:
         return {"available": False, "groups": []}
 
@@ -278,6 +266,23 @@ def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) 
             "facts": [{"id": i, "text": by_id[i]["text"]} for i in ids],
         })
     return {"available": True, "groups": groups}
+
+
+def _generate_json(system: str, user: str, *, max_tokens: int,
+                   model: Optional[str], attempts: int = 2) -> Optional[dict]:
+    """llm.generate + tolerant JSON parse, retried on an empty/unparseable reply.
+
+    A strong model occasionally returns an empty or malformed body (overload,
+    truncation) — without a retry that surfaced as a misleading "verifier
+    unavailable". One extra attempt heals the common transient. Returns the
+    parsed dict, or None if every attempt failed (no key / persistent error)."""
+    for _ in range(max(1, attempts)):
+        raw = llm.generate(system, user, max_tokens=max_tokens, model=model)
+        if raw:
+            data = _parse_json(raw)
+            if data is not None:
+                return data
+    return None
 
 
 def _parse_json(raw: str) -> Optional[dict]:
