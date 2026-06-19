@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InterviewGuide } from "../types";
 
@@ -9,10 +8,24 @@ interface Props {
 }
 
 export default function InterviewView({ clientId, onJumpToCell }: Props) {
-  const [guide, setGuide] = useState<InterviewGuide | null>(null);
+  const qc = useQueryClient();
+  // The generated guide lives in the query cache (keyed by client), not local
+  // state — so it survives a tab switch / unmount; setQueryData also lands the
+  // result even if the analyst navigates away while generation is still running.
+  const guideQ = useQuery<InterviewGuide | null>({
+    queryKey: ["interview-guide", clientId],
+    queryFn: () => null,
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  const guide = guideQ.data ?? null;
   const gen = useMutation({
-    mutationFn: () => api.interviewGuide(clientId),
-    onSuccess: setGuide,
+    mutationFn: async () => {
+      const g = await api.interviewGuide(clientId);
+      qc.setQueryData(["interview-guide", clientId], g);
+      return g;
+    },
   });
 
   return (

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { AuditResult, Entity, ReviewFact, DuplicateGroup } from "../types";
@@ -10,8 +10,29 @@ interface Props {
 
 export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   const qc = useQueryClient();
-  const [audit, setAudit] = useState<AuditResult | null>(null);
-  const [done, setDone] = useState<Set<number>>(new Set());
+
+  // LLM results live in the query cache (keyed by client), not local state — so
+  // they survive a tab switch / unmount. setQueryData below lands the result
+  // even if the analyst navigates away while the audit is still running.
+  const auditQ = useQuery<AuditResult | null>({
+    queryKey: ["fact-audit", clientId],
+    queryFn: () => null,
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  const audit = auditQ.data ?? null;
+  const dupsQ = useQuery<DuplicateGroup[] | null>({
+    queryKey: ["fact-dups", clientId],
+    queryFn: () => null,
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  const dups = dupsQ.data ?? null;
+  const dropFromAudit = (id: number) =>
+    qc.setQueryData<AuditResult | null>(["fact-audit", clientId], (prev) =>
+      prev ? { ...prev, facts: prev.facts.filter(f => f.id !== id) } : prev);
 
   const entities = useQuery<Entity[]>({
     queryKey: ["entities", clientId],
@@ -33,27 +54,37 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   const promote = useMutation({ mutationFn: (id: number) => api.promoteFact(id), onSuccess: invalidate });
   const rejectReview = useMutation({ mutationFn: (id: number) => api.rejectFact(id), onSuccess: invalidate });
 
-  const [dups, setDups] = useState<DuplicateGroup[] | null>(null);
   const findDups = useMutation({
-    mutationFn: () => api.findDuplicates(clientId),
-    onSuccess: (r) => setDups(r.available ? r.groups : []),
+    mutationFn: async () => {
+      const r = await api.findDuplicates(clientId);
+      const groups = r.available ? r.groups : [];
+      qc.setQueryData(["fact-dups", clientId], groups);
+      return groups;
+    },
   });
   const merge = useMutation({
     mutationFn: (g: DuplicateGroup) => api.mergeFacts(g.keep, g.ids.filter(i => i !== g.keep)),
-    onSuccess: (_d, g) => { setDups(d => (d ?? []).filter(x => x.keep !== g.keep)); invalidate(); },
+    onSuccess: (_d, g) => {
+      qc.setQueryData<DuplicateGroup[] | null>(["fact-dups", clientId], (d) => (d ?? []).filter(x => x.keep !== g.keep));
+      invalidate();
+    },
   });
 
   const run = useMutation({
-    mutationFn: () => api.runAudit(clientId),
-    onSuccess: (r) => { setAudit(r); setDone(new Set()); invalidate(); },
+    mutationFn: async () => {
+      const r = await api.runAudit(clientId);
+      qc.setQueryData(["fact-audit", clientId], r);
+      return r;
+    },
+    onSuccess: invalidate,
   });
   const keep = useMutation({
     mutationFn: (id: number) => api.setVerification(id, { verification: "verified" }),
-    onSuccess: (_d, id) => { setDone(s => new Set(s).add(id)); invalidate(); },
+    onSuccess: (_d, id) => { dropFromAudit(id); invalidate(); },
   });
   const reject = useMutation({
     mutationFn: (id: number) => api.rejectFact(id),
-    onSuccess: (_d, id) => { setDone(s => new Set(s).add(id)); invalidate(); },
+    onSuccess: (_d, id) => { dropFromAudit(id); invalidate(); },
   });
   const confirmEntity = useMutation({
     mutationFn: (id: number) => api.patchEntity(id, { confirmed: true }),
@@ -64,7 +95,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["entities", clientId] }),
   });
 
-  const pending = (audit?.facts ?? []).filter(f => !done.has(f.id));
+  const pending = audit?.facts ?? [];
   const byEntity = useMemo(() => {
     const m: Record<string, number[]> = {};
     for (const f of pending) {
@@ -134,7 +165,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                   className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
                   слить в один ({g.ids.length} → 1)
                 </button>
-                <button onClick={() => setDups(d => (d ?? []).filter((_, i) => i !== gi))}
+                <button onClick={() => qc.setQueryData<DuplicateGroup[] | null>(["fact-dups", clientId], (d) => (d ?? []).filter((_, i) => i !== gi))}
                   className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>
               </div>
             </div>
