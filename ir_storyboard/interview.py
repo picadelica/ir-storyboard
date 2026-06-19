@@ -22,7 +22,7 @@ def _guide_model() -> str:
 def _clean_facts_by_cell(conn, client_id: str) -> Dict[str, List[dict]]:
     """Active, non-flagged facts grouped by subsection (the grounding material)."""
     rows = conn.execute(
-        """SELECT c.subsection_id AS sid, f.text AS text, f.flag AS flag
+        """SELECT f.id AS id, c.subsection_id AS sid, f.text AS text, f.flag AS flag
             FROM facts f JOIN cells c ON c.id = f.cell_id
             WHERE c.client_id = ? AND f.state = 'active'
               AND f.verification NOT IN ('suspect', 'refuted')
@@ -30,7 +30,7 @@ def _clean_facts_by_cell(conn, client_id: str) -> Dict[str, List[dict]]:
         (client_id,)).fetchall()
     out: Dict[str, List[dict]] = {}
     for r in rows:
-        out.setdefault(r["sid"], []).append({"text": r["text"], "flag": r["flag"]})
+        out.setdefault(r["sid"], []).append({"id": r["id"], "text": r["text"], "flag": r["flag"]})
     return out
 
 
@@ -38,23 +38,27 @@ _SYSTEM = """Ты — старший IR-интервьюер и нарратив
 
 Методология — 8 концентрических слоёв близости × 3 подсекции (1 = самое личное, 8 = внешний контекст). Внутренние слои 1–3 заполняются ТОЛЬКО живым интервью; внешние (продукт 6, видение 7, контекст 8, инвесторы 3.3) можно подтверждать/обогащать у фаундера. Флаги: g — подтверждённый позитив, r — риск/противоречие/концерн, y — явный гэп. ВАЖНО: r на личных слоях (1.x) и в 7.2 (противоречия/цена) — часто эмоциональное ядро истории, его надо бережно раскрывать, а не избегать.
 
-Принципы:
-- Каждый вопрос ГРУНТОВАН на конкретных известных фактах — ссылайся («ты говорил, что…»). Никаких generic-шаблонов.
+Каждый факт дан как `[id] (флаг) текст`. ДИСЦИПЛИНА ГРУНТОВАНИЯ (строго):
+- Каждый вопрос держится на конкретных фактах. В поле "grounds" перечисли id фактов, на которые он опирается. Вопрос без опоры на факт не задавай.
+- НЕ называй ни одного числа, имени, даты, суммы или конкретной детали, которой НЕТ в процитированных (grounds) фактах. Если нужной детали нет — сформулируй вопрос так, чтобы ДОБЫТЬ её у фаундера («сколько именно…», «в каком году…»), а не утверждай.
+- Цитируя, опирайся на текст факта («ты говорил, что…»). Никаких generic-шаблонов и домыслов.
+
+Прочие принципы:
 - Дуга по близости: человек/разогрев → профессиональное → команда/сообщество → трудное (противоречия, провалы, страхи) → видение/legacy.
 - На каждый вопрос 1–2 follow-up, чтобы добывать СЦЕНЫ и анекдоты (show, don't tell).
-- Приоритет: пустые/тонкие внутренние ячейки; красные кластеры под авторскую рамку фаундера; противоречия между фактами.
+- Приоритет: пустые/тонкие внутренние ячейки; красные кластеры под авторскую рамку фаундера; противоречия между фактами. Для пустой ячейки опоры может не быть — тогда grounds пустой, а вопрос открытый («расскажи про…»).
 
 Верни СТРОГО валидный JSON (без markdown), на русском:
 {
-  "dossier": "<1-2 плотных абзаца: кто фаундер/компания, какая история проступает, центральное напряжение>",
+  "dossier": "<1-2 плотных абзаца: кто фаундер/компания, какая история проступает, центральное напряжение — только по фактам>",
   "diagnosis": {"covered": "<что сильно покрыто>", "gaps": "<что зияет/тонко>", "priorities": ["<топ-приоритет на это интервью>", "..."]},
   "arcs": [
     {"title": "<название дуги>", "questions": [
-      {"question": "<грунтованный вопрос>", "targets": ["X.Y", "..."], "know": "<что уже знаем>", "close": "<что закрываем>", "followups": ["<уточняющий>", "..."]}
+      {"question": "<грунтованный вопрос>", "grounds": [<id факта>, ...], "targets": ["X.Y", "..."], "know": "<что уже знаем>", "close": "<что закрываем>", "followups": ["<уточняющий>", "..."]}
     ]}
   ]
 }
-Опирайся ТОЛЬКО на факты матрицы и якорь — не выдумывай. Будь конкретным и человечным."""
+Опирайся ТОЛЬКО на факты матрицы и якорь — не выдумывай чисел и деталей. Будь конкретным и человечным."""
 
 
 def build_guide(conn, client_id: str, *, model: Optional[str] = None) -> Dict[str, Any]:
@@ -67,14 +71,16 @@ def build_guide(conn, client_id: str, *, model: Optional[str] = None) -> Dict[st
     from . import matrix
     anchor = matrix.entity_anchor(conn, client_id)
 
+    by_id: Dict[int, dict] = {}
     lines: List[str] = []
     for L in LAYERS:
         for s in L.subsections:
             fs = by_cell.get(s.id, [])
             tag = "ПУСТО" if not fs else f"{len(fs)} факт(ов)"
-            lines.append(f"\n[{s.id}] {s.name} ({L.name}) — {tag}")
+            lines.append(f"\n=== {s.id} {s.name} ({L.name}) — {tag} ===")
             for f in fs:
-                lines.append(f"  ({(f['flag'] or '?')[0]}) {(f['text'] or '')[:220]}")
+                by_id[f["id"]] = f
+                lines.append(f"  [{f['id']}] ({(f['flag'] or '?')[0]}) {(f['text'] or '')[:220]}")
     anchor_txt = ""
     if anchor.get("company") or anchor.get("founders"):
         anchor_txt = (f"ЯКОРЬ — компания: {anchor.get('company') or '?'}; "
@@ -98,8 +104,19 @@ def build_guide(conn, client_id: str, *, model: Optional[str] = None) -> Dict[st
         for q in a.get("questions", []) or []:
             if not isinstance(q, dict) or not q.get("question"):
                 continue
+            grounds: List[dict] = []
+            for g in (q.get("grounds") or []):
+                try:
+                    gid = int(g)
+                except (TypeError, ValueError):
+                    continue
+                if gid in by_id and gid not in {x["id"] for x in grounds}:
+                    grounds.append({"id": gid, "text": (by_id[gid]["text"] or "")[:300]})
+                if len(grounds) >= 8:
+                    break
             qs.append({
                 "question": str(q.get("question"))[:1000],
+                "grounds": grounds,
                 "targets": [str(t) for t in (q.get("targets") or []) if t][:6],
                 "know": str(q.get("know") or "")[:600],
                 "close": str(q.get("close") or "")[:600],

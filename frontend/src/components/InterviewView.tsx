@@ -89,6 +89,18 @@ export default function InterviewView({ clientId, onJumpToCell }: Props) {
                         {q.close && <span>закрываем: {q.close}.</span>}
                       </div>
                     )}
+                    {q.grounds.length > 0 ? (
+                      <details className="mt-1">
+                        <summary className="text-[11px] text-blue-600 cursor-pointer select-none">
+                          основано на {q.grounds.length} факт(ах)
+                        </summary>
+                        <ul className="mt-1 list-disc pl-4 text-xs text-ink-mute space-y-0.5">
+                          {q.grounds.map(g => <li key={g.id}>{g.text}</li>)}
+                        </ul>
+                      </details>
+                    ) : (
+                      <div className="mt-1 text-[11px] text-amber-700">открытый вопрос — нет опоры на факт</div>
+                    )}
                     {q.followups.length > 0 && (
                       <ul className="mt-1 list-disc pl-4 text-xs text-ink-mute space-y-0.5">
                         {q.followups.map((f, fi) => <li key={fi}>{f}</li>)}

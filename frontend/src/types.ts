@@ -386,8 +386,14 @@ export interface DuplicatesResult {
   groups: DuplicateGroup[];
 }
 
+export interface GuideGround {
+  id: number;
+  text: string;
+}
+
 export interface GuideQuestion {
   question: string;
+  grounds: GuideGround[];
   targets: string[];
   know: string;
   close: string;

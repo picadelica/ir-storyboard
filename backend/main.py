@@ -1153,8 +1153,14 @@ def merge_facts_ep(body: MergeIn, conn=Depends(get_conn)):
 
 # ---------- grounded interview guide ----------
 
+class GuideGroundOut(BaseModel):
+    id: int
+    text: str = ""
+
+
 class GuideQuestionOut(BaseModel):
     question: str
+    grounds: List[GuideGroundOut] = []
     targets: List[str] = []
     know: str = ""
     close: str = ""

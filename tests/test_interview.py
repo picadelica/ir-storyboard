@@ -22,16 +22,16 @@ def conn(tmp_path):
 
 
 def test_build_guide_structure(conn, monkeypatch):
-    matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="Sold to Snap 2016.", flag="green")
+    snap = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="Sold to Snap 2016.", flag="green")
     matrix.add_fact(conn, client_id="co", subsection_id="1.3", text="Fears AI future.", flag="red",
                     rationale="личный страх — эмоциональное ядро")
     canned = {
         "dossier": "Founder X builds decentralized AI.",
         "diagnosis": {"covered": "product", "gaps": "childhood", "priorities": ["1.1 пусто", "1.3 раскрыть"]},
         "arcs": [{"title": "Человек", "questions": [
-            {"question": "Расскажи про детство?", "targets": ["1.1"], "know": "мало",
-             "close": "1.1", "followups": ["а потом?"]},
-            {"question": "no targets ok", "targets": []},
+            {"question": "Ты продал компанию Snap — расскажи.", "grounds": [snap, 999999],
+             "targets": ["2.1"], "know": "мало", "close": "2.2", "followups": ["а потом?"]},
+            {"question": "no grounds ok", "targets": []},
             {"targets": ["1.1"]},  # no question → dropped
         ]}],
     }
@@ -41,7 +41,10 @@ def test_build_guide_structure(conn, monkeypatch):
     assert g["diagnosis"]["priorities"] == ["1.1 пусто", "1.3 раскрыть"]
     qs = g["arcs"][0]["questions"]
     assert len(qs) == 2  # the question-less one dropped
-    assert qs[0]["targets"] == ["1.1"] and qs[0]["followups"] == ["а потом?"]
+    # grounds resolve to fact text; the unknown id 999999 is dropped
+    assert qs[0]["grounds"] == [{"id": snap, "text": "Sold to Snap 2016."}]
+    assert qs[0]["followups"] == ["а потом?"]
+    assert qs[1]["grounds"] == []  # open question with no grounding
 
 
 def test_build_guide_excludes_flagged_facts(conn, monkeypatch):
