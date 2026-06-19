@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from . import llm
@@ -64,7 +65,9 @@ _AUDIT_SYSTEM = """Ты — придирчивый fact-checker IR-аналит�
   ]
 }
 
-В "facts" включай ТОЛЬКО подозрительные (suspect) и опровергнутые (refuted) — чистые факты не перечисляй. Если ничего подозрительного — верни "facts": []. verdict=refuted — когда факт почти точно про другую сущность или выдуман; suspect — когда сомнительно и нужна внешняя проверка. Опирайся только на данные фактов."""
+В "facts" включай ТОЛЬКО подозрительные (suspect) и опровергнутые (refuted) — чистые факты не перечисляй. Если ничего подозрительного — верни "facts": []. verdict=refuted — когда факт почти точно про другую сущность или выдуман; suspect — когда сомнительно и нужна внешняя проверка. Опирайся только на данные фактов.
+
+ВАЖНО: ответ — только JSON-объект, без преамбулы, рассуждений и текста до или после него."""
 
 
 def audit_client(conn, client_id: str, *, model: Optional[str] = None) -> Dict[str, Any]:
@@ -278,11 +281,27 @@ def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) 
 
 
 def _parse_json(raw: str) -> Optional[dict]:
+    """Extract a JSON object from an LLM reply, tolerant of chatty models.
+
+    Models (esp. sonnet) often wrap the JSON in a ```fence``` and/or precede it
+    with a prose preamble ("I need to analyze..."). Try, in order: the whole
+    string, the contents of a fenced block anywhere, and the widest {...} span.
+    """
     raw = (raw or "").strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else None
-    except (json.JSONDecodeError, AttributeError):
+    if not raw:
         return None
+    candidates: List[str] = [raw]
+    m = re.search(r"```(?:json)?\s*(.+?)```", raw, re.DOTALL)
+    if m:
+        candidates.append(m.group(1).strip())
+    i, j = raw.find("{"), raw.rfind("}")
+    if 0 <= i < j:
+        candidates.append(raw[i : j + 1])
+    for cand in candidates:
+        try:
+            data = json.loads(cand)
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None

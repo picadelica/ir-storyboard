@@ -69,6 +69,38 @@ def test_audit_stub_unavailable(conn, monkeypatch):
     assert res["available"] is False and res["facts"] == []
 
 
+def test_parse_json_tolerates_preamble_and_fences():
+    # Bare object
+    assert verification._parse_json('{"a": 1}') == {"a": 1}
+    # Fenced block with a ```json hint
+    assert verification._parse_json('```json\n{"a": 1}\n```') == {"a": 1}
+    # The real-world failure: prose preamble, then a fenced JSON block (sonnet)
+    chatty = ('I need to analyze these facts.\n\nKey observations:\n'
+              '1. **Facts 324-327** look conflated.\n\n```json\n'
+              '{"canonical": {"company": "Gonka"}, "facts": [{"id": 1, "verdict": "refuted"}]}\n```')
+    parsed = verification._parse_json(chatty)
+    assert parsed is not None
+    assert parsed["canonical"]["company"] == "Gonka"
+    assert parsed["facts"][0]["id"] == 1
+    # Prose then a bare (unfenced) object
+    assert verification._parse_json('Here is the result:\n{"facts": []}')["facts"] == []
+    # Genuinely empty / non-JSON stays None
+    assert verification._parse_json("") is None
+    assert verification._parse_json("no json here at all") is None
+
+
+def test_audit_parses_chatty_model_reply(conn, monkeypatch):
+    f_research, _f_clean, _ = _seed_facts(conn)
+    reply = (f'Let me check.\n\n```json\n{{"canonical": {{"company": "RealCo"}}, '
+             f'"summary": "ok", "facts": [{{"id": {f_research}, "verdict": "refuted", '
+             f'"entity": "Khachuyan", "reason": "иное лицо"}}]}}\n```')
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: reply)
+    res = verification.audit_client(conn, "co")
+    assert res["available"] is True
+    assert res["canonical"]["company"] == "RealCo"
+    assert any(f["id"] == f_research and f["verdict"] == "refuted" for f in res["facts"])
+
+
 def test_verify_claims_web(monkeypatch):
     monkeypatch.setattr(llm, "web_search",
                         lambda q, n=6: [llm.SearchHit("TechCrunch", "https://tc.com/x", "Product Science raised $18M")])

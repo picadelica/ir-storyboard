@@ -1,5 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { api } from "../api";
+import { readLS, patchLS } from "../persist";
+import { RunProgress, useElapsed } from "./RunProgress";
 import type { InterviewGuide } from "../types";
 
 interface Props {
@@ -8,25 +11,22 @@ interface Props {
 }
 
 export default function InterviewView({ clientId, onJumpToCell }: Props) {
-  const qc = useQueryClient();
-  // The generated guide lives in the query cache (keyed by client), not local
-  // state — so it survives a tab switch / unmount; setQueryData also lands the
-  // result even if the analyst navigates away while generation is still running.
-  const guideQ = useQuery<InterviewGuide | null>({
-    queryKey: ["interview-guide", clientId],
-    queryFn: () => null,
-    enabled: false,
-    staleTime: Infinity,
-    gcTime: Infinity,
-  });
-  const guide = guideQ.data ?? null;
+  // The generated guide persists in localStorage (keyed by client) so it
+  // survives a tab switch / unmount / reload. The write happens inside the
+  // mutationFn so the result lands even if the analyst navigated away while
+  // generation was still running; on remount useState reads it back.
+  const lsKey = `interview-guide-${clientId}`;
+  const saved = readLS<{ guide?: InterviewGuide | null }>(lsKey);
+  const [guide, setGuide] = useState<InterviewGuide | null>(saved.guide ?? null);
   const gen = useMutation({
     mutationFn: async () => {
       const g = await api.interviewGuide(clientId);
-      qc.setQueryData(["interview-guide", clientId], g);
+      patchLS(lsKey, { guide: g });   // lands even if unmounted mid-run
       return g;
     },
+    onSuccess: setGuide,
   });
+  const elapsed = useElapsed(gen.isPending);
 
   return (
     <div className="p-5 max-w-3xl space-y-5">
@@ -46,7 +46,13 @@ export default function InterviewView({ clientId, onJumpToCell }: Props) {
         </button>
       </div>
 
-      {gen.isPending && <div className="text-sm text-ink-mute">Читаю матрицу и собираю гайд…</div>}
+      <RunProgress active={gen.isPending} elapsed={elapsed} label="Читаю матрицу и собираю гайд…" />
+
+      {gen.isError && (
+        <div className="bg-flag-red-bg border border-flag-red/40 rounded p-3 text-sm text-flag-red">
+          Не удалось собрать гайд: {(gen.error as Error)?.message || "ошибка запроса"}. Попробуй ещё раз.
+        </div>
+      )}
 
       {guide && !guide.available && (
         <div className="bg-flag-grey-bg border border-flag-grey/40 rounded p-3 text-sm text-ink-mute">

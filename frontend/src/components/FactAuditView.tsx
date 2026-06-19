@@ -1,6 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { readLS, patchLS } from "../persist";
+import { RunProgress, useElapsed } from "./RunProgress";
 import type { AuditResult, Entity, ReviewFact, DuplicateGroup } from "../types";
 
 interface Props {
@@ -11,28 +13,27 @@ interface Props {
 export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   const qc = useQueryClient();
 
-  // LLM results live in the query cache (keyed by client), not local state — so
-  // they survive a tab switch / unmount. setQueryData below lands the result
-  // even if the analyst navigates away while the audit is still running.
-  const auditQ = useQuery<AuditResult | null>({
-    queryKey: ["fact-audit", clientId],
-    queryFn: () => null,
-    enabled: false,
-    staleTime: Infinity,
-    gcTime: Infinity,
-  });
-  const audit = auditQ.data ?? null;
-  const dupsQ = useQuery<DuplicateGroup[] | null>({
-    queryKey: ["fact-dups", clientId],
-    queryFn: () => null,
-    enabled: false,
-    staleTime: Infinity,
-    gcTime: Infinity,
-  });
-  const dups = dupsQ.data ?? null;
+  // LLM results persist in localStorage (keyed by client), not just component
+  // state — so they survive a tab switch / unmount / reload. The write happens
+  // inside the mutationFn (not an effect), so the result lands even if the
+  // analyst navigated away while the audit was still running; on remount the
+  // useState initializer reads it back.
+  const lsKey = `fact-audit-${clientId}`;
+  const saved = readLS<{ audit?: AuditResult | null; dups?: DuplicateGroup[] | null }>(lsKey);
+  const [audit, setAudit] = useState<AuditResult | null>(saved.audit ?? null);
+  const [dups, setDups] = useState<DuplicateGroup[] | null>(saved.dups ?? null);
   const dropFromAudit = (id: number) =>
-    qc.setQueryData<AuditResult | null>(["fact-audit", clientId], (prev) =>
-      prev ? { ...prev, facts: prev.facts.filter(f => f.id !== id) } : prev);
+    setAudit(prev => {
+      const nx = prev ? { ...prev, facts: prev.facts.filter(f => f.id !== id) } : prev;
+      patchLS(lsKey, { audit: nx });
+      return nx;
+    });
+  const dropDupGroup = (pred: (g: DuplicateGroup, i: number) => boolean) =>
+    setDups(d => {
+      const nx = (d ?? []).filter((g, i) => !pred(g, i));
+      patchLS(lsKey, { dups: nx });
+      return nx;
+    });
 
   const entities = useQuery<Entity[]>({
     queryKey: ["entities", clientId],
@@ -58,25 +59,23 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     mutationFn: async () => {
       const r = await api.findDuplicates(clientId);
       const groups = r.available ? r.groups : [];
-      qc.setQueryData(["fact-dups", clientId], groups);
+      patchLS(lsKey, { dups: groups });   // lands even if unmounted mid-run
       return groups;
     },
+    onSuccess: (groups) => setDups(groups),
   });
   const merge = useMutation({
     mutationFn: (g: DuplicateGroup) => api.mergeFacts(g.keep, g.ids.filter(i => i !== g.keep)),
-    onSuccess: (_d, g) => {
-      qc.setQueryData<DuplicateGroup[] | null>(["fact-dups", clientId], (d) => (d ?? []).filter(x => x.keep !== g.keep));
-      invalidate();
-    },
+    onSuccess: (_d, g) => { dropDupGroup(x => x.keep === g.keep); invalidate(); },
   });
 
   const run = useMutation({
     mutationFn: async () => {
       const r = await api.runAudit(clientId);
-      qc.setQueryData(["fact-audit", clientId], r);
+      patchLS(lsKey, { audit: r });       // lands even if unmounted mid-run
       return r;
     },
-    onSuccess: invalidate,
+    onSuccess: (r) => { setAudit(r); invalidate(); },
   });
   const keep = useMutation({
     mutationFn: (id: number) => api.setVerification(id, { verification: "verified" }),
@@ -107,6 +106,9 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
 
   const rejectAll = (ids: number[]) => ids.forEach(id => reject.mutate(id));
 
+  const auditElapsed = useElapsed(run.isPending);
+  const dupsElapsed = useElapsed(findDups.isPending);
+
   return (
     <div className="p-5 space-y-5 max-w-4xl">
       <div className="flex items-baseline justify-between">
@@ -133,6 +135,20 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
           </button>
         </div>
       </div>
+
+      <RunProgress active={run.isPending} elapsed={auditElapsed} label="Проверяю факты на склейку сущностей…" />
+      <RunProgress active={findDups.isPending} elapsed={dupsElapsed} label="Ищу дубли фактов…" />
+
+      {run.isError && (
+        <div className="bg-flag-red-bg border border-flag-red/40 rounded p-3 text-sm text-flag-red">
+          Проверка не удалась: {(run.error as Error)?.message || "ошибка запроса"}. Попробуй ещё раз.
+        </div>
+      )}
+      {findDups.isError && (
+        <div className="bg-flag-red-bg border border-flag-red/40 rounded p-3 text-sm text-flag-red">
+          Поиск дублей не удался: {(findDups.error as Error)?.message || "ошибка запроса"}. Попробуй ещё раз.
+        </div>
+      )}
 
       {dups !== null && (
         <section className="bg-white rounded-lg border border-ink-line p-4 space-y-3">
@@ -165,7 +181,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                   className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
                   слить в один ({g.ids.length} → 1)
                 </button>
-                <button onClick={() => qc.setQueryData<DuplicateGroup[] | null>(["fact-dups", clientId], (d) => (d ?? []).filter((_, i) => i !== gi))}
+                <button onClick={() => dropDupGroup((_, i) => i === gi)}
                   className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>
               </div>
             </div>
