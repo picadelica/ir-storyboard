@@ -12,9 +12,7 @@ and no findings, so callers degrade gracefully (CI runs offline).
 """
 from __future__ import annotations
 
-import json
 import os
-import re
 from typing import Any, Dict, List, Optional
 
 from . import llm
@@ -270,43 +268,14 @@ def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) 
 
 def _generate_json(system: str, user: str, *, max_tokens: int,
                    model: Optional[str], attempts: int = 2) -> Optional[dict]:
-    """llm.generate + tolerant JSON parse, retried on an empty/unparseable reply.
-
-    A strong model occasionally returns an empty or malformed body (overload,
-    truncation) — without a retry that surfaced as a misleading "verifier
-    unavailable". One extra attempt heals the common transient. Returns the
-    parsed dict, or None if every attempt failed (no key / persistent error)."""
-    for _ in range(max(1, attempts)):
-        raw = llm.generate(system, user, max_tokens=max_tokens, model=model)
-        if raw:
-            data = _parse_json(raw)
-            if data is not None:
-                return data
-    return None
+    """Thin object-only wrapper over the universal llm.generate_json primitive
+    (generate + tolerant parse + retry). Kept as a local name so the existing
+    callers and tests import it from here."""
+    data = llm.generate_json(system, user, max_tokens=max_tokens, model=model, attempts=attempts)
+    return data if isinstance(data, dict) else None
 
 
 def _parse_json(raw: str) -> Optional[dict]:
-    """Extract a JSON object from an LLM reply, tolerant of chatty models.
-
-    Models (esp. sonnet) often wrap the JSON in a ```fence``` and/or precede it
-    with a prose preamble ("I need to analyze..."). Try, in order: the whole
-    string, the contents of a fenced block anywhere, and the widest {...} span.
-    """
-    raw = (raw or "").strip()
-    if not raw:
-        return None
-    candidates: List[str] = [raw]
-    m = re.search(r"```(?:json)?\s*(.+?)```", raw, re.DOTALL)
-    if m:
-        candidates.append(m.group(1).strip())
-    i, j = raw.find("{"), raw.rfind("}")
-    if 0 <= i < j:
-        candidates.append(raw[i : j + 1])
-    for cand in candidates:
-        try:
-            data = json.loads(cand)
-        except (json.JSONDecodeError, AttributeError):
-            continue
-        if isinstance(data, dict):
-            return data
-    return None
+    """Object-only wrapper over llm.extract_json (tolerant of chatty models)."""
+    data = llm.extract_json(raw)
+    return data if isinstance(data, dict) else None

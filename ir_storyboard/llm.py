@@ -535,22 +535,10 @@ def extract_facts_from_llm_report(
             + system_prompt
         )
 
-    raw = generate(system_prompt, user_content, max_tokens=4096)
-
-    if not raw:
+    data = extract_json(generate(system_prompt, user_content, max_tokens=4096))
+    if not isinstance(data, dict):
         return _stub_extract(section_heading, section_paragraphs, available_subsections)
-
-    # Strip markdown fences if model wrapped JSON in ```
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1]
-        raw = raw.rsplit("```", 1)[0].strip()
-
-    try:
-        data = json.loads(raw)
-        facts_data = data.get("facts", [])
-    except (json.JSONDecodeError, AttributeError):
-        return _stub_extract(section_heading, section_paragraphs, available_subsections)
+    facts_data = data.get("facts", []) or []
 
     results: List[ExtractedFact] = []
     for item in facts_data:
@@ -681,31 +669,14 @@ def extract_facts_from_full_document(
             + system_prompt
         )
 
-    raw = generate(system_prompt, user_content, max_tokens=8192)
-
-    if not raw:
+    data = extract_json(generate(system_prompt, user_content, max_tokens=8192))
+    if not isinstance(data, dict):
         # Stub fallback: process each section individually
-        from .ingest.classifiers.section_to_layer import suggest_subsection
         results = []
         for heading, paragraphs in sections:
             results.extend(_stub_extract(heading, paragraphs, available_subsections))
         return results
-
-    # Strip markdown fences
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1]
-        raw = raw.rsplit("```", 1)[0].strip()
-
-    try:
-        data = json.loads(raw)
-        facts_data = data.get("facts", [])
-    except (json.JSONDecodeError, AttributeError, KeyError):
-        from .ingest.classifiers.section_to_layer import suggest_subsection
-        results = []
-        for heading, paragraphs in sections:
-            results.extend(_stub_extract(heading, paragraphs, available_subsections))
-        return results
+    facts_data = data.get("facts", []) or []
 
     results: List[ExtractedFact] = []
     for item in facts_data:
@@ -794,6 +765,62 @@ def _repair_truncated_facts_json(raw: str) -> Optional[dict]:
         return None
 
 
+# ── Universal structured-output primitives ───────────────────────────────────
+# Every place that asks the model for JSON used to strip ``` only when the reply
+# STARTED with a fence and then json.loads the rest — which breaks the moment a
+# chatty model adds a prose preamble ("I need to analyze..."). Route all JSON
+# extraction through one tolerant parser so we stop re-fighting that bug.
+
+def extract_json(raw: Optional[str], *, repair: bool = False) -> Optional[Any]:
+    """Pull a JSON value out of an LLM reply, tolerant of chatty models.
+
+    Handles, in order: the whole string; the contents of a ```fence``` anywhere
+    in the reply; the widest {...}/[...] span (prose preamble before/after). With
+    ``repair=True`` also salvages a body truncated by max_tokens. Returns the
+    parsed value (dict or list), or None if nothing parses.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    candidates: List[str] = [raw]
+    m = re.search(r"```(?:json)?\s*(.+?)```", raw, re.DOTALL)
+    if m:
+        candidates.append(m.group(1).strip())
+    starts = [p for p in (raw.find("{"), raw.find("[")) if p >= 0]
+    ends = [p for p in (raw.rfind("}"), raw.rfind("]")) if p >= 0]
+    if starts and ends and min(starts) < max(ends):
+        candidates.append(raw[min(starts):max(ends) + 1])
+    for cand in candidates:
+        try:
+            return json.loads(cand)
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    if repair:
+        for cand in candidates:
+            rep = _repair_truncated_facts_json(cand)
+            if rep is not None:
+                return rep
+    return None
+
+
+def generate_json(system: str, user: str, *, max_tokens: int = 4096,
+                  model: Optional[str] = None, attempts: int = 2,
+                  repair: bool = False) -> Optional[Any]:
+    """generate() + extract_json(), retried on an empty/unparseable reply.
+
+    A strong model occasionally returns an empty or malformed body (overload,
+    truncation); one extra attempt heals the common transient. Returns the
+    parsed value, or None when every attempt failed (no key / persistent error).
+    """
+    for _ in range(max(1, attempts)):
+        raw = generate(system, user, max_tokens=max_tokens, model=model)
+        if raw:
+            data = extract_json(raw, repair=repair)
+            if data is not None:
+                return data
+    return None
+
+
 def extract_facts_from_transcript(
     segments: List[dict],
     available_subsections: List[str],
@@ -874,16 +901,13 @@ def extract_facts_from_transcript(
             r = generate(system_prompt, user_content, max_tokens=16000, model=model)
             if not r:
                 return None, "", None, None
-            r = r.strip()
-            if r.startswith("```"):
-                r = r.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            try:
-                return json.loads(r), r, None, None
-            except json.JSONDecodeError as ex:
-                rep = _repair_truncated_facts_json(r)
-                if rep is not None:
-                    return rep, r, ex, len(rep.get("facts", []))
-                return None, r, ex, None
+            data = extract_json(r)
+            if isinstance(data, dict):
+                return data, r, None, None
+            rep = _repair_truncated_facts_json(r)
+            if rep is not None:
+                return rep, r, None, len(rep.get("facts", []))
+            return None, r, ValueError("unparseable JSON after extract+repair"), None
 
         data, raw, parse_error, repaired_count = _attempt(None)
         used_fallback = False
@@ -1069,16 +1093,8 @@ def summarize_youtube_preview(
             + system_prompt
         )
 
-    raw = generate(system_prompt, user_content, max_tokens=2000)
-    if not raw:
-        return {"video_brief": "", "cell_briefs": {}}
-
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
+    data = extract_json(generate(system_prompt, user_content, max_tokens=2000))
+    if not isinstance(data, dict):
         return {"video_brief": "", "cell_briefs": {}}
 
     video_brief = (data.get("video_brief") or "").strip()
@@ -1186,21 +1202,10 @@ def extract_facts_from_research_text(
     # Cap to ~16K chars to stay within context with sizable subsection list
     user_content = f"{header}ARTICLE:\n{text[:16000]}"
 
-    raw = generate(system_prompt, user_content, max_tokens=8192)
-    if not raw:
+    # repair=True salvages a fact list truncated by max_tokens
+    data = extract_json(generate(system_prompt, user_content, max_tokens=8192), repair=True)
+    if not isinstance(data, dict):
         return []
-
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        # Try repair (max_tokens cutoff case)
-        repaired = _repair_truncated_facts_json(raw)
-        if repaired is None:
-            return []
-        data = repaired
 
     results: List[ExtractedFact] = []
     for item in data.get("facts", []) or []:
