@@ -97,21 +97,27 @@ _SYSTEM = """Ты строишь СТРУКТУРНЫЙ БИЗНЕС-ПРОФИ�
 {"proposals": [{"section": "<одна из секций>", "key": "<короткий ярлык>", "value": "<факт>", "source_url": "<URL из данных>", "source_title": "<название источника>", "as_of": "<дата или пусто>"}]}"""
 
 
-def build_about_proposals(conn, client_id: str, *, model: Optional[str] = None) -> Dict[str, Any]:
+def build_about_proposals(conn, client_id: str, *, model: Optional[str] = None,
+                          pasted: str = "", pasted_url: str = "", pasted_title: str = "",
+                          use_web: bool = True) -> Dict[str, Any]:
     """Propose source-grounded business facts for the company About card.
 
-    Returns {available, proposals:[{section,key,value,source_url,source_title,as_of,origin}],
-             stats:{from_matrix,from_web,dropped_ungrounded,duplicates}}. Writes nothing."""
+    Evidence: (A) the client's collected facts, (B) web search (if use_web), and
+    optionally (C) a pasted document/URL the analyst supplies. A fact survives only
+    if its source_url is in the supplied evidence. Returns {available, proposals,
+    stats}; writes nothing."""
     name = _client_name(conn, client_id)
     ents = matrix.entities_for_client(conn, client_id)
     company = next((e for e in ents if e["kind"] == "company"), None)
     existing = {_norm_val(f["value"]) for f in (company["facts"] if company else [])}
 
     facts = _matrix_evidence(conn, client_id)
-    hits = _web_evidence(name)
-    if not facts and not hits:
-        return {"available": True, "proposals": [],
-                "stats": {"from_matrix": 0, "from_web": 0, "dropped_ungrounded": 0, "duplicates": 0}}
+    hits = _web_evidence(name) if use_web else []
+    pasted = (pasted or "").strip()[:12000]
+    stats = {"from_matrix": len(facts), "from_web": len(hits),
+             "dropped_ungrounded": 0, "duplicates": 0}
+    if not facts and not hits and not pasted:
+        return {"available": True, "proposals": [], "stats": stats}
 
     # allowed URLs (normalized) + origin lookup — the grounding whitelist
     allowed: Dict[str, str] = {}
@@ -119,6 +125,8 @@ def build_about_proposals(conn, client_id: str, *, model: Optional[str] = None) 
         allowed.setdefault(_norm_url(f["url"]), "matrix")
     for h in hits:
         allowed.setdefault(_norm_url(h["url"]), "web")
+    if pasted and pasted_url.strip():
+        allowed.setdefault(_norm_url(pasted_url), "doc")
 
     card_block = ""
     if existing:
@@ -128,12 +136,14 @@ def build_about_proposals(conn, client_id: str, *, model: Optional[str] = None) 
     user = (f"Компания: {name}\n\n{card_block}"
             f"(A) УЖЕ СОБРАННЫЕ ФАКТЫ:\n{a_block}\n\n"
             f"(B) ВЕБ-ПОИСК:\n{b_block}")
+    if pasted:
+        doc_src = pasted_url.strip() or "(без URL)"
+        user += (f"\n\n(C) ВСТАВЛЕННЫЙ ДОКУМЕНТ [src: {doc_src}] "
+                 f"{('«'+pasted_title.strip()+'»') if pasted_title.strip() else ''}:\n{pasted}")
 
     data = llm.generate_json(_SYSTEM, user, max_tokens=6000, model=model)
     if data is None:
-        return {"available": False, "proposals": [],
-                "stats": {"from_matrix": len(facts), "from_web": len(hits),
-                          "dropped_ungrounded": 0, "duplicates": 0}}
+        return {"available": False, "proposals": [], "stats": stats}
 
     proposals: List[dict] = []
     dropped = dups = 0
@@ -165,6 +175,6 @@ def build_about_proposals(conn, client_id: str, *, model: Optional[str] = None) 
             "origin": origin,        # matrix | web
         })
 
-    return {"available": True, "proposals": proposals,
-            "stats": {"from_matrix": len(facts), "from_web": len(hits),
-                      "dropped_ungrounded": dropped, "duplicates": dups}}
+    stats["dropped_ungrounded"] = dropped
+    stats["duplicates"] = dups
+    return {"available": True, "proposals": proposals, "stats": stats}

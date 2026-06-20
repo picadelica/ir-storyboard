@@ -79,11 +79,17 @@ const SECTION_LABEL: Record<string, string> = {
 // Source-grounded auto-fill: a background job proposes business facts (from the
 // client's collected facts + web search), the analyst accepts what to keep, only
 // then it lands. Every proposal carries a real source link — verify before accept.
+type AutofillOpts = { pasted?: string; pasted_url?: string; pasted_title?: string; use_web?: boolean };
+
 function Autofill({ clientId, onCommitted }: { clientId: string; onCommitted: () => void }) {
   const [result, setResult] = useState<AboutAutofillResult | null>(null);
   const [accepted, setAccepted] = useState<Set<number>>(new Set());
+  const [docOpen, setDocOpen] = useState(false);
+  const [pasted, setPasted] = useState("");
+  const [pUrl, setPUrl] = useState("");
+  const [pTitle, setPTitle] = useState("");
   const run = useMutation({
-    mutationFn: () => api.autofillCompany(clientId),
+    mutationFn: (opts: AutofillOpts) => api.autofillCompany(clientId, opts),
     onSuccess: (r) => { setResult(r); setAccepted(new Set(r.proposals.map((_, i) => i))); },
   });
   const elapsed = useElapsed(run.isPending);
@@ -96,13 +102,46 @@ function Autofill({ clientId, onCommitted }: { clientId: string; onCommitted: ()
   const bySec: Record<string, { p: AboutProposal; i: number }[]> = {};
   proposals.forEach((p, i) => (bySec[p.section] ??= []).push({ p, i }));
   const toggle = (i: number) => setAccepted(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
+  const submitDoc = () => {
+    if (!pasted.trim() || !pUrl.trim()) return;
+    setDocOpen(false);
+    run.mutate({ pasted: pasted.trim(), pasted_url: pUrl.trim(), pasted_title: pTitle.trim(), use_web: false });
+  };
 
   return (
     <>
-      <button onClick={() => run.mutate()} disabled={run.isPending}
-        className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300 shrink-0">
-        {run.isPending ? "Ищу…" : "Авто-наполнить"}
-      </button>
+      <div className="flex gap-2 shrink-0">
+        <button onClick={() => setDocOpen(true)} disabled={run.isPending}
+          className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50">
+          Из документа
+        </button>
+        <button onClick={() => run.mutate({ use_web: true })} disabled={run.isPending}
+          className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">
+          {run.isPending ? "Ищу…" : "Авто-наполнить"}
+        </button>
+      </div>
+
+      {docOpen && (
+        <div className="fixed inset-0 z-30 bg-black/30 flex items-start justify-center overflow-y-auto py-10"
+          onClick={() => setDocOpen(false)}>
+          <div className="bg-white rounded-lg border border-ink-line w-full max-w-2xl mx-4 p-4 space-y-2" onClick={e => e.stopPropagation()}>
+            <div className="flex items-baseline justify-between">
+              <h3 className="text-sm font-semibold">Из документа</h3>
+              <button onClick={() => setDocOpen(false)} className="text-ink-mute hover:text-ink text-sm">✕</button>
+            </div>
+            <p className="text-[11px] text-ink-mute">Вставь текст (deep-research отчёт, статья) и URL источника — факты будут привязаны к этой ссылке.</p>
+            <input className="text-xs border border-ink-line rounded px-2 py-1 w-full" placeholder="URL источника * (https://…)" value={pUrl} onChange={e => setPUrl(e.target.value)} />
+            <input className="text-xs border border-ink-line rounded px-2 py-1 w-full" placeholder="название источника (необязательно)" value={pTitle} onChange={e => setPTitle(e.target.value)} />
+            <textarea className="text-xs border border-ink-line rounded px-2 py-1 w-full h-48" placeholder="вставь текст документа *" value={pasted} onChange={e => setPasted(e.target.value)} />
+            <div className="flex gap-2 items-center">
+              <button onClick={submitDoc} disabled={!pasted.trim() || !pUrl.trim()}
+                className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">Извлечь факты</button>
+              <button onClick={() => setDocOpen(false)} className="text-xs text-ink-mute hover:text-ink">отмена</button>
+              {pasted.trim() && !pUrl.trim() && <span className="text-[10px] text-amber-700">нужен URL источника для привязки фактов</span>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {(run.isPending || result || run.isError) && (
         <div className="fixed inset-0 z-30 bg-black/30 flex items-start justify-center overflow-y-auto py-10"
@@ -114,7 +153,7 @@ function Autofill({ clientId, onCommitted }: { clientId: string; onCommitted: ()
             </div>
 
             <RunProgress active={run.isPending} elapsed={elapsed} expected={90}
-              label="Собираю факты: матрица + веб-поиск…" />
+              label="Собираю факты из источников…" />
             {run.isError && <div className="text-sm text-flag-red">Не удалось: {(run.error as Error)?.message}. Попробуй ещё раз.</div>}
 
             {result && !result.available && (
@@ -144,7 +183,7 @@ function Autofill({ clientId, onCommitted }: { clientId: string; onCommitted: ()
                             <input type="checkbox" checked={accepted.has(i)} onChange={() => toggle(i)} className="mt-1" />
                             {p.key && <span className="text-ink-mute shrink-0 min-w-[80px]">{p.key}</span>}
                             <span className="flex-1">{p.value}{p.as_of && <span className="text-[11px] text-ink-mute"> · {p.as_of}</span>}</span>
-                            <span className={`text-[10px] px-1 rounded shrink-0 ${p.origin === "web" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-ink-mute"}`}>{p.origin === "web" ? "веб" : "матрица"}</span>
+                            <span className={`text-[10px] px-1 rounded shrink-0 ${p.origin === "matrix" ? "bg-slate-100 text-ink-mute" : "bg-blue-50 text-blue-700"}`}>{p.origin === "web" ? "веб" : p.origin === "doc" ? "документ" : "матрица"}</span>
                             <a href={p.source_url} target="_blank" rel="noreferrer" className="text-blue-600 shrink-0" title={p.source_title || p.source_url}>↗</a>
                           </li>
                         ))}
@@ -172,17 +211,47 @@ function Autofill({ clientId, onCommitted }: { clientId: string; onCommitted: ()
 
 function CompanyHeader({ company: e, onChanged }: { company: Entity; onChanged: () => void }) {
   const [linkOpen, setLinkOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(e.name);
+  const [role, setRole] = useState(e.role || "");
+  const [note, setNote] = useState(e.note || "");
   const setLinks = useMutation({
     mutationFn: (links: Record<string, string>) => api.patchEntity(e.id, { links }),
     onSuccess: () => { setLinkOpen(false); onChanged(); },
   });
+  const saveHead = useMutation({
+    mutationFn: () => api.patchEntity(e.id, { name: name.trim() || e.name, role: role.trim(), note: note.trim() }),
+    onSuccess: () => { setEditing(false); onChanged(); },
+  });
+  const inp = "text-sm border border-ink-line rounded px-2 py-1";
+
+  if (editing) {
+    return (
+      <div className="bg-white rounded-lg border border-ink-line p-4 space-y-2">
+        <div className="flex gap-2 flex-wrap">
+          <input className={`${inp} w-48`} placeholder="название *" value={name} onChange={ev => setName(ev.target.value)} autoFocus />
+          <input className={`${inp} w-48`} placeholder="роль / одной строкой" value={role} onChange={ev => setRole(ev.target.value)} />
+        </div>
+        <input className={`${inp} w-full`} placeholder="заметка (необязательно)" value={note} onChange={ev => setNote(ev.target.value)} />
+        <div className="flex gap-2 items-center">
+          <button onClick={() => saveHead.mutate()} disabled={saveHead.isPending || !name.trim()}
+            className="text-[11px] px-2 py-1 rounded bg-ink text-white hover:bg-black disabled:bg-slate-300">{saveHead.isPending ? "…" : "сохранить"}</button>
+          <button onClick={() => { setName(e.name); setRole(e.role || ""); setNote(e.note || ""); setEditing(false); }}
+            className="text-[11px] text-ink-mute hover:text-ink">отмена</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white rounded-lg border border-ink-line p-4">
       <div className="flex items-baseline gap-2 flex-wrap">
         <h2 className="text-lg font-semibold">{e.name}</h2>
         {e.role && <span className="text-sm text-ink-mute">· {e.role}</span>}
+        <button onClick={() => setEditing(true)} className="text-ink-mute hover:text-ink text-xs" title="править заголовок">✎</button>
         <span className="ml-auto text-[11px] text-ink-mute">бизнес-профиль · без нарратива</span>
       </div>
+      {e.note && <div className="mt-1 text-xs text-ink-mute">{e.note}</div>}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {Object.entries(e.links || {}).map(([k, url]) => (
           <span key={k} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5">

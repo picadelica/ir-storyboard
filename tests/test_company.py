@@ -65,6 +65,24 @@ def test_autofill_dedupes_existing_card_facts(conn, monkeypatch):
     assert res["stats"]["duplicates"] == 1
 
 
+def test_autofill_from_pasted_document(conn, monkeypatch):
+    """Pasted doc with a URL: facts citing that URL survive (origin=doc); web off."""
+    web_called = {"n": 0}
+    monkeypatch.setattr(llm, "web_search", lambda q, n=5: web_called.__setitem__("n", web_called["n"] + 1) or [])
+    canned = {"proposals": [
+        {"section": "funding", "key": "Series A", "value": "$30M Series A 2025", "source_url": "https://report.example/gonka"},
+        {"section": "history", "key": "x", "value": "fabricated", "source_url": "https://elsewhere.example/y"},
+    ]}
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: json.dumps(canned, ensure_ascii=False))
+    res = company.build_about_proposals(conn, "demo", pasted="Gonka raised a $30M Series A in 2025.",
+                                        pasted_url="https://report.example/gonka", pasted_title="Deep research", use_web=False)
+    assert web_called["n"] == 0  # use_web=False → no search
+    vals = {p["value"]: p for p in res["proposals"]}
+    assert "$30M Series A 2025" in vals and vals["$30M Series A 2025"]["origin"] == "doc"
+    assert "fabricated" not in vals          # URL not the pasted doc → dropped
+    assert res["stats"]["dropped_ungrounded"] == 1
+
+
 def test_autofill_stub_unavailable(conn, monkeypatch):
     _patch_web(monkeypatch, [("x", "https://techcrunch.com/gonka", "y")])
     monkeypatch.setattr(llm, "generate", lambda *a, **k: "")

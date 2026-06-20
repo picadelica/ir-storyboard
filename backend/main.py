@@ -2184,16 +2184,27 @@ def llm_job_status(job_id: str):
 
 # ---------- company About: auto-fill (proposals → analyst review → commit) ----------
 
-def _compute_about_proposals(conn, client_id: str) -> dict:
-    return company.build_about_proposals(conn, client_id)
+class AboutAutofillIn(BaseModel):
+    pasted: str = ""
+    pasted_url: str = ""
+    pasted_title: str = ""
+    use_web: bool = True
 
 
 @app.post("/api/clients/{client_id}/company/autofill/start", response_model=LLMJobOut)
-def start_company_autofill(client_id: str):
-    """Kick off the source-grounded About auto-fill (reuse matrix facts + web
-    search) as a background job; poll /jobs/{id}. Returns proposals only —
-    nothing is written until the analyst commits."""
-    return LLMJobOut(job_id=_start_llm_job(_compute_about_proposals, client_id), status="processing")
+def start_company_autofill(client_id: str, body: Optional[AboutAutofillIn] = None):
+    """Kick off the source-grounded About auto-fill as a background job; poll
+    /jobs/{id}. Evidence = collected facts + web search, plus an optional pasted
+    document. Returns proposals only — nothing is written until the analyst
+    commits."""
+    b = body or AboutAutofillIn()
+
+    def fn(conn, cid):
+        return company.build_about_proposals(
+            conn, cid, pasted=b.pasted, pasted_url=b.pasted_url,
+            pasted_title=b.pasted_title, use_web=b.use_web)
+
+    return LLMJobOut(job_id=_start_llm_job(fn, client_id), status="processing")
 
 
 class AboutProposalIn(BaseModel):

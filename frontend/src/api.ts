@@ -37,8 +37,10 @@ interface JobOut<T> {
 // Start a background LLM job and poll its short status endpoint until done.
 // Each poll is a fast request, so no single connection stays idle long enough
 // for a NAT/proxy to drop it — unlike a 1–2 min synchronous call.
-async function runJob<T>(startPath: string, intervalMs = 2500, timeoutMs = 600_000): Promise<T> {
-  const { job_id } = await call<JobOut<T>>(startPath, { method: "POST" });
+async function runJob<T>(startPath: string, body?: unknown, intervalMs = 2500, timeoutMs = 600_000): Promise<T> {
+  const init: RequestInit = { method: "POST" };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  const { job_id } = await call<JobOut<T>>(startPath, init);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, intervalMs));
@@ -360,8 +362,8 @@ export const api = {
     call(`/entity-facts/${factId}`, { method: "DELETE" }),
 
   // company About auto-fill (background job → proposals → commit accepted)
-  autofillCompany: (clientId: string): Promise<AboutAutofillResult> =>
-    runJob<AboutAutofillResult>(`/clients/${clientId}/company/autofill/start`),
+  autofillCompany: (clientId: string, opts?: { pasted?: string; pasted_url?: string; pasted_title?: string; use_web?: boolean }): Promise<AboutAutofillResult> =>
+    runJob<AboutAutofillResult>(`/clients/${clientId}/company/autofill/start`, opts ?? {}),
   commitCompanyFacts: (clientId: string, proposals: AboutProposal[]): Promise<{ committed: number }> =>
     call(`/clients/${clientId}/company/autofill/commit`, { method: "POST", body: JSON.stringify({ proposals }) }),
 };
