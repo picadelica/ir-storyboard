@@ -1027,14 +1027,13 @@ class ClaimIn(BaseModel):
     query: str = ""
 
 
-@app.post("/api/clients/{client_id}/audit", response_model=AuditOut)
-def run_audit(client_id: str, conn=Depends(get_conn)):
-    """Skeptical entity-conflation audit over the client's research/document facts.
-    Applies the verdict (suspect/refuted) onto each flagged fact so the matrix and
-    triage screen show it. Does NOT reject anything — that's a human step."""
+def _compute_audit(conn, client_id: str) -> dict:
+    """Run the entity-conflation audit, apply verdicts onto flagged facts, and
+    bootstrap a draft identity anchor. Returns a plain JSON-serializable dict so
+    it can be served both synchronously and from a background job."""
     res = verification.audit_client(conn, client_id)
     applied = 0
-    out_facts: List[AuditFactOut] = []
+    out_facts: List[dict] = []
     for f in res.get("facts", []):
         row = matrix.get_fact(conn, f["id"])
         if row is None:
@@ -1042,15 +1041,22 @@ def run_audit(client_id: str, conn=Depends(get_conn)):
         matrix.set_fact_verification(
             conn, f["id"], verification=f["verdict"], note=f["reason"], entity=f["entity"])
         applied += 1
-        out_facts.append(AuditFactOut(
-            id=f["id"], verdict=f["verdict"], entity=f["entity"], reason=f["reason"],
-            subsection_id=row["subsection_id"], text=row["text"]))
-    # bootstrap a draft identity anchor (company/founders/decoys) for analyst review
+        out_facts.append({"id": f["id"], "verdict": f["verdict"], "entity": f["entity"],
+                          "reason": f["reason"], "subsection_id": row["subsection_id"],
+                          "text": row["text"]})
     if res.get("canonical"):
         matrix.bootstrap_entities(conn, client_id, res["canonical"])
-    return AuditOut(available=res.get("available", False), canonical=res.get("canonical", {}),
-                    summary=res.get("summary", ""), facts=out_facts,
-                    n_facts=res.get("n_facts", 0), applied=applied)
+    return {"available": res.get("available", False), "canonical": res.get("canonical", {}),
+            "summary": res.get("summary", ""), "facts": out_facts,
+            "n_facts": res.get("n_facts", 0), "applied": applied}
+
+
+@app.post("/api/clients/{client_id}/audit", response_model=AuditOut)
+def run_audit(client_id: str, conn=Depends(get_conn)):
+    """Skeptical entity-conflation audit (synchronous). Prefer the async
+    /audit/start + /jobs/{id} pair for the UI — a long synchronous request can
+    be cut by idle-connection timeouts in the network path."""
+    return AuditOut(**_compute_audit(conn, client_id))
 
 
 @app.post("/api/clients/{client_id}/verify-claims")
@@ -1134,11 +1140,14 @@ class MergeIn(BaseModel):
     merge_ids: List[int]
 
 
+def _compute_dups(conn, client_id: str) -> dict:
+    return verification.find_duplicate_groups(conn, client_id)
+
+
 @app.post("/api/clients/{client_id}/find-duplicates", response_model=DuplicatesOut)
 def find_duplicates(client_id: str, conn=Depends(get_conn)):
-    res = verification.find_duplicate_groups(conn, client_id)
-    return DuplicatesOut(available=res.get("available", False),
-                         groups=[DupGroupOut(**g) for g in res.get("groups", [])])
+    """Synchronous; prefer /find-duplicates/start + /jobs/{id} for the UI."""
+    return DuplicatesOut(**_compute_dups(conn, client_id))
 
 
 @app.post("/api/facts/merge", response_model=FactOut)
@@ -1186,10 +1195,15 @@ class InterviewGuideOut(BaseModel):
     n_facts: int = 0
 
 
+def _compute_guide(conn, client_id: str) -> dict:
+    return interview.build_guide(conn, client_id)
+
+
 @app.post("/api/clients/{client_id}/interview-guide", response_model=InterviewGuideOut)
 def interview_guide(client_id: str, conn=Depends(get_conn)):
-    """Grounded, per-founder interview guide from the verified matrix."""
-    res = interview.build_guide(conn, client_id)
+    """Grounded interview guide (synchronous). Prefer /interview-guide/start +
+    /jobs/{id} for the UI — the build is a long single LLM call."""
+    res = _compute_guide(conn, client_id)
     return InterviewGuideOut(
         available=res.get("available", False),
         dossier=res.get("dossier", ""),
@@ -2091,6 +2105,76 @@ def download_llm_report_file(
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{artifact_path.name}"'},
     )
+
+
+# ── Generic async LLM-job store ──────────────────────────────────────────────
+# Audit / interview-guide / dedup are slow single LLM calls (30s–2min). A long
+# synchronous request gets cut by idle-connection timeouts in the network path
+# (NAT/firewall drop a connection with no bytes flowing for ~60s → the browser
+# sees "Failed to fetch"). So run the work in a background thread and let the
+# client poll a short status endpoint.
+import threading as _threading
+
+_llm_jobs: dict[str, dict] = {}   # job_id → {status, result, error}
+_llm_jobs_lock = _threading.Lock()
+
+
+def _llm_job_run(job_id: str, fn, client_id: str) -> None:
+    """Background thread: open an own DB connection, run fn(conn, client_id),
+    store the resulting dict. Each job needs its own sqlite connection — the
+    request's connection cannot cross threads."""
+    from ir_storyboard import db as _db
+    conn = _db.connect(_db.DEFAULT_DB_PATH)
+    try:
+        _db.init_schema(conn)
+        result = fn(conn, client_id)
+        with _llm_jobs_lock:
+            _llm_jobs[job_id] = {"status": "done", "result": result, "error": None}
+    except Exception as exc:  # noqa: BLE001 — surfaced to the client as job.error
+        with _llm_jobs_lock:
+            _llm_jobs[job_id] = {"status": "error", "result": None, "error": str(exc)}
+    finally:
+        conn.close()
+
+
+def _start_llm_job(fn, client_id: str) -> str:
+    import uuid as _uuid
+    job_id = str(_uuid.uuid4())
+    with _llm_jobs_lock:
+        _llm_jobs[job_id] = {"status": "processing", "result": None, "error": None}
+    _threading.Thread(target=_llm_job_run, args=(job_id, fn, client_id), daemon=True).start()
+    return job_id
+
+
+class LLMJobOut(BaseModel):
+    job_id: str
+    status: str                       # processing | done | error
+    result: Optional[dict] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/clients/{client_id}/audit/start", response_model=LLMJobOut)
+def start_audit(client_id: str):
+    return LLMJobOut(job_id=_start_llm_job(_compute_audit, client_id), status="processing")
+
+
+@app.post("/api/clients/{client_id}/find-duplicates/start", response_model=LLMJobOut)
+def start_find_duplicates(client_id: str):
+    return LLMJobOut(job_id=_start_llm_job(_compute_dups, client_id), status="processing")
+
+
+@app.post("/api/clients/{client_id}/interview-guide/start", response_model=LLMJobOut)
+def start_interview_guide(client_id: str):
+    return LLMJobOut(job_id=_start_llm_job(_compute_guide, client_id), status="processing")
+
+
+@app.get("/api/jobs/{job_id}", response_model=LLMJobOut)
+def llm_job_status(job_id: str):
+    with _llm_jobs_lock:
+        job = _llm_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+    return LLMJobOut(job_id=job_id, status=job["status"], result=job["result"], error=job["error"])
 
 
 # ── YouTube Ingest — async job store ─────────────────────────────────────────

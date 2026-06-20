@@ -78,6 +78,38 @@ def test_audit_apply_then_reject_restore(ctx, monkeypatch):
     assert green_count() == 2
 
 
+def test_audit_async_job_flow(ctx, tmp_path, monkeypatch):
+    """Async start → poll /jobs/{id} → done with the same result shape."""
+    import time
+    client, fid, _clean = ctx
+    canned = {"canonical": {"company": "RealCo", "founders": ["Liberman"]},
+              "summary": "x", "facts": [
+                  {"id": fid, "verdict": "suspect", "entity": "Khachuyan", "reason": "иное лицо"}]}
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: json.dumps(canned, ensure_ascii=False))
+    # the background thread opens its own connection from DEFAULT_DB_PATH — point
+    # it at the same db the fixture seeded
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "verif_api.db")
+
+    start = client.post("/api/clients/co/audit/start")
+    assert start.status_code == 200, start.text
+    job_id = start.json()["job_id"]
+    assert start.json()["status"] == "processing"
+
+    result = None
+    for _ in range(100):  # ~5s budget
+        j = client.get(f"/api/jobs/{job_id}").json()
+        if j["status"] == "done":
+            result = j["result"]
+            break
+        assert j["status"] != "error", j.get("error")
+        time.sleep(0.05)
+    assert result is not None, "job did not finish"
+    assert result["available"] and result["applied"] == 1
+    assert result["facts"][0]["id"] == fid
+
+    assert client.get("/api/jobs/does-not-exist").status_code == 404
+
+
 def test_set_verification_manual(ctx):
     client, fid, _ = ctx
     r = client.post(f"/api/facts/{fid}/verification",

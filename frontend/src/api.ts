@@ -26,6 +26,28 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+interface JobOut<T> {
+  job_id: string;
+  status: "processing" | "done" | "error";
+  result: T | null;
+  error: string | null;
+}
+
+// Start a background LLM job and poll its short status endpoint until done.
+// Each poll is a fast request, so no single connection stays idle long enough
+// for a NAT/proxy to drop it — unlike a 1–2 min synchronous call.
+async function runJob<T>(startPath: string, intervalMs = 2500, timeoutMs = 600_000): Promise<T> {
+  const { job_id } = await call<JobOut<T>>(startPath, { method: "POST" });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, intervalMs));
+    const job = await call<JobOut<T>>(`/jobs/${job_id}`);
+    if (job.status === "done") return job.result as T;
+    if (job.status === "error") throw new Error(job.error || "задача завершилась с ошибкой");
+  }
+  throw new Error("истекло время ожидания");
+}
+
 export const api = {
   health: () => call<{ ok: boolean }>("/health"),
   layers: () => call<Layer[]>("/layers"),
@@ -303,7 +325,7 @@ export const api = {
 
   // fact trust / verification
   runAudit: (clientId: string): Promise<AuditResult> =>
-    call<AuditResult>(`/clients/${clientId}/audit`, { method: "POST" }),
+    runJob<AuditResult>(`/clients/${clientId}/audit/start`),
   setVerification: (factId: number, body: { verification: string; note?: string; entity?: string }):
     Promise<Fact> =>
     call<Fact>(`/facts/${factId}/verification`, { method: "POST", body: JSON.stringify(body) }),
@@ -316,11 +338,11 @@ export const api = {
   promoteFact: (factId: number): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/promote`, { method: "POST" }),
   findDuplicates: (clientId: string): Promise<DuplicatesResult> =>
-    call<DuplicatesResult>(`/clients/${clientId}/find-duplicates`, { method: "POST" }),
+    runJob<DuplicatesResult>(`/clients/${clientId}/find-duplicates/start`),
   mergeFacts: (keepId: number, mergeIds: number[]): Promise<Fact> =>
     call<Fact>(`/facts/merge`, { method: "POST", body: JSON.stringify({ keep_id: keepId, merge_ids: mergeIds }) }),
   interviewGuide: (clientId: string): Promise<InterviewGuide> =>
-    call<InterviewGuide>(`/clients/${clientId}/interview-guide`, { method: "POST" }),
+    runJob<InterviewGuide>(`/clients/${clientId}/interview-guide/start`),
 
   // identity anchor
   entities: (clientId: string): Promise<Entity[]> =>

@@ -46,7 +46,7 @@ export default function InterviewView({ clientId, onJumpToCell }: Props) {
         </button>
       </div>
 
-      <RunProgress active={gen.isPending} elapsed={elapsed} label="Читаю матрицу и собираю гайд…" />
+      <RunProgress active={gen.isPending} elapsed={elapsed} label="Читаю матрицу и собираю гайд…" expected={100} />
 
       {gen.isError && (
         <div className="bg-flag-red-bg border border-flag-red/40 rounded p-3 text-sm text-flag-red">
