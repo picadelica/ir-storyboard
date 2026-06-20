@@ -6,10 +6,20 @@
 
 **Последнее обновление:** 2026-06-18
 **Ветка:** `feat/v2` (запушена)
-**HEAD:** `435eec5 feat(verify): async jobs for audit/guide/dedup — poll instead of long sync request`
+**HEAD:** `f43ad29 refactor(llm): universal extract_json/generate_json — one hardened JSON path`
 **Прод:** 216.57.108.107, перекатан 2026-06-20 (fact-trust Фазы 1+2+3 + грунтованный гайд
-интервью + дисциплина грунтования + надёжный парсер + ретрай + асинхронные job-и для
-аудита/гайда/дублей, деплой зелёный). Тесты: `pytest -m "not network"` → **224 passed**.
+интервью + дисциплина грунтования + надёжный парсер + ретрай + асинхронные job-и + единый
+LLM-JSON примитив, деплой зелёный). Тесты: `pytest -m "not network"` → **231 passed**.
+
+**Единый LLM-JSON примитив (2026-06-20):** «бились каждый раз», потому что 6 мест в `llm.py` +
+verification + interview парсили JSON одинаково слабо (срез ``` только если ответ С НЕЁ
+начинается → ломается на прозе-преамбуле). Сведено в два примитива в `llm.py`:
+`extract_json(raw, repair=False)` (весь текст → fenced-блок где угодно → широкий `{...}`/`[...]`
+спан → опц. ремонт обрезанного по max_tokens; отдаёт dict|list|None) и `generate_json(...)`
+(generate + extract_json + ретрай на пустой/битый). Все 6 экстракторов (report/full-doc/
+transcript/youtube-summary/research) переведены; `verification._parse_json/_generate_json` и
+interview — тонкие обёртки над примитивом. Это ЕДИНСТВЕННОЕ место, где теперь чинить парсинг
+LLM-JSON. Проверено на проде: audit 28с/12 склеек, guide 120с/5 дуг — оба через примитив.
 
 **Асинхронные LLM-задачи (2026-06-20) — фикс «Failed to fetch» на гайде:** `build_guide` идёт
 50–116с; долгий синхронный запрос рвёт NAT/файрвол по простою соединения (~60с без байтов →
