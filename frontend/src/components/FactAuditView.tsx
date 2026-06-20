@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { readLS, patchLS } from "../persist";
 import { RunProgress, useElapsed } from "./RunProgress";
-import type { AuditResult, Entity, ReviewFact, DuplicateGroup } from "../types";
+import type { AuditResult, Entity, EntityFact, ReviewFact, DuplicateGroup } from "../types";
 
 interface Props {
   clientId: string;
@@ -85,15 +85,6 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     mutationFn: (id: number) => api.rejectFact(id),
     onSuccess: (_d, id) => { dropFromAudit(id); invalidate(); },
   });
-  const confirmEntity = useMutation({
-    mutationFn: (id: number) => api.patchEntity(id, { confirmed: true }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["entities", clientId] }),
-  });
-  const removeEntity = useMutation({
-    mutationFn: (id: number) => api.deleteEntity(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["entities", clientId] }),
-  });
-
   const pending = audit?.facts ?? [];
   const byEntity = useMemo(() => {
     const m: Record<string, number[]> = {};
@@ -190,11 +181,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
       )}
 
       {/* identity anchor */}
-      <IdentityAnchor
-        entities={entities.data ?? []}
-        onConfirm={(id) => confirmEntity.mutate(id)}
-        onRemove={(id) => removeEntity.mutate(id)}
-      />
+      <IdentityAnchor clientId={clientId} entities={entities.data ?? []} />
 
       {(review.data?.length ?? 0) > 0 && (
         <section className="bg-white rounded-lg border border-amber-300 p-4 space-y-2">
@@ -290,62 +277,196 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   );
 }
 
-function IdentityAnchor({ entities, onConfirm, onRemove }: {
-  entities: Entity[]; onConfirm: (id: number) => void; onRemove: (id: number) => void;
-}) {
-  const KIND_LABEL: Record<string, string> = { company: "компания", founder: "фаундер", decoy: "двойник" };
+const KIND_LABEL: Record<string, string> = { company: "компания", founder: "фаундер", decoy: "двойник" };
+
+function IdentityAnchor({ clientId, entities }: { clientId: string; entities: Entity[] }) {
+  const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const inval = () => qc.invalidateQueries({ queryKey: ["entities", clientId] });
+  const create = useMutation({
+    mutationFn: (body: { kind: string; name: string; role: string }) => api.createEntity(clientId, body),
+    onSuccess: () => { setAdding(false); inval(); },
+  });
   return (
     <section className="bg-white rounded-lg border border-ink-line p-4">
       <div className="flex items-baseline justify-between mb-3">
         <h3 className="text-sm font-semibold">Якорь идентичности</h3>
         <span className="text-[11px] text-ink-mute">проверенные факты, вне матрицы</span>
       </div>
-      {entities.length === 0 ? (
-        <div className="text-xs text-ink-mute italic">
-          Пусто. Запусти проверку — аудит предложит компанию, фаундеров и двойников.
+      {entities.length === 0 && !adding ? (
+        <div className="text-xs text-ink-mute italic mb-2">
+          Пусто. Запусти проверку — аудит предложит компанию, фаундеров и двойников. Или добавь карточку вручную.
         </div>
       ) : (
         <div className="space-y-2">
-          {entities.map(e => (
-            <div key={e.id} className={`rounded border p-3 ${e.kind === "decoy" ? "bg-amber-50/60 border-amber-200" : "border-ink-line"}`}>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] uppercase tracking-wide text-ink-mute font-mono">{KIND_LABEL[e.kind] ?? e.kind}</span>
-                <span className="text-sm font-medium">{e.name}</span>
-                {e.role && <span className="text-xs text-ink-mute">· {e.role}</span>}
-                {!e.confirmed && <span className="text-[10px] text-amber-700 bg-amber-100 rounded px-1.5">черновик</span>}
-                <div className="ml-auto flex gap-1.5">
-                  {!e.confirmed && (
-                    <button onClick={() => onConfirm(e.id)}
-                      className="text-[11px] px-2 py-0.5 rounded border border-ink-line hover:bg-slate-50">подтвердить</button>
-                  )}
-                  <button onClick={() => onRemove(e.id)}
-                    className="text-[11px] px-1.5 py-0.5 text-red-600 hover:text-red-800">удалить</button>
-                </div>
-              </div>
-              {Object.keys(e.links || {}).length > 0 && (
-                <div className="mt-1.5 flex flex-wrap gap-2">
-                  {Object.entries(e.links).map(([k, url]) => (
-                    <a key={k} href={url} target="_blank" rel="noreferrer"
-                      className="text-[11px] text-blue-600 hover:underline border border-ink-line rounded px-1.5">{k}</a>
-                  ))}
-                </div>
-              )}
-              {e.note && <div className="mt-1 text-xs text-ink-mute">{e.note}</div>}
-              {e.facts.length > 0 && (
-                <ul className="mt-2 space-y-0.5">
-                  {e.facts.map(f => (
-                    <li key={f.id} className="text-xs flex gap-2">
-                      {f.key && <span className="text-ink-mute">{f.key}:</span>}
-                      <span className="flex-1">{f.value}</span>
-                      {f.source_url && <a href={f.source_url} target="_blank" rel="noreferrer" className="text-blue-600">↗</a>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
+          {entities.map(e => <EntityCard key={e.id} entity={e} onChanged={inval} />)}
         </div>
       )}
+
+      {adding ? (
+        <AddEntityForm onCancel={() => setAdding(false)} onSubmit={(b) => create.mutate(b)} busy={create.isPending} />
+      ) : (
+        <button onClick={() => setAdding(true)}
+          className="mt-3 text-[11px] px-2 py-1 rounded border border-dashed border-ink-line text-ink-mute hover:bg-slate-50">
+          + добавить карточку
+        </button>
+      )}
     </section>
+  );
+}
+
+function EntityCard({ entity: e, onChanged }: { entity: Entity; onChanged: () => void }) {
+  const [factOpen, setFactOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const confirm = useMutation({ mutationFn: () => api.patchEntity(e.id, { confirmed: true }), onSuccess: onChanged });
+  const remove = useMutation({ mutationFn: () => api.deleteEntity(e.id), onSuccess: onChanged });
+  const addFact = useMutation({
+    mutationFn: (body: Partial<EntityFact>) => api.addEntityFact(e.id, body),
+    onSuccess: () => { setFactOpen(false); onChanged(); },
+  });
+  const delFact = useMutation({ mutationFn: (fid: number) => api.deleteEntityFact(fid), onSuccess: onChanged });
+  const setLinks = useMutation({
+    mutationFn: (links: Record<string, string>) => api.patchEntity(e.id, { links }),
+    onSuccess: () => { setLinkOpen(false); onChanged(); },
+  });
+
+  return (
+    <div className={`rounded border p-3 ${e.kind === "decoy" ? "bg-amber-50/60 border-amber-200" : "border-ink-line"}`}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] uppercase tracking-wide text-ink-mute font-mono">{KIND_LABEL[e.kind] ?? e.kind}</span>
+        <span className="text-sm font-medium">{e.name}</span>
+        {e.role && <span className="text-xs text-ink-mute">· {e.role}</span>}
+        {!e.confirmed && <span className="text-[10px] text-amber-700 bg-amber-100 rounded px-1.5">черновик</span>}
+        <div className="ml-auto flex gap-1.5">
+          {!e.confirmed && (
+            <button onClick={() => confirm.mutate()}
+              className="text-[11px] px-2 py-0.5 rounded border border-ink-line hover:bg-slate-50">подтвердить</button>
+          )}
+          <button onClick={() => remove.mutate()}
+            className="text-[11px] px-1.5 py-0.5 text-red-600 hover:text-red-800">удалить</button>
+        </div>
+      </div>
+
+      {/* links (Wiki / X / LinkedIn …) */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        {Object.entries(e.links || {}).map(([k, url]) => (
+          <span key={k} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5">
+            <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{k}</a>
+            <button onClick={() => { const { [k]: _drop, ...rest } = e.links || {}; setLinks.mutate(rest); }}
+              className="text-ink-mute hover:text-red-600">×</button>
+          </span>
+        ))}
+        <button onClick={() => setLinkOpen(v => !v)} className="text-[11px] text-ink-mute hover:text-ink">+ ссылка</button>
+      </div>
+      {linkOpen && (
+        <AddLinkForm busy={setLinks.isPending}
+          onSubmit={(label, url) => setLinks.mutate({ ...(e.links || {}), [label]: url })}
+          onCancel={() => setLinkOpen(false)} />
+      )}
+
+      {e.note && <div className="mt-1 text-xs text-ink-mute">{e.note}</div>}
+
+      {/* facts */}
+      {e.facts.length > 0 && (
+        <ul className="mt-2 space-y-0.5">
+          {e.facts.map(f => (
+            <li key={f.id} className="text-xs flex gap-2 group">
+              {f.key && <span className="text-ink-mute shrink-0">{f.key}:</span>}
+              <span className="flex-1">{f.value}</span>
+              {f.source_url && <a href={f.source_url} target="_blank" rel="noreferrer" className="text-blue-600" title={f.source_title || f.source_url}>↗</a>}
+              <button onClick={() => delFact.mutate(f.id)}
+                className="text-ink-mute hover:text-red-600 opacity-0 group-hover:opacity-100">×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {factOpen ? (
+        <AddFactForm busy={addFact.isPending}
+          onSubmit={(body) => addFact.mutate(body)} onCancel={() => setFactOpen(false)} />
+      ) : (
+        <button onClick={() => setFactOpen(true)}
+          className="mt-2 text-[11px] px-2 py-0.5 rounded border border-dashed border-ink-line text-ink-mute hover:bg-slate-50">
+          + факт
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AddFactForm({ onSubmit, onCancel, busy }: {
+  onSubmit: (b: Partial<EntityFact>) => void; onCancel: () => void; busy: boolean;
+}) {
+  const [key, setKey] = useState("");
+  const [value, setValue] = useState("");
+  const [url, setUrl] = useState("");
+  const [title, setTitle] = useState("");
+  const submit = () => {
+    if (!value.trim()) return;
+    onSubmit({ key: key.trim(), value: value.trim(), source_url: url.trim(), source_title: title.trim(), verified: !!url.trim() });
+  };
+  const inp = "text-xs border border-ink-line rounded px-2 py-1 w-full";
+  return (
+    <div className="mt-2 p-2 rounded bg-slate-50 border border-ink-line space-y-1.5">
+      <div className="flex gap-1.5">
+        <input className={`${inp} w-28`} placeholder="ключ (напр. Основана)" value={key} onChange={e => setKey(e.target.value)} />
+        <input className={inp} placeholder="значение факта *" value={value} onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") submit(); }} autoFocus />
+      </div>
+      <div className="flex gap-1.5">
+        <input className={inp} placeholder="ссылка-источник (Wiki/LinkedIn/X)" value={url} onChange={e => setUrl(e.target.value)} />
+        <input className={`${inp} w-32`} placeholder="название источника" value={title} onChange={e => setTitle(e.target.value)} />
+      </div>
+      <div className="flex gap-2 items-center">
+        <button onClick={submit} disabled={busy || !value.trim()}
+          className="text-[11px] px-2 py-1 rounded bg-ink text-white hover:bg-black disabled:bg-slate-300">{busy ? "…" : "добавить"}</button>
+        <button onClick={onCancel} className="text-[11px] text-ink-mute hover:text-ink">отмена</button>
+        {!url.trim() && value.trim() && <span className="text-[10px] text-amber-700">без ссылки факт пометится непроверенным</span>}
+      </div>
+    </div>
+  );
+}
+
+function AddLinkForm({ onSubmit, onCancel, busy }: {
+  onSubmit: (label: string, url: string) => void; onCancel: () => void; busy: boolean;
+}) {
+  const [label, setLabel] = useState("");
+  const [url, setUrl] = useState("");
+  const submit = () => { if (label.trim() && url.trim()) onSubmit(label.trim(), url.trim()); };
+  const inp = "text-xs border border-ink-line rounded px-2 py-1";
+  return (
+    <div className="mt-1.5 flex gap-1.5 items-center">
+      <input className={`${inp} w-24`} placeholder="Wiki / X / …" value={label} onChange={e => setLabel(e.target.value)} autoFocus />
+      <input className={`${inp} flex-1`} placeholder="https://…" value={url} onChange={e => setUrl(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") submit(); }} />
+      <button onClick={submit} disabled={busy || !label.trim() || !url.trim()}
+        className="text-[11px] px-2 py-1 rounded bg-ink text-white hover:bg-black disabled:bg-slate-300">ок</button>
+      <button onClick={onCancel} className="text-[11px] text-ink-mute hover:text-ink">×</button>
+    </div>
+  );
+}
+
+function AddEntityForm({ onSubmit, onCancel, busy }: {
+  onSubmit: (b: { kind: string; name: string; role: string }) => void; onCancel: () => void; busy: boolean;
+}) {
+  const [kind, setKind] = useState("company");
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("");
+  const submit = () => { if (name.trim()) onSubmit({ kind, name: name.trim(), role: role.trim() }); };
+  const inp = "text-xs border border-ink-line rounded px-2 py-1";
+  return (
+    <div className="mt-3 p-2 rounded bg-slate-50 border border-ink-line flex flex-wrap gap-1.5 items-center">
+      <select className={inp} value={kind} onChange={e => setKind(e.target.value)}>
+        <option value="company">компания</option>
+        <option value="founder">фаундер</option>
+        <option value="decoy">двойник</option>
+      </select>
+      <input className={`${inp} w-40`} placeholder="название *" value={name} onChange={e => setName(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") submit(); }} autoFocus />
+      <input className={`${inp} w-40`} placeholder="роль (напр. CEO)" value={role} onChange={e => setRole(e.target.value)} />
+      <button onClick={submit} disabled={busy || !name.trim()}
+        className="text-[11px] px-2 py-1 rounded bg-ink text-white hover:bg-black disabled:bg-slate-300">{busy ? "…" : "создать"}</button>
+      <button onClick={onCancel} className="text-[11px] text-ink-mute hover:text-ink">отмена</button>
+    </div>
   );
 }
