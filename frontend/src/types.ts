@@ -425,6 +425,22 @@ export interface EntityFact {
   section?: string;   // profile | sites | funding | history | product | metrics | ""
 }
 
+export interface AboutProposal {
+  section: string;
+  key: string;
+  value: string;
+  source_url: string;
+  source_title: string;
+  as_of?: string | null;
+  origin: string;   // matrix | web
+}
+
+export interface AboutAutofillResult {
+  available: boolean;
+  proposals: AboutProposal[];
+  stats: { from_matrix: number; from_web: number; dropped_ungrounded: number; duplicates: number };
+}
+
 export interface Entity {
   id: number;
   kind: string;                 // company | founder | decoy

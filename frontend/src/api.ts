@@ -3,6 +3,7 @@ import type {
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
   AuditResult, Entity, EntityFact, ReviewFact, DuplicatesResult, InterviewGuide,
+  AboutProposal, AboutAutofillResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
@@ -357,4 +358,10 @@ export const api = {
     call<EntityFact>(`/entities/${entityId}/facts`, { method: "POST", body: JSON.stringify(body) }),
   deleteEntityFact: (factId: number): Promise<{ ok: boolean }> =>
     call(`/entity-facts/${factId}`, { method: "DELETE" }),
+
+  // company About auto-fill (background job → proposals → commit accepted)
+  autofillCompany: (clientId: string): Promise<AboutAutofillResult> =>
+    runJob<AboutAutofillResult>(`/clients/${clientId}/company/autofill/start`),
+  commitCompanyFacts: (clientId: string, proposals: AboutProposal[]): Promise<{ committed: number }> =>
+    call(`/clients/${clientId}/company/autofill/commit`, { method: "POST", body: JSON.stringify({ proposals }) }),
 };

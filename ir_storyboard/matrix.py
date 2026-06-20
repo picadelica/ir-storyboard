@@ -378,6 +378,9 @@ def entities_for_client(conn: sqlite3.Connection, client_id: str) -> List[dict]:
         )]
         for ef in d["facts"]:
             ef["verified"] = bool(ef["verified"])
+            # as_of column has DATE (NUMERIC) affinity — SQLite coerces a bare
+            # year like "2024" to int 2024; normalize back to str for the API
+            ef["as_of"] = None if ef["as_of"] is None else str(ef["as_of"])
         out.append(d)
     return out
 

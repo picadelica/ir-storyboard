@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Entity, EntityFact, Client } from "../types";
+import { RunProgress, useElapsed } from "./RunProgress";
+import type { Entity, EntityFact, Client, AboutProposal, AboutAutofillResult } from "../types";
 
 interface Props {
   clientId: string;
@@ -54,6 +55,10 @@ export default function CompanyAbout({ clientId }: Props) {
 
   return (
     <div className="p-5 max-w-3xl space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-ink-mute">Голые бизнес-факты со ссылками. Без нарратива.</p>
+        <Autofill clientId={clientId} onCommitted={inval} />
+      </div>
       <CompanyHeader company={company} onChanged={inval} />
       {SECTIONS.map(s => (
         <SectionBlock key={s.id} section={s} entityId={company.id} facts={bySection(s.id)} onChanged={inval} />
@@ -63,6 +68,105 @@ export default function CompanyAbout({ clientId }: Props) {
           entityId={company.id} facts={ungrouped} onChanged={inval} />
       )}
     </div>
+  );
+}
+
+const SECTION_LABEL: Record<string, string> = {
+  profile: "Профиль", sites: "Сайты и каналы", funding: "Финансирование",
+  history: "История / майлстоны", product: "Продукт и рынок", metrics: "Метрики",
+};
+
+// Source-grounded auto-fill: a background job proposes business facts (from the
+// client's collected facts + web search), the analyst accepts what to keep, only
+// then it lands. Every proposal carries a real source link — verify before accept.
+function Autofill({ clientId, onCommitted }: { clientId: string; onCommitted: () => void }) {
+  const [result, setResult] = useState<AboutAutofillResult | null>(null);
+  const [accepted, setAccepted] = useState<Set<number>>(new Set());
+  const run = useMutation({
+    mutationFn: () => api.autofillCompany(clientId),
+    onSuccess: (r) => { setResult(r); setAccepted(new Set(r.proposals.map((_, i) => i))); },
+  });
+  const elapsed = useElapsed(run.isPending);
+  const commit = useMutation({
+    mutationFn: (picked: AboutProposal[]) => api.commitCompanyFacts(clientId, picked),
+    onSuccess: () => { setResult(null); setAccepted(new Set()); onCommitted(); },
+  });
+
+  const proposals = result?.proposals ?? [];
+  const bySec: Record<string, { p: AboutProposal; i: number }[]> = {};
+  proposals.forEach((p, i) => (bySec[p.section] ??= []).push({ p, i }));
+  const toggle = (i: number) => setAccepted(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
+
+  return (
+    <>
+      <button onClick={() => run.mutate()} disabled={run.isPending}
+        className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300 shrink-0">
+        {run.isPending ? "Ищу…" : "Авто-наполнить"}
+      </button>
+
+      {(run.isPending || result || run.isError) && (
+        <div className="fixed inset-0 z-30 bg-black/30 flex items-start justify-center overflow-y-auto py-10"
+          onClick={() => { if (!run.isPending && !commit.isPending) { setResult(null); run.reset(); } }}>
+          <div className="bg-white rounded-lg border border-ink-line w-full max-w-2xl mx-4 p-4 space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-baseline justify-between">
+              <h3 className="text-sm font-semibold">Авто-наполнение — предложения</h3>
+              <button onClick={() => { setResult(null); run.reset(); }} className="text-ink-mute hover:text-ink text-sm">✕</button>
+            </div>
+
+            <RunProgress active={run.isPending} elapsed={elapsed} expected={90}
+              label="Собираю факты: матрица + веб-поиск…" />
+            {run.isError && <div className="text-sm text-flag-red">Не удалось: {(run.error as Error)?.message}. Попробуй ещё раз.</div>}
+
+            {result && !result.available && (
+              <div className="text-sm text-ink-mute">Верификатор не ответил (перегруз или нет ключа). Попробуй ещё раз.</div>
+            )}
+            {result?.available && proposals.length === 0 && (
+              <div className="text-sm text-ink-mute">
+                Нечего предложить — нет фактов с источниками для этой компании.
+                {result.stats.dropped_ungrounded > 0 && ` Отброшено без источника: ${result.stats.dropped_ungrounded}.`}
+              </div>
+            )}
+
+            {result?.available && proposals.length > 0 && (
+              <>
+                <p className="text-[11px] text-ink-mute">
+                  Из матрицы: {result.stats.from_matrix} · веб-хитов: {result.stats.from_web}
+                  {result.stats.dropped_ungrounded > 0 && ` · отброшено без источника: ${result.stats.dropped_ungrounded}`}.
+                  Отметь, что внести — каждый факт со ссылкой, проверь перед принятием.
+                </p>
+                <div className="max-h-[55vh] overflow-y-auto space-y-3">
+                  {Object.entries(bySec).map(([sec, items]) => (
+                    <div key={sec}>
+                      <div className="text-xs font-semibold mb-1">{SECTION_LABEL[sec] ?? sec}</div>
+                      <ul className="space-y-1">
+                        {items.map(({ p, i }) => (
+                          <li key={i} className="flex gap-2 text-sm items-baseline">
+                            <input type="checkbox" checked={accepted.has(i)} onChange={() => toggle(i)} className="mt-1" />
+                            {p.key && <span className="text-ink-mute shrink-0 min-w-[80px]">{p.key}</span>}
+                            <span className="flex-1">{p.value}{p.as_of && <span className="text-[11px] text-ink-mute"> · {p.as_of}</span>}</span>
+                            <span className={`text-[10px] px-1 rounded shrink-0 ${p.origin === "web" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-ink-mute"}`}>{p.origin === "web" ? "веб" : "матрица"}</span>
+                            <a href={p.source_url} target="_blank" rel="noreferrer" className="text-blue-600 shrink-0" title={p.source_title || p.source_url}>↗</a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 items-center pt-1">
+                  <button
+                    onClick={() => commit.mutate(proposals.filter((_, i) => accepted.has(i)))}
+                    disabled={commit.isPending || accepted.size === 0}
+                    className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">
+                    {commit.isPending ? "Вношу…" : `Внести отмеченные (${accepted.size})`}
+                  </button>
+                  <button onClick={() => { setResult(null); run.reset(); }} className="text-xs text-ink-mute hover:text-ink">отмена</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

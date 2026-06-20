@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ir_storyboard import backup, brief, db, matrix, outputs, seed, verification, interview
+from ir_storyboard import backup, brief, db, matrix, outputs, seed, verification, interview, company
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
 from ir_storyboard.llm import web_search, classify_facts_batch
@@ -1305,7 +1305,9 @@ def add_entity_fact_ep(entity_id: int, f: EntityFactIn, conn=Depends(get_conn)):
                                  section=f.section)
     row = conn.execute("SELECT id, key, value, source_url, source_title, as_of, verified, sort_order, "
                        "COALESCE(section,'') AS section FROM entity_facts WHERE id=?", (fid,)).fetchone()
-    d = dict(row); d["verified"] = bool(d["verified"])
+    d = dict(row)
+    d["verified"] = bool(d["verified"])
+    d["as_of"] = None if d["as_of"] is None else str(d["as_of"])  # DATE affinity may coerce "2024" → int
     return EntityFactOut(**d)
 
 
@@ -2178,6 +2180,57 @@ def llm_job_status(job_id: str):
     if job is None:
         raise HTTPException(404, f"Job {job_id} not found")
     return LLMJobOut(job_id=job_id, status=job["status"], result=job["result"], error=job["error"])
+
+
+# ---------- company About: auto-fill (proposals → analyst review → commit) ----------
+
+def _compute_about_proposals(conn, client_id: str) -> dict:
+    return company.build_about_proposals(conn, client_id)
+
+
+@app.post("/api/clients/{client_id}/company/autofill/start", response_model=LLMJobOut)
+def start_company_autofill(client_id: str):
+    """Kick off the source-grounded About auto-fill (reuse matrix facts + web
+    search) as a background job; poll /jobs/{id}. Returns proposals only —
+    nothing is written until the analyst commits."""
+    return LLMJobOut(job_id=_start_llm_job(_compute_about_proposals, client_id), status="processing")
+
+
+class AboutProposalIn(BaseModel):
+    section: str = ""
+    key: str = ""
+    value: str
+    source_url: str = ""
+    source_title: str = ""
+    as_of: Optional[str] = None
+
+
+class AboutCommitIn(BaseModel):
+    proposals: List[AboutProposalIn]
+
+
+@app.post("/api/clients/{client_id}/company/autofill/commit")
+def commit_company_autofill(client_id: str, body: AboutCommitIn, conn=Depends(get_conn)):
+    """Write the analyst-accepted proposals onto the company card (verified,
+    source-linked). Creates the company entity if it doesn't exist yet."""
+    ents = matrix.entities_for_client(conn, client_id)
+    comp = next((e for e in ents if e["kind"] == "company"), None)
+    if comp is None:
+        row = conn.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
+        name = (row["name"] if row else "") or client_id
+        eid = matrix.add_entity(conn, client_id=client_id, kind="company", name=name, confirmed=True)
+    else:
+        eid = comp["id"]
+    n = 0
+    for p in body.proposals:
+        if not p.value.strip():
+            continue
+        matrix.add_entity_fact(conn, entity_id=eid, key=p.key, value=p.value,
+                               source_url=p.source_url, source_title=p.source_title,
+                               as_of=p.as_of, verified=bool(p.source_url.strip()),
+                               section=p.section)
+        n += 1
+    return {"committed": n}
 
 
 # ── YouTube Ingest — async job store ─────────────────────────────────────────

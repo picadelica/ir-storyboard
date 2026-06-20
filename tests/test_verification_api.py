@@ -110,6 +110,38 @@ def test_audit_async_job_flow(ctx, tmp_path, monkeypatch):
     assert client.get("/api/jobs/does-not-exist").status_code == 404
 
 
+def test_entity_fact_bare_year_as_of(ctx):
+    """A bare-year as_of ('2024') survives SQLite DATE affinity (stored int) and
+    still reads back as a string — no 500 from the entities endpoint."""
+    client, _, _ = ctx
+    e = client.post("/api/clients/co/entities", json={"kind": "company", "name": "Co"}).json()
+    f = client.post(f"/api/entities/{e['id']}/facts",
+                    json={"value": "Founded", "as_of": "2024", "section": "profile"}).json()
+    assert f["as_of"] == "2024"
+    got = client.get("/api/clients/co/entities")
+    assert got.status_code == 200
+    fact = next(x for x in got.json() if x["id"] == e["id"])["facts"][0]
+    assert fact["as_of"] == "2024"
+
+
+def test_company_autofill_commit(ctx):
+    """Accepted proposals land on the company card (created on the fly), verified
+    because source-linked, grouped by section."""
+    client, _, _ = ctx
+    r = client.post("/api/clients/co/company/autofill/commit", json={"proposals": [
+        {"section": "funding", "key": "Seed", "value": "$10M (2024)", "source_url": "https://tc.com/x", "source_title": "TC"},
+        {"section": "profile", "key": "", "value": "no source fact", "source_url": ""},
+    ]})
+    assert r.status_code == 200 and r.json()["committed"] == 2
+    comp = next(e for e in client.get("/api/clients/co/entities").json() if e["kind"] == "company")
+    facts = {f["value"]: f for f in comp["facts"]}
+    assert facts["$10M (2024)"]["section"] == "funding" and facts["$10M (2024)"]["verified"]
+    assert facts["no source fact"]["verified"] is False  # no source → not verified
+
+    start = client.post("/api/clients/co/company/autofill/start")
+    assert start.status_code == 200 and start.json()["job_id"]
+
+
 def test_set_verification_manual(ctx):
     client, fid, _ = ctx
     r = client.post(f"/api/facts/{fid}/verification",
