@@ -6,6 +6,7 @@ import type { CellSummary, Layer } from "./types";
 import Sidebar from "./components/Sidebar";
 import UserMenu from "./components/UserMenu";
 import MatrixGrid from "./components/MatrixGrid";
+import CompanyAbout from "./components/CompanyAbout";
 import CellDrawer from "./components/CellDrawer";
 import CycleRunner from "./components/CycleRunner";
 import ArtifactsView from "./components/ArtifactsView";
@@ -91,6 +92,7 @@ function ClientPage() {
         )}
 
         <div className="flex-1 overflow-y-auto">
+          {activeTab === "about" && <CompanyAbout clientId={clientId!} />}
           {activeTab === "matrix" && (
             <MatrixGrid
               clientId={clientId!}
@@ -194,7 +196,7 @@ function ZoneIcon({ id }: { id: string }) {
 
 type Sub = { id: string; label: string };
 const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
-  { id: "map", label: "Map", tabs: [{ id: "matrix", label: "Matrix" }] },
+  { id: "map", label: "Map", tabs: [{ id: "about", label: "About" }, { id: "matrix", label: "Matrix" }] },
   {
     id: "build", label: "Build", tabs: [
       { id: "ingest", label: "LLM report" },
@@ -225,6 +227,7 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
   const nav = useNavigate();
   const activeZone = ZONES.find(z => z.tabs.some(t => t.id === activeTab)) ?? ZONES[0];
   const showSub = activeZone.tabs.length > 1 || activeZone.id === "deliver";
+  const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.getClient(clientId) });
 
   return (
     <div className="border-b border-ink-line bg-white">
@@ -244,6 +247,13 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
             </button>
           );
         })}
+
+        {client.data?.name && (
+          <div className="ml-4 min-w-0 flex items-baseline gap-2">
+            <span className="text-sm font-semibold text-ink truncate" title={client.data.name}>{client.data.name}</span>
+            {client.data.sector && <span className="text-[11px] text-ink-mute truncate">{client.data.sector}</span>}
+          </div>
+        )}
 
         <div className="ml-auto flex items-center gap-3">
           <button

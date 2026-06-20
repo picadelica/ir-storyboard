@@ -409,6 +409,12 @@ export default function Sidebar({ clientId }: Props) {
     try { localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0"); } catch { /* noop */ }
   }, [collapsed]);
 
+  // Auto-hide the clients column when a company is selected — the name moves to
+  // the top bar, the workspace gets the room. Re-expand stays one click away.
+  useEffect(() => {
+    if (clientId) setCollapsed(true);
+  }, [clientId]);
+
   const clients = useQuery({ queryKey: ["clients"], queryFn: api.listClients });
   const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: api.clientsPortfolio });
   const covMap = new Map((portfolio.data ?? []).map(p => [p.id, p]));

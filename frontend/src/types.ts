@@ -422,6 +422,7 @@ export interface EntityFact {
   as_of?: string | null;
   verified: boolean;
   sort_order: number;
+  section?: string;   // profile | sites | funding | history | product | metrics | ""
 }
 
 export interface Entity {

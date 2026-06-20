@@ -160,6 +160,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
             sort_order   INTEGER NOT NULL DEFAULT 0
         )
     """)
+    # company "About" card: group entity facts into business sections
+    # (profile / sites / funding / history / product / metrics). Empty = ungrouped.
+    _add_column_if_missing(conn, "entity_facts", "section", "TEXT NOT NULL DEFAULT ''")
     # fact-trust (phase 3): extra corroborating sources for a merged fact. The
     # canonical fact keeps facts.source_id as its primary; duplicates' sources are
     # folded in here. Corroboration = 1 (primary) + count(fact_sources) — a trust

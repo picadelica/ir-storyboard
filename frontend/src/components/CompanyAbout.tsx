@@ -1,0 +1,202 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api";
+import type { Entity, EntityFact, Client } from "../types";
+
+interface Props {
+  clientId: string;
+}
+
+// The company "About" — a structured business profile (no narrative), kept as a
+// distinct entity and filled by hand (and, later, by ingest). Facts are grouped
+// into fixed business sections; every fact is source-linked.
+const SECTIONS: { id: string; label: string; hint: string; keyPh: string; valPh: string }[] = [
+  { id: "profile", label: "Профиль", hint: "юр. название, основана, стадия, команда, чем занимается", keyPh: "напр. Основана", valPh: "2021, Сан-Франциско" },
+  { id: "sites", label: "Сайты и каналы", hint: "сайт, домены, X / LinkedIn / GitHub", keyPh: "напр. Сайт", valPh: "https://…" },
+  { id: "funding", label: "Финансирование", hint: "раунд: стадия, сумма, дата, лид/инвесторы, оценка", keyPh: "напр. Seed", valPh: "$18M, 2024, лид Coatue" },
+  { id: "history", label: "История / майлстоны", hint: "датированные бизнес-события: запуски, релизы, сделки", keyPh: "напр. Запуск", valPh: "что и когда произошло" },
+  { id: "product", label: "Продукт и рынок", hint: "продукт, категория/рынок, конкуренты", keyPh: "напр. Продукт", valPh: "что это и для кого" },
+  { id: "metrics", label: "Метрики", hint: "ключевые числа: ARR, пользователи, рост (с датой)", keyPh: "напр. ARR", valPh: "$2M (Q1 2026)" },
+];
+
+export default function CompanyAbout({ clientId }: Props) {
+  const qc = useQueryClient();
+  const entities = useQuery<Entity[]>({ queryKey: ["entities", clientId], queryFn: () => api.entities(clientId) });
+  const client = useQuery<Client>({ queryKey: ["client", clientId], queryFn: () => api.getClient(clientId) });
+  const inval = () => qc.invalidateQueries({ queryKey: ["entities", clientId] });
+
+  const company = (entities.data ?? []).find(e => e.kind === "company") ?? null;
+
+  const createCompany = useMutation({
+    mutationFn: () => api.createEntity(clientId, { kind: "company", name: client.data?.name || clientId, confirmed: true }),
+    onSuccess: inval,
+  });
+
+  if (entities.isLoading) return <div className="p-5 text-sm text-ink-mute">Загрузка…</div>;
+
+  if (!company) {
+    return (
+      <div className="p-5 max-w-3xl">
+        <h2 className="text-lg font-semibold mb-1">О компании</h2>
+        <p className="text-sm text-ink-mute mb-4">
+          Структурный бизнес-профиль компании — голые факты со ссылками, без нарратива.
+        </p>
+        <button onClick={() => createCompany.mutate()} disabled={createCompany.isPending}
+          className="text-sm px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">
+          {createCompany.isPending ? "Создаю…" : "Создать карточку компании"}
+        </button>
+      </div>
+    );
+  }
+
+  const bySection = (sid: string) => (company.facts || []).filter(f => (f.section || "") === sid);
+  const ungrouped = (company.facts || []).filter(f => !SECTIONS.some(s => s.id === (f.section || "")));
+
+  return (
+    <div className="p-5 max-w-3xl space-y-4">
+      <CompanyHeader company={company} onChanged={inval} />
+      {SECTIONS.map(s => (
+        <SectionBlock key={s.id} section={s} entityId={company.id} facts={bySection(s.id)} onChanged={inval} />
+      ))}
+      {ungrouped.length > 0 && (
+        <SectionBlock section={{ id: "", label: "Прочее", hint: "факты без секции", keyPh: "ключ", valPh: "значение" }}
+          entityId={company.id} facts={ungrouped} onChanged={inval} />
+      )}
+    </div>
+  );
+}
+
+function CompanyHeader({ company: e, onChanged }: { company: Entity; onChanged: () => void }) {
+  const [linkOpen, setLinkOpen] = useState(false);
+  const setLinks = useMutation({
+    mutationFn: (links: Record<string, string>) => api.patchEntity(e.id, { links }),
+    onSuccess: () => { setLinkOpen(false); onChanged(); },
+  });
+  return (
+    <div className="bg-white rounded-lg border border-ink-line p-4">
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <h2 className="text-lg font-semibold">{e.name}</h2>
+        {e.role && <span className="text-sm text-ink-mute">· {e.role}</span>}
+        <span className="ml-auto text-[11px] text-ink-mute">бизнес-профиль · без нарратива</span>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {Object.entries(e.links || {}).map(([k, url]) => (
+          <span key={k} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5">
+            <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{k}</a>
+            <button onClick={() => { const { [k]: _d, ...rest } = e.links || {}; setLinks.mutate(rest); }}
+              className="text-ink-mute hover:text-red-600">×</button>
+          </span>
+        ))}
+        <button onClick={() => setLinkOpen(v => !v)} className="text-[11px] text-ink-mute hover:text-ink">+ ссылка</button>
+      </div>
+      {linkOpen && (
+        <LinkForm busy={setLinks.isPending}
+          onSubmit={(label, url) => setLinks.mutate({ ...(e.links || {}), [label]: url })}
+          onCancel={() => setLinkOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function SectionBlock({ section, entityId, facts, onChanged }: {
+  section: { id: string; label: string; hint: string; keyPh: string; valPh: string };
+  entityId: number; facts: EntityFact[]; onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const addFact = useMutation({
+    mutationFn: (body: Partial<EntityFact>) => api.addEntityFact(entityId, { ...body, section: section.id }),
+    onSuccess: () => { setOpen(false); onChanged(); },
+  });
+  const delFact = useMutation({ mutationFn: (fid: number) => api.deleteEntityFact(fid), onSuccess: onChanged });
+
+  return (
+    <section className="bg-white rounded-lg border border-ink-line p-4">
+      <div className="flex items-baseline justify-between gap-3 mb-1">
+        <h3 className="text-sm font-semibold">{section.label}</h3>
+        <span className="text-[11px] text-ink-mute text-right">{section.hint}</span>
+      </div>
+      {facts.length === 0 ? (
+        <div className="text-xs text-ink-mute italic py-1">Пусто.</div>
+      ) : (
+        <ul className="space-y-1 py-1">
+          {facts.map(f => (
+            <li key={f.id} className="text-sm flex gap-2 group items-baseline">
+              {f.key && <span className="text-ink-mute shrink-0 min-w-[80px]">{f.key}</span>}
+              <span className="flex-1">{f.value}{f.as_of && <span className="text-[11px] text-ink-mute"> · {f.as_of}</span>}</span>
+              {f.source_url
+                ? <a href={f.source_url} target="_blank" rel="noreferrer" className="text-blue-600 shrink-0" title={f.source_title || f.source_url}>↗</a>
+                : <span className="text-[10px] text-amber-700 shrink-0" title="нет источника">непроверено</span>}
+              <button onClick={() => delFact.mutate(f.id)}
+                className="text-ink-mute hover:text-red-600 opacity-0 group-hover:opacity-100 shrink-0">×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {open ? (
+        <FactForm section={section} busy={addFact.isPending}
+          onSubmit={(b) => addFact.mutate(b)} onCancel={() => setOpen(false)} />
+      ) : (
+        <button onClick={() => setOpen(true)}
+          className="mt-1 text-[11px] px-2 py-0.5 rounded border border-dashed border-ink-line text-ink-mute hover:bg-slate-50">
+          + факт
+        </button>
+      )}
+    </section>
+  );
+}
+
+function FactForm({ section, onSubmit, onCancel, busy }: {
+  section: { keyPh: string; valPh: string };
+  onSubmit: (b: Partial<EntityFact>) => void; onCancel: () => void; busy: boolean;
+}) {
+  const [key, setKey] = useState("");
+  const [value, setValue] = useState("");
+  const [url, setUrl] = useState("");
+  const [title, setTitle] = useState("");
+  const [asOf, setAsOf] = useState("");
+  const submit = () => {
+    if (!value.trim()) return;
+    onSubmit({ key: key.trim(), value: value.trim(), source_url: url.trim(),
+      source_title: title.trim(), as_of: asOf.trim() || null, verified: !!url.trim() });
+  };
+  const inp = "text-xs border border-ink-line rounded px-2 py-1";
+  return (
+    <div className="mt-2 p-2 rounded bg-slate-50 border border-ink-line space-y-1.5">
+      <div className="flex gap-1.5">
+        <input className={`${inp} w-28`} placeholder={section.keyPh} value={key} onChange={e => setKey(e.target.value)} />
+        <input className={`${inp} flex-1`} placeholder={`${section.valPh} *`} value={value} onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") submit(); }} autoFocus />
+        <input className={`${inp} w-24`} placeholder="дата" value={asOf} onChange={e => setAsOf(e.target.value)} />
+      </div>
+      <div className="flex gap-1.5">
+        <input className={`${inp} flex-1`} placeholder="ссылка-источник" value={url} onChange={e => setUrl(e.target.value)} />
+        <input className={`${inp} w-32`} placeholder="название источника" value={title} onChange={e => setTitle(e.target.value)} />
+      </div>
+      <div className="flex gap-2 items-center">
+        <button onClick={submit} disabled={busy || !value.trim()}
+          className="text-[11px] px-2 py-1 rounded bg-ink text-white hover:bg-black disabled:bg-slate-300">{busy ? "…" : "добавить"}</button>
+        <button onClick={onCancel} className="text-[11px] text-ink-mute hover:text-ink">отмена</button>
+        {!url.trim() && value.trim() && <span className="text-[10px] text-amber-700">без ссылки факт пометится непроверенным</span>}
+      </div>
+    </div>
+  );
+}
+
+function LinkForm({ onSubmit, onCancel, busy }: {
+  onSubmit: (label: string, url: string) => void; onCancel: () => void; busy: boolean;
+}) {
+  const [label, setLabel] = useState("");
+  const [url, setUrl] = useState("");
+  const submit = () => { if (label.trim() && url.trim()) onSubmit(label.trim(), url.trim()); };
+  const inp = "text-xs border border-ink-line rounded px-2 py-1";
+  return (
+    <div className="mt-1.5 flex gap-1.5 items-center">
+      <input className={`${inp} w-24`} placeholder="Wiki / X / …" value={label} onChange={e => setLabel(e.target.value)} autoFocus />
+      <input className={`${inp} flex-1`} placeholder="https://…" value={url} onChange={e => setUrl(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") submit(); }} />
+      <button onClick={submit} disabled={busy || !label.trim() || !url.trim()}
+        className="text-[11px] px-2 py-1 rounded bg-ink text-white hover:bg-black disabled:bg-slate-300">ок</button>
+      <button onClick={onCancel} className="text-[11px] text-ink-mute hover:text-ink">×</button>
+    </div>
+  );
+}

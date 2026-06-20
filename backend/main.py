@@ -1224,6 +1224,7 @@ class EntityFactOut(BaseModel):
     as_of: Optional[str] = None
     verified: bool = False
     sort_order: int = 0
+    section: str = ""
 
 
 class EntityOut(BaseModel):
@@ -1268,6 +1269,7 @@ class EntityFactIn(BaseModel):
     as_of: Optional[str] = None
     verified: bool = False
     sort_order: int = 0
+    section: str = ""
 
 
 @app.get("/api/clients/{client_id}/entities", response_model=List[EntityOut])
@@ -1299,9 +1301,10 @@ def remove_entity(entity_id: int, conn=Depends(get_conn)):
 def add_entity_fact_ep(entity_id: int, f: EntityFactIn, conn=Depends(get_conn)):
     fid = matrix.add_entity_fact(conn, entity_id=entity_id, key=f.key, value=f.value,
                                  source_url=f.source_url, source_title=f.source_title,
-                                 as_of=f.as_of, verified=f.verified, sort_order=f.sort_order)
-    row = conn.execute("SELECT id, key, value, source_url, source_title, as_of, verified, sort_order "
-                       "FROM entity_facts WHERE id=?", (fid,)).fetchone()
+                                 as_of=f.as_of, verified=f.verified, sort_order=f.sort_order,
+                                 section=f.section)
+    row = conn.execute("SELECT id, key, value, source_url, source_title, as_of, verified, sort_order, "
+                       "COALESCE(section,'') AS section FROM entity_facts WHERE id=?", (fid,)).fetchone()
     d = dict(row); d["verified"] = bool(d["verified"])
     return EntityFactOut(**d)
 

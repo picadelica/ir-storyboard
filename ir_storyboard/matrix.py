@@ -371,7 +371,8 @@ def entities_for_client(conn: sqlite3.Connection, client_id: str) -> List[dict]:
             d["links"] = {}
         d["confirmed"] = bool(d["confirmed"])
         d["facts"] = [dict(r) for r in conn.execute(
-            """SELECT id, key, value, source_url, source_title, as_of, verified, sort_order
+            """SELECT id, key, value, source_url, source_title, as_of, verified, sort_order,
+                      COALESCE(section, '') AS section
                 FROM entity_facts WHERE entity_id=? ORDER BY sort_order, id""",
             (e["id"],),
         )]
@@ -423,12 +424,13 @@ def delete_entity(conn: sqlite3.Connection, entity_id: int) -> None:
 def add_entity_fact(conn: sqlite3.Connection, *, entity_id: int, key: str = "",
                     value: str = "", source_url: str = "", source_title: str = "",
                     as_of: Optional[str] = None, verified: bool = False,
-                    sort_order: int = 0) -> int:
+                    sort_order: int = 0, section: str = "") -> int:
     cur = conn.execute(
         """INSERT INTO entity_facts (entity_id, key, value, source_url, source_title,
-                                     as_of, verified, sort_order)
-            VALUES (?,?,?,?,?,?,?,?)""",
-        (entity_id, key, value, source_url, source_title, as_of, 1 if verified else 0, sort_order),
+                                     as_of, verified, sort_order, section)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+        (entity_id, key, value, source_url, source_title, as_of,
+         1 if verified else 0, sort_order, section),
     )
     conn.commit()
     return cur.lastrowid

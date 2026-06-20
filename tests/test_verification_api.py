@@ -173,10 +173,12 @@ def test_entities_crud(ctx):
     eid = e["id"]
     f = client.post(f"/api/entities/{eid}/facts",
                     json={"key": "prior", "value": "Acme (2019)", "source_url": "https://acme.co",
-                          "verified": True}).json()
+                          "verified": True, "section": "funding"}).json()
+    assert f["section"] == "funding"  # company About groups facts by business section
     got = next(x for x in client.get("/api/clients/co/entities").json() if x["id"] == eid)
     assert got["role"] == "CTO" and got["links"]["x"].endswith("/jane")
     assert got["facts"][0]["value"] == "Acme (2019)" and got["facts"][0]["verified"]
+    assert got["facts"][0]["section"] == "funding"
     # the card editor adds/removes links via PATCH links (full replace)
     client.patch(f"/api/entities/{eid}", json={"links": {"x": "https://x.com/jane", "wiki": "https://en.wikipedia.org/Jane"}})
     relinked = next(x for x in client.get("/api/clients/co/entities").json() if x["id"] == eid)
