@@ -6,7 +6,7 @@
 
 **Последнее обновление:** 2026-06-18
 **Ветка:** `feat/v2` (запушена)
-**HEAD:** `f326a90 feat(company): dedicated company About card — structured business profile`
+**HEAD:** `ce17707 feat(company): source-grounded auto-fill for the About card (1+2)`
 **Прод:** 216.57.108.107, перекатан 2026-06-20 (fact-trust Фазы 1+2+3 + гайд + дисциплина +
 парсер + ретрай + async job-и + единый LLM-JSON примитив + редактируемые карточки + карточка
 компании «About», деплой зелёный). Тесты: `pytest -m "not network"` → **231 passed**.
