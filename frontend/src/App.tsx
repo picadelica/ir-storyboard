@@ -183,6 +183,8 @@ function ZoneIcon({ id }: { id: string }) {
   switch (id) {
     case "map":
       return <svg {...p}><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="8.5" /></svg>;
+    case "about":
+      return <svg {...p}><path d="M3 21h18M5 21V8l7-4 7 4v13M9 21v-5h6v5M9 11h.01M15 11h.01" /></svg>;
     case "build":
       return <svg {...p}><path d="M12 3l8 4.5-8 4.5-8-4.5z" /><path d="M4 12l8 4.5 8-4.5" /></svg>;
     case "health":
@@ -196,7 +198,8 @@ function ZoneIcon({ id }: { id: string }) {
 
 type Sub = { id: string; label: string };
 const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
-  { id: "map", label: "Map", tabs: [{ id: "about", label: "About" }, { id: "matrix", label: "Matrix" }] },
+  { id: "map", label: "Map", tabs: [{ id: "matrix", label: "Matrix" }] },
+  { id: "about", label: "About", tabs: [{ id: "about", label: "About" }] },
   {
     id: "build", label: "Build", tabs: [
       { id: "ingest", label: "LLM report" },
