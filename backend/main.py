@@ -1573,6 +1573,14 @@ class ResearchResult(BaseModel):
     queries_used: List[str]
 
 
+class ResearchQueriesOut(BaseModel):
+    queries: List[str]
+
+
+class ResearchRunIn(BaseModel):
+    queries: Optional[List[str]] = None   # edited by the analyst; None → auto-build
+
+
 class FactCandidateOut(BaseModel):
     text: str
     suggested_subsection_id: Optional[str]
@@ -1669,14 +1677,30 @@ def _enrich_candidate(cand) -> FactCandidateOut:
     )
 
 
-@app.post("/api/clients/{client_id}/research", response_model=ResearchResult)
-def research_client(client_id: str, conn=Depends(get_conn)):
+@app.post("/api/clients/{client_id}/research/queries", response_model=ResearchQueriesOut)
+def research_queries(client_id: str, conn=Depends(get_conn)):
+    """Step 1 of online research: generate the search queries WITHOUT searching,
+    so the analyst can review/edit them before spending a Tavily call."""
     row = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
     if not row:
         raise HTTPException(404, "client not found")
     d = dict(row)
-    queries = _build_queries(d.get("name", ""), d.get("founder_name", ""),
-                             d.get("sector", ""))
+    queries = _build_queries(d.get("name", ""), d.get("founder_name", ""), d.get("sector", ""))
+    return ResearchQueriesOut(queries=[q for q, _ in queries])
+
+
+@app.post("/api/clients/{client_id}/research", response_model=ResearchResult)
+def research_client(client_id: str, body: Optional[ResearchRunIn] = None, conn=Depends(get_conn)):
+    """Step 2: run the search. With body.queries (analyst-edited) — search those;
+    without — auto-build (back-compat)."""
+    row = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "client not found")
+    d = dict(row)
+    if body and body.queries is not None:
+        queries = [(q.strip(), "online_research") for q in body.queries if q.strip()]
+    else:
+        queries = _build_queries(d.get("name", ""), d.get("founder_name", ""), d.get("sector", ""))
     seen_urls: set = set()
     hits: List[SearchHitOut] = []
     for q, default_channel in queries:

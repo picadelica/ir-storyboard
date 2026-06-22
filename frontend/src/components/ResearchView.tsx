@@ -351,16 +351,21 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
 
 export default function ResearchView({ clientId }: Props) {
   const [hits, setHits] = useState<SearchHit[]>([]);
-  const [queries, setQueries] = useState<string[]>([]);
-  const [importedCount, setImportedCount] = useState(0);
+  const [draft, setDraft] = useState("");          // editable queries, one per line
+  const [generated, setGenerated] = useState(false);
+  const [, setImportedCount] = useState(0);
+
+  const genMut = useMutation({
+    mutationFn: () => api.researchQueries(clientId),
+    onSuccess: (res) => { setDraft(res.queries.join("\n")); setGenerated(true); },
+  });
 
   const searchMut = useMutation({
-    mutationFn: () => api.research(clientId),
-    onSuccess: (res) => {
-      setHits(res.hits);
-      setQueries(res.queries_used);
-    },
+    mutationFn: () => api.research(clientId, draft.split("\n").map(q => q.trim()).filter(Boolean)),
+    onSuccess: (res) => { setHits(res.hits); },
   });
+
+  const queryCount = draft.split("\n").map(q => q.trim()).filter(Boolean).length;
 
   return (
     <div className="p-5 space-y-5 max-w-4xl">
@@ -368,21 +373,47 @@ export default function ResearchView({ clientId }: Props) {
         <div>
           <h2 className="text-lg font-semibold">Research</h2>
           <p className="text-xs text-ink-mute mt-0.5">
-            Найти источники онлайн → LLM классифицирует → выбрать факты → импортировать в матрицу
+            Подобрать запросы → проверить и поправить → искать → выбрать факты → импортировать в матрицу
           </p>
         </div>
-        <button
-          onClick={() => searchMut.mutate()}
-          disabled={searchMut.isPending}
-          className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
-        >
-          {searchMut.isPending ? "Ищем…" : "🔍 Search online"}
-        </button>
+        {!generated && (
+          <button
+            onClick={() => genMut.mutate()}
+            disabled={genMut.isPending}
+            className="px-4 py-2 bg-ink text-white text-sm rounded hover:bg-black disabled:opacity-50"
+          >
+            {genMut.isPending ? "Подбираю…" : "Подобрать запросы"}
+          </button>
+        )}
       </div>
 
-      {queries.length > 0 && (
-        <div className="text-[11px] text-ink-mute">
-          Запросы: {queries.map(q => <code key={q} className="bg-slate-100 px-1 rounded mr-1">{q}</code>)}
+      {/* Step 1 → 2: review & edit the generated queries before searching */}
+      {generated && (
+        <div className="bg-white rounded-lg border border-ink-line p-4 space-y-2">
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-sm font-semibold">Поисковые запросы <span className="font-normal text-ink-mute">({queryCount})</span></h3>
+            <button onClick={() => genMut.mutate()} disabled={genMut.isPending}
+              className="text-[11px] text-ink-mute hover:text-ink">{genMut.isPending ? "…" : "сгенерировать заново"}</button>
+          </div>
+          <p className="text-[11px] text-ink-mute">Один запрос в строке. Поправь, добавь или удали — потом запускай поиск.</p>
+          <textarea
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            rows={Math.max(4, draft.split("\n").length + 1)}
+            className="w-full text-sm font-mono border border-ink-line rounded px-2.5 py-2 leading-relaxed"
+            placeholder='напр. "Имя Фамилия" "Компания" interview'
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => searchMut.mutate()}
+              disabled={searchMut.isPending || queryCount === 0}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              {searchMut.isPending ? "Ищем…" : `🔍 Искать (${queryCount})`}
+            </button>
+            <button onClick={() => { setGenerated(false); setDraft(""); setHits([]); }}
+              className="text-xs text-ink-mute hover:text-ink">сбросить</button>
+          </div>
         </div>
       )}
 

@@ -174,8 +174,13 @@ export const api = {
     }),
   patchWorkItem: (wid: number, body: Partial<WorkItem>) =>
     call<WorkItem>(`/work-items/${wid}`, { method: "PATCH", body: JSON.stringify(body) }),
-  research: (clientId: string) =>
-    call<ResearchResult>(`/clients/${clientId}/research`, { method: "POST" }),
+  researchQueries: (clientId: string) =>
+    call<{ queries: string[] }>(`/clients/${clientId}/research/queries`, { method: "POST" }),
+  research: (clientId: string, queries?: string[]) =>
+    call<ResearchResult>(`/clients/${clientId}/research`, {
+      method: "POST",
+      body: JSON.stringify(queries !== undefined ? { queries } : {}),
+    }),
 
   ingestPreview: (clientId: string, body: {
     channel: string; source_url: string; source_title: string; text: string;
