@@ -165,6 +165,7 @@ classify_fact: Callable[[str], FactCandidate] = stub_classify
 web_search: Callable[[str, int], List[SearchHit]] = stub_web_search
 summarize: Callable[[str, int], str] = stub_summarize
 generate: Callable[..., str] = stub_generate
+_client = None  # real anthropic.Anthropic set by _try_init_anthropic; read by PDF vision
 
 
 def classify_facts_batch(texts: List[str]) -> List[FactCandidate]:
@@ -203,7 +204,10 @@ One object per input fact, same order. Set sid to null if no subsection fits.\
 # ─────────────────── real Claude implementation ─────────────────────────────
 
 def _try_init_anthropic() -> None:
-    global classify_fact, summarize, classify_facts_batch, generate
+    # _client must be a MODULE global, not a closure local: module-level extractors
+    # (extract_facts_from_pdf) read it via globals().get("_client"). Without this it
+    # stays None there → PDF vision silently returns [] even with a valid API key.
+    global classify_fact, summarize, classify_facts_batch, generate, _client
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
