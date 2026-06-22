@@ -1992,6 +1992,65 @@ def llm_report_ingest_preview(
     )
 
 
+# ── Generate-prompt + paste-response (no upload needed) ────────────────────────
+
+class ResearchPromptOut(BaseModel):
+    agent: str
+    agents: List[str]
+    prompt: str
+
+
+@app.get("/api/clients/{client_id}/ingest/llm-report/prompt", response_model=ResearchPromptOut)
+def llm_report_prompt(client_id: str, agent: str = "chatgpt", conn=Depends(get_conn)):
+    """Deep-research prompt for an external LLM, filled with the client's identity.
+    The analyst runs it in their agent and pastes the answer back (preview-text)."""
+    from ir_storyboard import research_prompt
+    row = conn.execute("SELECT name, founder_name, sector FROM clients WHERE id=?", (client_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, f"Client '{client_id}' not found")
+    d = dict(row)
+    prompt = research_prompt.build_prompt(name=d.get("name") or client_id,
+                                          founder=d.get("founder_name") or "",
+                                          sector=d.get("sector") or "", agent=agent)
+    return ResearchPromptOut(agent=agent, agents=research_prompt.AGENTS, prompt=prompt)
+
+
+class IngestTextIn(BaseModel):
+    text: str
+    agent_hint: Optional[str] = None
+
+
+@app.post("/api/clients/{client_id}/ingest/llm-report/preview-text", response_model=IngestPreviewOut)
+def llm_report_ingest_preview_text(client_id: str, body: IngestTextIn, conn=Depends(get_conn)):
+    """Parse a pasted LLM-report answer (text) through the same pipeline as an
+    uploaded file. Writes the text to a temp .md and reuses preview_llm_report."""
+    from ir_storyboard.ingest.pipeline import preview_llm_report
+    import tempfile
+    if not body.text.strip():
+        raise HTTPException(400, "empty text")
+    if not conn.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone():
+        raise HTTPException(404, f"Client '{client_id}' not found")
+    with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as tmp:
+        tmp.write(body.text)
+        tmp_path = Path(tmp.name)
+    try:
+        preview = preview_llm_report(tmp_path, client_id, conn, agent_hint=body.agent_hint)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(422, f"Failed to parse text: {exc}")
+    return IngestPreviewOut(
+        audit_id=preview.audit_id,
+        source_artifact_path=str(tmp_path),
+        detected_agent=preview.detected_agent,
+        sources=[ResolvedCitationOut(**s.__dict__) for s in preview.sources],
+        facts=[ResolvedFactOut(**f.__dict__) for f in preview.facts],
+        notes=preview.notes,
+        stats=preview.stats,
+    )
+
+
 # ── Commit endpoint ───────────────────────────────────────────────────────────
 
 @app.post(

@@ -54,6 +54,31 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
     },
   });
 
+  // ── "Промпт + ответ" mode: generate a deep-research prompt, run it externally,
+  // paste the answer back (parsed by the same pipeline as an uploaded file).
+  const [mode, setMode] = useState<"file" | "prompt">("file");
+  const [promptAgent, setPromptAgent] = useState("chatgpt");
+  const [promptText, setPromptText] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const genPrompt = useMutation({
+    mutationFn: () => api.llmReportPrompt(clientId, promptAgent),
+    onSuccess: (r) => setPromptText(r.prompt),
+  });
+  const analyzeText = useMutation({
+    mutationFn: () => api.llmIngestPreviewText(clientId, answer,
+      promptAgent === "chatgpt" ? "chatgpt-deep-research" : promptAgent),
+    onSuccess: (data) => { setPreview(data); setEdits({}); setScreen("preview"); },
+  });
+  const copyPrompt = async () => {
+    try { await navigator.clipboard.writeText(promptText); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
+  };
+  const PROMPT_AGENTS = [
+    { value: "chatgpt", label: "ChatGPT Deep Research" }, { value: "claude", label: "Claude" },
+    { value: "perplexity", label: "Perplexity" }, { value: "gemini", label: "Gemini" },
+  ];
+
   const commitMut = useMutation({
     mutationFn: () =>
       api.llmIngestCommit(
@@ -104,62 +129,95 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
           )}
         </div>
 
-        {/* Agent selector */}
-        <div>
-          <label className="block text-xs font-medium text-ink-mute mb-1.5">LLM Agent</label>
-          <div className="flex flex-wrap gap-2">
-            {AGENT_OPTIONS.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setAgentHint(opt.value)}
-                className={`px-3 py-1.5 text-xs rounded border transition ${
-                  agentHint === opt.value
-                    ? "bg-ink text-white border-ink"
-                    : "border-ink-line text-ink-mute hover:border-ink hover:text-ink"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
+        {/* mode toggle */}
+        <div className="inline-flex rounded-lg border border-ink-line overflow-hidden text-sm">
+          <button onClick={() => setMode("file")}
+            className={`px-3.5 py-1.5 ${mode === "file" ? "bg-ink text-white" : "text-ink-mute hover:bg-ink/[0.04]"}`}>Файл</button>
+          <button onClick={() => setMode("prompt")}
+            className={`px-3.5 py-1.5 ${mode === "prompt" ? "bg-ink text-white" : "text-ink-mute hover:bg-ink/[0.04]"}`}>Промпт + ответ</button>
         </div>
 
-        {/* Drop zone */}
-        <div
-          className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition ${
-            dragOver ? "border-blue-400 bg-blue-50" : "border-ink-line hover:border-slate-400"
-          }`}
-          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={e => {
-            e.preventDefault();
-            setDragOver(false);
-            handleFile(e.dataTransfer.files[0]);
-          }}
-          onClick={() => fileRef.current?.click()}
-        >
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".docx,.md,.txt,.pdf"
-            className="hidden"
-            onChange={e => handleFile(e.target.files?.[0])}
-          />
-          {analyzeMut.isPending ? (
-            <div className="text-sm text-ink-mute">Analysing document…</div>
-          ) : (
-            <>
-              <div className="text-sm font-medium text-ink mb-1">
-                Drop file here or click to browse
+        {mode === "file" && (
+          <>
+            {/* Agent selector */}
+            <div>
+              <label className="block text-xs font-medium text-ink-mute mb-1.5">LLM Agent</label>
+              <div className="flex flex-wrap gap-2">
+                {AGENT_OPTIONS.map(opt => (
+                  <button key={opt.value} onClick={() => setAgentHint(opt.value)}
+                    className={`px-3 py-1.5 text-xs rounded border transition ${
+                      agentHint === opt.value ? "bg-ink text-white border-ink"
+                        : "border-ink-line text-ink-mute hover:border-ink hover:text-ink"}`}>
+                    {opt.label}
+                  </button>
+                ))}
               </div>
-              <div className="text-xs text-ink-mute">.docx · .md · .txt · .pdf</div>
-            </>
-          )}
-        </div>
+            </div>
 
-        {analyzeMut.isError && (
-          <div className="text-sm text-red-600 bg-red-50 rounded p-3">
-            {String(analyzeMut.error)}
+            {/* Drop zone */}
+            <div
+              className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition ${
+                dragOver ? "border-blue-400 bg-blue-50" : "border-ink-line hover:border-slate-400"}`}
+              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={e => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
+              onClick={() => fileRef.current?.click()}
+            >
+              <input ref={fileRef} type="file" accept=".docx,.md,.txt,.pdf" className="hidden"
+                onChange={e => handleFile(e.target.files?.[0])} />
+              {analyzeMut.isPending ? (
+                <div className="text-sm text-ink-mute">Analysing document…</div>
+              ) : (
+                <>
+                  <div className="text-sm font-medium text-ink mb-1">Drop file here or click to browse</div>
+                  <div className="text-xs text-ink-mute">.docx · .md · .txt · .pdf</div>
+                </>
+              )}
+            </div>
+            {analyzeMut.isError && (
+              <div className="text-sm text-red-600 bg-red-50 rounded p-3">{String(analyzeMut.error)}</div>
+            )}
+          </>
+        )}
+
+        {mode === "prompt" && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-xs text-ink-mute">Агент</label>
+              <select value={promptAgent} onChange={e => setPromptAgent(e.target.value)}
+                className="text-xs border border-ink-line rounded px-2 py-1 bg-white">
+                {PROMPT_AGENTS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+              </select>
+              <button onClick={() => genPrompt.mutate()} disabled={genPrompt.isPending}
+                className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">
+                {genPrompt.isPending ? "…" : "Сгенерировать промпт"}
+              </button>
+            </div>
+
+            {promptText && (
+              <div className="space-y-1.5">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xs font-medium text-ink-mute">1. Скопируй промпт в {PROMPT_AGENTS.find(a => a.value === promptAgent)?.label}</span>
+                  <button onClick={copyPrompt} className="text-[11px] text-blue-600 hover:underline">{copied ? "Скопировано ✓" : "Copy"}</button>
+                </div>
+                <textarea readOnly value={promptText} rows={8}
+                  className="w-full text-xs font-mono border border-ink-line rounded px-2.5 py-2 bg-slate-50 leading-relaxed" />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-ink-mute">2. Вставь ответ агента и разбери</span>
+              <textarea value={answer} onChange={e => setAnswer(e.target.value)} rows={10}
+                placeholder="Вставь сюда текст ответа deep-research (с источниками [N] в конце)…"
+                className="w-full text-sm border border-ink-line rounded px-2.5 py-2 leading-relaxed" />
+              <div className="flex items-center gap-2">
+                <button onClick={() => analyzeText.mutate()} disabled={analyzeText.isPending || !answer.trim()}
+                  className="text-sm px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                  {analyzeText.isPending ? "Разбираю…" : "Разобрать ответ"}
+                </button>
+                {analyzeText.isError && <span className="text-xs text-red-600">{String(analyzeText.error)}</span>}
+              </div>
+            </div>
           </div>
         )}
 

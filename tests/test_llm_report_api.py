@@ -215,3 +215,40 @@ def test_history_empty(client):
     resp = client.get("/api/clients/libermans-gonka/ingest/llm-report/history")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# ── generate-prompt + paste-text (proposal #3 part B) ───────────────────────────
+
+def test_llm_report_prompt_generation(client):
+    r = client.get("/api/clients/libermans-gonka/ingest/llm-report/prompt", params={"agent": "chatgpt"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["agent"] == "chatgpt" and "chatgpt" in d["agents"]
+    assert "Libermans (Gonka AI)" in d["prompt"]          # subject filled
+    assert "L1 Founder Personal Story" in d["prompt"]     # matrix intro present
+    assert "Open Questions for Interview" in d["prompt"]
+    # a different agent yields a different body
+    claude = client.get("/api/clients/libermans-gonka/ingest/llm-report/prompt", params={"agent": "claude"}).json()
+    assert claude["prompt"] != d["prompt"]
+
+
+def test_llm_report_preview_text(client):
+    pasted = (
+        "## Technology & Product\n"
+        "Gonka runs a decentralized GPU network for AI training [1].\n\n"
+        "## Investments & Financing\n"
+        "Raised a $10M seed round in 2024 led by Bitfury [2].\n\n"
+        "## Sources\n"
+        "[1] Gonka Docs — gonka.ai — https://gonka.ai/docs\n"
+        "[2] TechCrunch — TechCrunch — https://techcrunch.com/gonka\n"
+    )
+    r = client.post("/api/clients/libermans-gonka/ingest/llm-report/preview-text",
+                    json={"text": pasted, "agent_hint": "chatgpt-deep-research"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    # same pipeline as a file upload: facts extracted + parsed [N] sources
+    assert d["facts"], "pasted markdown report should yield facts"
+    assert any("gonka.ai" in (s.get("canonical_url") or "") for s in d["sources"])
+    # empty text rejected
+    assert client.post("/api/clients/libermans-gonka/ingest/llm-report/preview-text",
+                       json={"text": "   "}).status_code == 400

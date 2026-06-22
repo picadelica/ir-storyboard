@@ -232,6 +232,13 @@ export const api = {
   llmIngestHistory: (clientId: string): Promise<LLMIngestAuditRow[]> =>
     call<LLMIngestAuditRow[]>(`/clients/${clientId}/ingest/llm-report/history`),
 
+  llmReportPrompt: (clientId: string, agent: string): Promise<{ agent: string; agents: string[]; prompt: string }> =>
+    call(`/clients/${clientId}/ingest/llm-report/prompt?agent=${agent}`),
+  llmIngestPreviewText: (clientId: string, text: string, agentHint?: string): Promise<LLMIngestPreview> =>
+    call<LLMIngestPreview>(`/clients/${clientId}/ingest/llm-report/preview-text`, {
+      method: "POST", body: JSON.stringify({ text, agent_hint: agentHint }),
+    }),
+
   // ── YouTube Ingest ──────────────────────────────────────────────────────────
   youtubePreviewStart: (clientId: string, url: string): Promise<YouTubeJobOut> =>
     call<YouTubeJobOut>(`/clients/${clientId}/ingest/youtube/preview`, {
