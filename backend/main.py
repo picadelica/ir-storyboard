@@ -2532,8 +2532,15 @@ def _yt_job_run(job_id: str, client_id: str, url: str, db_path: str) -> None:
     conn = _db.connect(_db.DEFAULT_DB_PATH if not db_path else _db.Path(db_path))
     _db.init_schema(conn)
     from ir_storyboard.ingest.youtube_pipeline import run_youtube_preview
+
+    def _set_stage(stage: str) -> None:
+        with _yt_jobs_lock:
+            job = _yt_jobs.get(job_id)
+            if job is not None and job.get("status") == "processing":
+                job["stage"] = stage
+
     try:
-        result = run_youtube_preview(client_id, url, conn)
+        result = run_youtube_preview(client_id, url, conn, progress_cb=_set_stage)
         with _yt_jobs_lock:
             _yt_jobs[job_id] = {"status": "done", "result": result, "error": None}
     except Exception as exc:
@@ -2788,7 +2795,7 @@ def youtube_preview_by_id(client_id: str, preview_id: str, conn=Depends(get_conn
     import json as _json
     _ensure_audit_table_youtube(conn)
     row = conn.execute(
-        """SELECT preview_json, confirmed_at FROM ingest_audit
+        """SELECT preview_json, committed_at FROM ingest_audit
             WHERE id = ? AND client_id = ? AND ingest_kind = 'youtube'""",
         (preview_id, client_id),
     ).fetchone()
@@ -2853,7 +2860,7 @@ def youtube_preview_by_id(client_id: str, preview_id: str, conn=Depends(get_conn
         transcribe_cost_usd=data.get("transcribe_cost_usd"),
         notes=data.get("notes", []) or [],
         stats=data.get("stats", {}) or {},
-        confirmed_at=row["confirmed_at"],
+        confirmed_at=row["committed_at"],   # NULL = pending → reopen stays editable
         video_brief=data.get("video_brief", "") or "",
         cell_briefs=data.get("cell_briefs", {}) or {},
     )
@@ -2875,7 +2882,7 @@ def youtube_history(
     rows = conn.execute(
         """SELECT id, client_id, video_id, transcriber, transcribe_cost_usd,
                   parsed_at, facts_emitted, facts_committed, channel_warnings,
-                  expert_email, confirmed_at
+                  expert_email, committed_at
              FROM ingest_audit
              WHERE client_id = ? AND ingest_kind = 'youtube'
              ORDER BY parsed_at DESC
@@ -2894,7 +2901,7 @@ def youtube_history(
             facts_committed=r["facts_committed"],
             channel_warnings=r["channel_warnings"],
             expert_email=r["expert_email"],
-            confirmed_at=r["confirmed_at"],
+            confirmed_at=r["committed_at"],   # NULL = pending (reopen stays editable)
         )
         for r in rows
     ]

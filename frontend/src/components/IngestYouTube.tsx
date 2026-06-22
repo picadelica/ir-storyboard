@@ -58,6 +58,9 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   const [expertEmail, setExpertEmail] = useState("");
   const [jobId, setJobId] = useState<string | null>(lsSaved.jobId || null);
   const [jobStatus, setJobStatus] = useState<string>(lsSaved.jobStatus || "");
+  const [jobStage, setJobStage] = useState<string>("");
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
+  const [reopened, setReopened] = useState(false);   // preview came from history reopen
   const [reopenLoading, setReopenLoading] = useState<string | null>(null);
   const [reopenError, setReopenError] = useState<string>("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -113,6 +116,13 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }
 
+  // Elapsed-seconds ticker while a job is processing (drives the status bar timer).
+  useEffect(() => {
+    if (jobStatus !== "processing") return;
+    const t = setInterval(() => setElapsedSec((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [jobStatus]);
+
   // Resume polling if we have a jobId that was processing when tab was left
   useEffect(() => {
     if (jobId && jobStatus === "processing" && !pollRef.current) {
@@ -120,10 +130,12 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         try {
           const status = await api.youtubePreviewStatus(clientId, jobId);
           setJobStatus(status.status);
+          if (status.stage) setJobStage(status.stage);
           if (status.status === "done" && status.result) {
             stopPolling();
             setPreview(status.result);
             setReadOnly(false);
+            setReopened(false);
             setDropped(new Set());
             setOverrides(new Set());
             setSelected(new Set());
@@ -136,7 +148,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             saveState({ jobStatus: "error" });
           }
         } catch { stopPolling(); }
-      }, 5000);
+      }, 2500);
     }
     return () => stopPolling();
   }, []);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -146,15 +158,19 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
     onSuccess: (job) => {
       setJobId(job.job_id);
       setJobStatus("processing");
+      setJobStage("");
+      setElapsedSec(0);
       saveState({ jobId: job.job_id, jobStatus: "processing", url });
       pollRef.current = setInterval(async () => {
         try {
           const status = await api.youtubePreviewStatus(clientId, job.job_id);
           setJobStatus(status.status);
+          if (status.stage) setJobStage(status.stage);
           if (status.status === "done" && status.result) {
             stopPolling();
             setPreview(status.result);
             setReadOnly(false);
+            setReopened(false);
             setDropped(new Set());
             setOverrides(new Set());
             setSelected(new Set());
@@ -167,7 +183,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             saveState({ jobStatus: "error" });
           }
         } catch { stopPolling(); }
-      }, 5000);
+      }, 2500);
     },
   });
 
@@ -232,7 +248,11 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
     try {
       const result = await api.youtubePreviewById(clientId, previewId);
       setPreview(result);
-      setReadOnly(true);
+      setReopened(true);
+      // Already-committed previews are read-only history; an UNCOMMITTED preview
+      // reopened from history is fully editable + committable — this is the path
+      // for an analyst who ran several ingests without reviewing and comes back.
+      setReadOnly(!!result.confirmed_at);
       setDropped(new Set());
       setOverrides(new Set());
       setSelected(new Set());
@@ -374,11 +394,21 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             </button>
           </div>
           {(previewMut.isPending || jobStatus === "processing") && (
-            <div className="text-xs text-ink-mute space-y-1">
-              <div>Запущено в фоне — обрабатываем…</div>
+            <div className="rounded-lg border border-ink-line bg-slate-50 p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-2 font-medium text-ink">
+                  <span className="inline-block w-3 h-3 rounded-full border-2 border-ink/30 border-t-ink animate-spin" />
+                  {jobStage || "Запущено в фоне — обрабатываем…"}
+                </span>
+                <span className="font-mono text-ink-mute tabular-nums">{fmtDuration(elapsedSec)}</span>
+              </div>
+              {/* Indeterminate progress bar — durations vary, so we show motion, not a %. */}
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full w-1/3 rounded-full bg-ink animate-[ytslide_1.4s_ease-in-out_infinite]" />
+              </div>
               <div className="text-[10px] text-slate-400">
-                Скачиваем аудио → транскрибируем → извлекаем факты.
-                Для часового видео ~5–15 мин. Можно закрыть этот таб и вернуться.
+                Метаданные → скачиваем аудио → транскрибируем по чанкам → извлекаем факты.
+                Для часового видео ~5–15 мин. Можно закрыть таб и вернуться — прогон идёт на сервере.
               </div>
             </div>
           )}
@@ -560,6 +590,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
               setScreen("input");
               setPreview(null);
               setReadOnly(false);
+              setReopened(false);
               setUrl("");
               setJobId(null);
               setJobStatus("");
@@ -593,8 +624,9 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         </div>
         <button
           onClick={() => {
-            if (readOnly) {
+            if (readOnly || reopened) {
               setReadOnly(false);
+              setReopened(false);
               setPreview(null);
               setScreen("history");
             } else {
@@ -610,18 +642,17 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
 
       {readOnly && (
         <div className="bg-slate-100 border border-slate-300 rounded-lg p-3 text-sm text-slate-700">
-          {preview.confirmed_at ? (
-            <>
-              <span className="font-medium">Committed</span> on{" "}
-              {new Date(preview.confirmed_at).toLocaleString()} —
-              read-only review. Edits and re-commit disabled.
-            </>
-          ) : (
-            <>
-              <span className="font-medium">Uncommitted preview</span> from history — read-only review.
-              To re-ingest this video, return to input and paste the URL again.
-            </>
-          )}
+          <span className="font-medium">Committed</span> on{" "}
+          {preview.confirmed_at && new Date(preview.confirmed_at).toLocaleString()} —
+          read-only review. Edits and re-commit disabled.
+        </div>
+      )}
+
+      {!readOnly && reopened && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+          <span className="font-medium">Незакоммиченный прогон из истории.</span>{" "}
+          Проверьте факты и сохраните в матрицу — кэш транскрипта уже есть, заново
+          распознавать не нужно.
         </div>
       )}
 

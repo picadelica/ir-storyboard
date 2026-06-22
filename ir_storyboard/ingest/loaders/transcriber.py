@@ -323,11 +323,12 @@ def get_or_transcribe(
     transcriber: Transcriber,
     conn: sqlite3.Connection,
     cache_dir: Path | None = None,
+    progress_cb=None,
 ) -> Transcript:
     """Return Transcript, using cached youtube_transcripts row if available.
 
     If the cached row was produced by a different transcriber, re-transcribes
-    and overwrites the cache row.
+    and overwrites the cache row. progress_cb(stage) drives the job's UI status.
     """
 
     _ensure_transcripts_table(conn)
@@ -338,6 +339,8 @@ def get_or_transcribe(
     ).fetchone()
 
     if row and row["transcriber"] == transcriber.name:
+        if progress_cb:
+            progress_cb("транскрипт найден в кэше")
         segs = [
             TranscriptSegment(**s)
             for s in json.loads(row["segments_json"])
@@ -369,8 +372,11 @@ def get_or_transcribe(
         cache_dir = Path("/tmp/ir_youtube_audio")
 
     t_start = time.time()
+    if progress_cb:
+        progress_cb("скачиваем аудио (yt-dlp)")
     audio_path = fetch_audio(video_id, cache_dir)
-    all_segments = transcribe_audio_chunks(audio_path, transcriber, language_hint=meta.language)
+    all_segments = transcribe_audio_chunks(
+        audio_path, transcriber, language_hint=meta.language, progress_cb=progress_cb)
     detected_language = meta.language or "en"
     wall_clock = int(time.time() - t_start)
 

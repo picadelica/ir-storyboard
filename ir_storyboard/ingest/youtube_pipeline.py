@@ -129,8 +129,10 @@ def run_youtube_preview(
     url: str,
     conn: sqlite3.Connection,
     cache_dir=None,
+    progress_cb=None,
 ) -> YouTubePreviewResult:
-    """Full pipeline: URL → metadata → transcript → extract → anchor → guard → preview."""
+    """Full pipeline: URL → metadata → transcript → extract → anchor → guard → preview.
+    progress_cb(stage: str) drives the job's UI status bar."""
     from pathlib import Path
 
     _ensure_audit_table_youtube(conn)
@@ -140,6 +142,8 @@ def run_youtube_preview(
     notes: list[str] = []
 
     # Step 1: normalize + metadata
+    if progress_cb:
+        progress_cb("получаем метаданные видео")
     canonical_url = normalize_url(url)
     meta = fetch_metadata(canonical_url)
 
@@ -156,7 +160,8 @@ def run_youtube_preview(
         and row_before["transcriber"] == transcriber.name
     )
 
-    transcript = get_or_transcribe(meta.video_id, meta, transcriber, conn, cache_dir=cache_path)
+    transcript = get_or_transcribe(meta.video_id, meta, transcriber, conn,
+                                   cache_dir=cache_path, progress_cb=progress_cb)
     if from_cache:
         notes.append(f"Transcript loaded from cache (transcriber={transcriber.name})")
 
@@ -166,6 +171,8 @@ def run_youtube_preview(
         transcribe_cost_usd = round((meta.duration_sec / 60.0) * 0.006, 4)
 
     # Steps 3-9: shared transcript → facts → audit core
+    if progress_cb:
+        progress_cb("извлекаем факты и якорим цитаты (LLM)")
     return run_transcript_preview(
         client_id=client_id,
         canonical_url=canonical_url,
@@ -349,7 +356,9 @@ def run_transcript_preview(
             stats["facts_emitted"],
             stats["greys"],
             stats["channel_warnings"],
-            now,
+            now,    # confirmed_at: legacy NOT NULL column = preview/parse time.
+                    # "Committed yet?" is tracked by the nullable committed_at column
+                    # (set only on commit) — confirmed_at can't express pending.
             preview_json,
             meta.video_id, transcriber_name, transcribe_cost_usd,
         ),
@@ -553,13 +562,14 @@ def run_youtube_commit(
         except Exception:
             skipped_count += 1
 
-    # Update audit
+    # Update audit. committed_at (nullable) is the real "this run was committed"
+    # signal — NULL means still pending, so a reopen stays editable + committable.
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """UPDATE ingest_audit
-           SET facts_committed = ?, expert_email = ?, confirmed_at = ?
+           SET facts_committed = ?, expert_email = ?, confirmed_at = ?, committed_at = ?
            WHERE id = ?""",
-        (committed, expert_email, now, preview_id),
+        (committed, expert_email, now, now, preview_id),
     )
     conn.commit()
 

@@ -4,6 +4,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Indeterminate progress bar (YouTube/audio ingest status) — a segment that
+   sweeps left→right while a background job runs. */
+@keyframes ytslide {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(420%); }
+}
+
 html, body, #root {
   height: 100%;
 }

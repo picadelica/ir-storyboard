@@ -90,6 +90,11 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "ingest_audit", "transcriber", "TEXT")
     _add_column_if_missing(conn, "ingest_audit", "transcribe_cost_usd", "REAL")
     _add_column_if_missing(conn, "ingest_audit", "transcribe_duration_sec", "INTEGER")
+    # Nullable "committed" marker. The legacy confirmed_at is NOT NULL DEFAULT
+    # CURRENT_TIMESTAMP, so it's set even at preview time and can't express
+    # "pending". committed_at is NULL until the analyst actually commits — this is
+    # what makes a reopened uncommitted preview editable instead of read-only.
+    _add_column_if_missing(conn, "ingest_audit", "committed_at", "TIMESTAMP")
     # youtube ingest: add source_url to facts for timestamp deep-links
     _add_column_if_missing(conn, "facts", "source_url", "TEXT DEFAULT ''")
     # audio ingest: snippet start timecode (seconds) for clickable audio sources
