@@ -214,6 +214,13 @@ export const api = {
     call<IngestConfirmOut>(`/clients/${clientId}/ingest/client-facts`, {
       method: "POST", body: JSON.stringify({ source_title: sourceTitle, facts }),
     }),
+  // Авторазбор файла от клиента (PDF, в т.ч. скан) → факты по всей матрице L1–L8
+  clientFactsPreview: (clientId: string, file: File): Promise<IngestPreviewOut> => {
+    const form = new FormData();
+    form.append("file", file);
+    return fetch(`${API_BASE}/clients/${clientId}/ingest/client-facts/preview`, { method: "POST", body: form })
+      .then(async r => { if (!r.ok) throw new Error(`${r.status} ${await r.text().catch(() => "")}`); return r.json(); });
+  },
 
   synthesizeWorkItems: (clientId: string, quarter?: string) => {
     const q = quarter ? `?quarter=${quarter}` : "";

@@ -1933,6 +1933,41 @@ def ingest_client_facts(client_id: str, body: ClientFactsIn, conn=Depends(get_co
     return IngestConfirmOut(written=written, skipped=skipped)
 
 
+@app.post("/api/clients/{client_id}/ingest/client-facts/preview", response_model=ResearchPreviewOut)
+async def client_facts_preview(client_id: str, file: UploadFile = File(...), conn=Depends(get_conn)):
+    """Auto-parse a file the CLIENT sent personally (incl. image/scanned PDF): Claude
+    vision reads it and maps atomic facts to the matrix. Unlike the 'other PDF' path,
+    ALL layers are open (L1–L8) — client material is often personal founder info, and
+    the source is the client (offline_interview), not the web. Returns candidates the
+    analyst reviews; commit goes through /ingest/client-facts as must-have (blue)."""
+    from ir_storyboard.llm import extract_facts_from_pdf
+    _check_client(client_id, conn)
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(400, "Нужен PDF-файл")
+    pdf_bytes = await file.read()
+    available_subsections = [s.id for L in LAYERS for s in L.subsections]  # all L1–L8
+    facts = extract_facts_from_pdf(
+        pdf_bytes, available_subsections,
+        subsection_descriptions=matrix.get_subsection_descriptions(conn),
+        client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
+    )
+    candidates: List[FactCandidateOut] = []
+    for f in facts:
+        try:
+            sub = subsection_by_id(f.subsection_id)
+            layer_id = int(f.subsection_id.split(".")[0])
+            layer_name = layer_by_id(layer_id).name
+        except KeyError:
+            continue
+        candidates.append(FactCandidateOut(
+            text=f.text, suggested_subsection_id=f.subsection_id,
+            suggested_subsection_name=sub.name, suggested_layer_id=layer_id,
+            suggested_layer_name=layer_name, suggested_flag=f.flag,
+            confidence=f.confidence, rationale=(f.rationale or "")[:160]))
+    return ResearchPreviewOut(channel="offline_interview", source_url="",
+                              source_title=file.filename or "От клиента", candidates=candidates)
+
+
 @app.post("/api/clients/{client_id}/ingest/confirm", response_model=IngestConfirmOut)
 def research_ingest_confirm(client_id: str, body: IngestConfirmIn, conn=Depends(get_conn)):
     written: List[int] = []

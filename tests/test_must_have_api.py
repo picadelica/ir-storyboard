@@ -83,3 +83,43 @@ def test_cell_summary_reports_n_must(ctx):
     cells = client.get("/api/clients/co/matrix").json()
     cell = next(c for c in cells if c["subsection_id"] == "4.1")
     assert cell.get("n_must") == 1
+
+
+def test_client_facts_pdf_preview_allows_L1(ctx, monkeypatch):
+    """Auto-parse of a client file maps facts across ALL layers (L1 included),
+    unlike the web 'other PDF' path which is capped at L2–L8."""
+    from ir_storyboard import llm
+    client, _ = ctx
+
+    def _fake_extract(pdf_bytes, available_subsections, **kw):
+        assert "1.1" in available_subsections  # L1 must be open for client material
+        return [
+            llm.ExtractedFact(text="Основатель вырос в семье инженеров.", subsection_id="1.1", flag="green"),
+            llm.ExtractedFact(text="Закрыли раунд A на $5M.", subsection_id="4.1", flag="green"),
+        ]
+    monkeypatch.setattr(llm, "extract_facts_from_pdf", _fake_extract)
+
+    files = {"file": ("client.pdf", b"%PDF-1.4 fake", "application/pdf")}
+    r = client.post("/api/clients/co/ingest/client-facts/preview", files=files)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["channel"] == "offline_interview"
+    sids = {c["suggested_subsection_id"] for c in body["candidates"]}
+    assert "1.1" in sids and "4.1" in sids
+
+    # committing the previewed facts → all must_have, L1 included
+    facts = [{"text": c["text"], "subsection_id": c["suggested_subsection_id"], "flag": c["suggested_flag"]}
+             for c in body["candidates"]]
+    r2 = client.post("/api/clients/co/ingest/client-facts",
+                     json={"source_title": body["source_title"], "facts": facts})
+    assert r2.status_code == 200, r2.text
+    assert len(r2.json()["written"]) == 2
+    l1 = client.get("/api/clients/co/cells/1.1/facts").json()
+    assert any(f["must_have"] and "инженеров" in f["text"] for f in l1)
+
+
+def test_client_facts_pdf_rejects_non_pdf(ctx):
+    client, _ = ctx
+    files = {"file": ("notes.txt", b"hello", "text/plain")}
+    r = client.post("/api/clients/co/ingest/client-facts/preview", files=files)
+    assert r.status_code == 400
