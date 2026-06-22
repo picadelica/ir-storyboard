@@ -6,8 +6,9 @@
 
 **Последнее обновление:** 2026-06-22
 **Ветка:** `feat/v2` (запушена)
-**HEAD:** `ae66807 feat(facts): attribute a fact to a specific founder (speaker)`
-**Прод:** 216.57.108.107, перекатан 2026-06-22. Тесты: `pytest -m "not network"` → **241 passed**.
+**HEAD:** `ad6dba9 feat: must-have (синие) факты от клиента + вкладка "От клиента" + вес в Deliver`
+**Прод:** 216.57.108.107, перекатан 2026-06-22 (deploy_ir_storyboard зелёный, health 200).
+Тесты: `pytest` → **247 passed** (1 fail — `test_youtube_e2e` сетевой, `@pytest.mark.network`).
 
 ## Предложения аналитиков (правки после деки) — 2026-06-22
 
@@ -25,6 +26,19 @@
   «Произвольный PDF» (любой PDF, в т.ч. картиночный → Claude vision читает напрямую → факты
   ложатся в матрицу L2–L8 → аналитик отмечает → коммит как archival, источник = файл;
   `llm.extract_facts_from_pdf`, `POST .../other-pdf/preview` + `.../other-pdf/commit`). ✓ на проде.
+- **№4 Must-have факты от клиента (синий) + вес в Deliver.** Факты, присланные клиентом лично —
+  ключевые. Реализовано оверлеем `facts.must_have` (boolean), НЕ 4-м значением `flag` (избегаем
+  перестройки таблицы из-за `CHECK(flag IN green/red/grey)`; идемпотентный ALTER в init_schema).
+  Рендер синим: `FlagDot mustHave`, tailwind `flag.blue`, в дровере синяя точка + ★-префикс +
+  ★-тоггл (`POST /facts/{id}/must-have`, `matrix.set_fact_must_have`), в ячейке матрицы синий
+  счётчик `★N` (`cell_summary.n_must`). Новая Build-вкладка **«От клиента»** (`IngestClientFacts`):
+  вставка фактов → `POST /clients/{id}/ingest/client-facts` (канал offline_interview — провенанс
+  по названию источника, разрешает L1-L3; `must_have=True`). Deliver: `brief.py` выносит must-have
+  отдельным блоком «★ Must-have от клиента (обязательно отрази)» в начало + ★-префикс + правило в
+  BRIEF_RULES + поле в render_json. Тест `tests/test_must_have_api.py` (тоггл / ingest / n_must).
+  Проверено e2e в браузере (seed-бэкенд): вставка факта в 3.3 → синий в дровере и в матрице,
+  brief содержит блок must-have. Колонка `must_have` (DEFAULT 0) применяется init_schema при
+  старте контейнера — пред-создание не требовалось. ✓ на проде.
 
 **Карточка компании «About» (2026-06-20):** компания — отдельная первоклассная сущность, не
 строка в якоре верификации. Вкладка **Map → «About»** (первой, перед Matrix). Структурный
