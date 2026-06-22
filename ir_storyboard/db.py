@@ -132,6 +132,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # is from — interviews with several founders (e.g. both Libermans) otherwise
     # leave facts unattributed to a specific person.
     _add_column_if_missing(conn, "facts", "speaker_entity_id", "INTEGER")
+    # must-have: a fact the client provided personally — rendered BLUE, weighted
+    # heavily in Deliver. An overlay on the green/red/grey flag (avoids a CHECK
+    # rebuild of the facts table for a 4th flag value).
+    _add_column_if_missing(conn, "facts", "must_have", "INTEGER NOT NULL DEFAULT 0")
     # fact-trust (phase 1): identity anchor outside the narrative matrix — the
     # company, its founders, and known decoys (different people with overlapping
     # names). Bare, source-linked facts only; the narrative lives in L1/L2 cells.

@@ -12,6 +12,8 @@ export default {
           "red-bg": "#fee2e2",
           grey: "#737373",
           "grey-bg": "#f5f5f5",
+          blue: "#2563eb",
+          "blue-bg": "#dbeafe",
           mixed: "#a16207",
           "mixed-bg": "#fef3c7",
           empty: "#cbd5e1",

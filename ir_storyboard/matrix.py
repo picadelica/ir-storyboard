@@ -239,7 +239,7 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
              text: str, flag: str, source_id: Optional[int] = None,
              confidence: float = 1.0, valid_until: Optional[str] = None,
              evidence_snippet: str = "", rationale: Optional[str] = None,
-             created_by: Optional[str] = None) -> int:
+             created_by: Optional[str] = None, must_have: bool = False) -> int:
     if flag not in (FLAG_GREEN, FLAG_RED, FLAG_GREY):
         raise ValueError(f"bad flag {flag}")
     rationale = validate_rationale(flag, rationale)
@@ -256,10 +256,10 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
     cell_id = get_or_create_cell(conn, client_id, subsection_id)
     cur = conn.execute(
         """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until,
-                              evidence_snippet, rationale, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                              evidence_snippet, rationale, created_by, must_have)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (cell_id, text, flag, source_id, confidence, valid_until,
-         evidence_snippet, rationale, created_by),
+         evidence_snippet, rationale, created_by, 1 if must_have else 0),
     )
     conn.commit()
     fact_id = cur.lastrowid
@@ -280,7 +280,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
-                  f.speaker_entity_id, se.name AS speaker_name,
+                  f.speaker_entity_id, se.name AS speaker_name, f.must_have,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -306,7 +306,7 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
-                  f.speaker_entity_id, se.name AS speaker_name,
+                  f.speaker_entity_id, se.name AS speaker_name, f.must_have,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -339,6 +339,13 @@ def set_fact_verification(conn: sqlite3.Connection, fact_id: int, *,
             WHERE id=?""",
         (verification, note or "", entity or "", _json.dumps(sources or []), fact_id),
     )
+    conn.commit()
+
+
+def set_fact_must_have(conn: sqlite3.Connection, fact_id: int, must_have: bool) -> None:
+    """Mark/unmark a fact as a client-provided must-have (rendered blue, weighted
+    in Deliver)."""
+    conn.execute("UPDATE facts SET must_have=? WHERE id=?", (1 if must_have else 0, fact_id))
     conn.commit()
 
 
@@ -630,6 +637,7 @@ def cell_summary(conn: sqlite3.Connection, client_id: str) -> List[Dict[str, Any
                SUM(CASE WHEN f.flag='green' THEN 1 ELSE 0 END) AS n_green,
                SUM(CASE WHEN f.flag='red'   THEN 1 ELSE 0 END) AS n_red,
                SUM(CASE WHEN f.flag='grey'  THEN 1 ELSE 0 END) AS n_grey,
+               SUM(CASE WHEN f.must_have=1  THEN 1 ELSE 0 END) AS n_must,
                MAX(f.captured_at) AS last_update,
                GROUP_CONCAT(DISTINCT src.channel) AS channels
         FROM subsections s

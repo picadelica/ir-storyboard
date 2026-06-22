@@ -106,6 +106,10 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
     mutationFn: ({ id, entityId }: { id: number; entityId: number | null }) => api.setFactSpeaker(id, entityId),
     onSuccess: invalidate,
   });
+  const setMustHave = useMutation({
+    mutationFn: ({ id, mustHave }: { id: number; mustHave: boolean }) => api.setMustHave(id, mustHave),
+    onSuccess: invalidate,
+  });
 
   const channelHint = subsection
     ? `Primary channels for L${subsection.layer.id}: ${subsection.layer.primary_channels.join(", ")}`
@@ -185,10 +189,19 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
             ) : (
               <>
                 <div className="flex items-start gap-2 mb-1.5">
-                  <FlagDot flag={f.flag} className="mt-1.5" />
+                  <FlagDot flag={f.flag} mustHave={f.must_have} className="mt-1.5" />
                   <div className={`text-sm leading-snug whitespace-pre-wrap flex-1
-                    ${f.state === "rejected" || f.verification === "refuted" ? "line-through text-ink-mute" : ""}`}>{f.text}</div>
+                    ${f.state === "rejected" || f.verification === "refuted" ? "line-through text-ink-mute" : ""}`}>
+                    {f.must_have && <span className="text-flag-blue font-semibold mr-1" title="must-have — от клиента">★</span>}
+                    {f.text}
+                  </div>
                   <div className="flex items-center gap-1 shrink-0">
+                    {f.state !== "rejected" && (
+                      <button onClick={() => setMustHave.mutate({ id: f.id, mustHave: !f.must_have })}
+                        title="факт от клиента лично (must-have, синий)"
+                        className={`text-[12px] px-1.5 py-0.5 rounded hover:bg-white
+                          ${f.must_have ? "text-flag-blue" : "text-ink-mute hover:text-flag-blue"}`}>★</button>
+                    )}
                     {f.state === "rejected" ? (
                       <button onClick={() => restoreFact.mutate(f.id)}
                         className="text-[11px] text-ink-mute hover:text-ink px-1.5 py-0.5 rounded hover:bg-white">вернуть</button>

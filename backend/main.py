@@ -247,6 +247,7 @@ class CellSummaryOut(BaseModel):
     n_green: int
     n_red: int
     n_grey: int
+    n_must: int = 0
     last_update: Optional[str] = None
     channels: List[str] = []
 
@@ -274,6 +275,7 @@ class FactOut(BaseModel):
     state: str = "active"
     speaker_entity_id: Optional[int] = None   # which founder this fact is from
     speaker_name: Optional[str] = None
+    must_have: bool = False   # client-provided, must-have → rendered blue
     n_sources: int = 1   # corroboration: 1 (primary) + folded-in sources
 
 
@@ -432,6 +434,7 @@ def _row_to_fact(row) -> FactOut:
         state=(row["state"] if "state" in keys else "active") or "active",
         speaker_entity_id=row["speaker_entity_id"] if "speaker_entity_id" in keys else None,
         speaker_name=row["speaker_name"] if "speaker_name" in keys else None,
+        must_have=bool(row["must_have"]) if "must_have" in keys and row["must_have"] else False,
         n_sources=1 + (row["extra_sources"] if "extra_sources" in keys and row["extra_sources"] else 0),
     )
 
@@ -1093,6 +1096,19 @@ def set_speaker(fact_id: int, body: SpeakerIn, conn=Depends(get_conn)):
         if ent is None or ent["client_id"] != row["client_id"]:
             raise HTTPException(400, "entity not found for this client")
     matrix.set_fact_speaker(conn, fact_id, body.entity_id)
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
+class MustHaveIn(BaseModel):
+    must_have: bool
+
+
+@app.post("/api/facts/{fact_id}/must-have", response_model=FactOut)
+def set_must_have(fact_id: int, body: MustHaveIn, conn=Depends(get_conn)):
+    """Mark/unmark a fact as a client-provided must-have (blue, weighted in Deliver)."""
+    if matrix.get_fact(conn, fact_id) is None:
+        raise HTTPException(404, "fact not found")
+    matrix.set_fact_must_have(conn, fact_id, body.must_have)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -1871,6 +1887,44 @@ def other_pdf_commit(client_id: str, body: OtherPdfCommitIn, conn=Depends(get_co
             fid = matrix.add_fact(conn, client_id=client_id, subsection_id=f.subsection_id,
                                   text=f.text, flag=f.flag, source_id=src_id,
                                   evidence_snippet=f.text[:400], rationale=rationale or None)
+            written.append(fid)
+        except ValueError:
+            skipped += 1
+    if written:
+        synthesize_work_items(conn, client_id)
+    return IngestConfirmOut(written=written, skipped=skipped)
+
+
+class ClientFactIn(BaseModel):
+    text: str
+    subsection_id: str
+    flag: str = "green"
+    rationale: str = ""
+
+
+class ClientFactsIn(BaseModel):
+    source_title: str = "От клиента"
+    facts: List[ClientFactIn]
+
+
+@app.post("/api/clients/{client_id}/ingest/client-facts", response_model=IngestConfirmOut)
+def ingest_client_facts(client_id: str, body: ClientFactsIn, conn=Depends(get_conn)):
+    """'Инфа от клиента': facts the client provided personally → added as must-have
+    (blue, weighted in Deliver). Source = the client (offline_interview channel —
+    title-only provenance, may fill any layer incl. L1–L3)."""
+    _check_client(client_id, conn)
+    src_id = matrix.add_source(conn, channel="offline_interview", title=body.source_title or "От клиента")
+    written: List[int] = []
+    skipped = 0
+    for f in body.facts:
+        if not f.text.strip() or not f.subsection_id:
+            skipped += 1
+            continue
+        rationale = f.rationale.strip() or ("прислал клиент (must-have)" if f.flag == "red" else None)
+        try:
+            fid = matrix.add_fact(conn, client_id=client_id, subsection_id=f.subsection_id,
+                                  text=f.text, flag=f.flag, source_id=src_id,
+                                  rationale=rationale, must_have=True)
             written.append(fid)
         except ValueError:
             skipped += 1

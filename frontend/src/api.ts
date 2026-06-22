@@ -208,6 +208,13 @@ export const api = {
       method: "POST", body: JSON.stringify({ source_title: sourceTitle, facts }),
     }),
 
+  // Инфа от клиента — факты, присланные клиентом лично (must-have, синие)
+  ingestClientFacts: (clientId: string, sourceTitle: string,
+    facts: { text: string; subsection_id: string; flag?: string; rationale?: string }[]): Promise<IngestConfirmOut> =>
+    call<IngestConfirmOut>(`/clients/${clientId}/ingest/client-facts`, {
+      method: "POST", body: JSON.stringify({ source_title: sourceTitle, facts }),
+    }),
+
   synthesizeWorkItems: (clientId: string, quarter?: string) => {
     const q = quarter ? `?quarter=${quarter}` : "";
     return call<SynthesizeResult>(`/clients/${clientId}/work-items/synthesize${q}`, { method: "POST" });
@@ -358,6 +365,8 @@ export const api = {
     call<Fact>(`/facts/${factId}/verification`, { method: "POST", body: JSON.stringify(body) }),
   setFactSpeaker: (factId: number, entityId: number | null): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/speaker`, { method: "POST", body: JSON.stringify({ entity_id: entityId }) }),
+  setMustHave: (factId: number, mustHave: boolean): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/must-have`, { method: "POST", body: JSON.stringify({ must_have: mustHave }) }),
   rejectFact: (factId: number): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/reject`, { method: "POST" }),
   restoreFact: (factId: number): Promise<Fact> =>

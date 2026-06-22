@@ -163,6 +163,7 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
                           <span className="tabular-nums">
                             {total} fact{total === 1 ? "" : "s"}
                             {cell.n_red ? <span className="text-flag-red"> · {cell.n_red} concern</span> : null}
+                            {cell.n_must ? <span className="text-flag-blue"> · ★{cell.n_must}</span> : null}
                           </span>
                         )}
                         <span className="flex items-center gap-1.5">

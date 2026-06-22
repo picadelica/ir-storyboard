@@ -16,6 +16,7 @@ from .models import LAYERS
 
 BRIEF_RULES = (
     "Работай ТОЛЬКО с фактологией ниже — не добавляй внешних фактов и не выдумывай.\n"
+    "- ★ must-have = факт прислал клиент лично; это КЛЮЧЕВОЕ — обязательно отрази в материале, на видном месте.\n"
     "- [green] = подтверждённый факт, можно утверждать прямо.\n"
     "- [grey] = известный пробел: обозначь как открытый вопрос или опусти, не достраивай.\n"
     "- [red] = факт-риск или противоречие: используй осторожно, с оговоркой.\n"
@@ -119,6 +120,7 @@ def collect_factology(conn, client_id: str, flags: Optional[list] = None,
                 facts.append({
                     "text": r["text"],
                     "flag": r["flag"],
+                    "must_have": bool(r["must_have"]) if "must_have" in r.keys() else False,
                     "rationale": r["rationale"] or "",
                     "source": {
                         "url": r["source_url"] or "",
@@ -149,6 +151,15 @@ def render_md(client: dict, template: dict, analyst_prompt: str, factology: list
         lines += ["## Постановка аналитика", analyst_prompt.strip(), ""]
     if (template.get("body") or "").strip():
         lines += ["## Задача", template["body"].strip(), ""]
+    # Must-have block first — client-provided, key facts the material must reflect.
+    must = [(layer, sub, f) for layer in factology for sub in layer["subsections"]
+            for f in sub["facts"] if f.get("must_have")]
+    if must:
+        lines += ["## ★ Must-have от клиента (обязательно отрази)", ""]
+        for layer, sub, f in must:
+            lines.append(f"- {f['text']} _(— {sub['subsection_id']} {sub['subsection_name']})_{_cite(f['source'])}")
+        lines.append("")
+
     lines += ["## Фактология (verified)", ""]
     if not factology:
         lines += ["_(нет фактов под выбранный фильтр)_", ""]
@@ -157,7 +168,8 @@ def render_md(client: dict, template: dict, analyst_prompt: str, factology: list
         for sub in layer["subsections"]:
             lines.append(f"**{sub['subsection_id']} {sub['subsection_name']}**")
             for f in sub["facts"]:
-                lines.append(f"- [{f['flag']}] {f['text']}{_cite(f['source'])}")
+                star = "★ " if f.get("must_have") else ""
+                lines.append(f"- {star}[{f['flag']}] {f['text']}{_cite(f['source'])}")
                 if f["flag"] in ("red", "grey") and f["rationale"]:
                     lines.append(f"  - примечание: {f['rationale']}")
             lines.append("")
@@ -173,6 +185,7 @@ def render_json(client: dict, template: dict, analyst_prompt: str, factology: li
                 facts.append({
                     "text": f["text"],
                     "flag": f["flag"],
+                    "must_have": f.get("must_have", False),
                     "layer_id": layer["layer_id"],
                     "layer_name": layer["layer_name"],
                     "subsection_id": sub["subsection_id"],

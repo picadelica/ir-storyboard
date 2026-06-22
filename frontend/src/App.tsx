@@ -19,6 +19,7 @@ import ResearchView from "./components/ResearchView";
 import IngestLLMReport from "./components/IngestLLMReport";
 import IngestYouTube from "./components/IngestYouTube";
 import IngestAudio from "./components/IngestAudio";
+import IngestClientFacts from "./components/IngestClientFacts";
 import MethodologyView from "./components/MethodologyView";
 import PlanView from "./components/PlanView";
 import BriefComposer from "./components/BriefComposer";
@@ -129,6 +130,9 @@ function ClientPage() {
           {activeTab === "audio" && (
             <IngestAudio key={clientId} clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
           )}
+          {activeTab === "client-facts" && (
+            <IngestClientFacts key={clientId} clientId={clientId!} onJumpToCell={onJumpToCell} layers={layers.data} />
+          )}
           {activeTab === "methodology" && (
             <MethodologyView key={clientId} clientId={clientId!} />
           )}
@@ -205,6 +209,7 @@ const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
       { id: "ingest", label: "LLM report" },
       { id: "youtube", label: "YouTube" },
       { id: "audio", label: "Audio" },
+      { id: "client-facts", label: "От клиента" },
       { id: "research", label: "Research" },
       { id: "work", label: "Work" },
     ],

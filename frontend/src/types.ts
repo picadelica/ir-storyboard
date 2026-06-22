@@ -345,6 +345,7 @@ export interface CellSummary {
   n_green: number;
   n_red: number;
   n_grey: number;
+  n_must?: number;
   last_update?: string | null;
   channels?: Channel[];
 }
@@ -372,6 +373,7 @@ export interface Fact {
   state?: string;               // active | review | rejected
   speaker_entity_id?: number | null;  // which founder this fact is from
   speaker_name?: string | null;
+  must_have?: boolean;          // client-provided must-have → blue
   n_sources?: number;           // corroboration count
 }
 
