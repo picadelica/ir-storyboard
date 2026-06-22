@@ -272,6 +272,8 @@ class FactOut(BaseModel):
     verification_note: str = ""
     entity: str = ""
     state: str = "active"
+    speaker_entity_id: Optional[int] = None   # which founder this fact is from
+    speaker_name: Optional[str] = None
     n_sources: int = 1   # corroboration: 1 (primary) + folded-in sources
 
 
@@ -428,6 +430,8 @@ def _row_to_fact(row) -> FactOut:
         verification_note=(row["verification_note"] if "verification_note" in keys else "") or "",
         entity=(row["entity"] if "entity" in keys else "") or "",
         state=(row["state"] if "state" in keys else "active") or "active",
+        speaker_entity_id=row["speaker_entity_id"] if "speaker_entity_id" in keys else None,
+        speaker_name=row["speaker_name"] if "speaker_name" in keys else None,
         n_sources=1 + (row["extra_sources"] if "extra_sources" in keys and row["extra_sources"] else 0),
     )
 
@@ -1070,6 +1074,25 @@ def set_verification(fact_id: int, v: VerificationIn, conn=Depends(get_conn)):
         raise HTTPException(404, "fact not found")
     matrix.set_fact_verification(conn, fact_id, verification=v.verification,
                                  note=v.note, entity=v.entity)
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
+class SpeakerIn(BaseModel):
+    entity_id: Optional[int] = None   # founder entity; null clears attribution
+
+
+@app.post("/api/facts/{fact_id}/speaker", response_model=FactOut)
+def set_speaker(fact_id: int, body: SpeakerIn, conn=Depends(get_conn)):
+    """Attribute a fact to a specific founder (entities row). Validates the entity
+    belongs to the same client."""
+    row = matrix.get_fact(conn, fact_id)
+    if row is None:
+        raise HTTPException(404, "fact not found")
+    if body.entity_id is not None:
+        ent = conn.execute("SELECT client_id FROM entities WHERE id=?", (body.entity_id,)).fetchone()
+        if ent is None or ent["client_id"] != row["client_id"]:
+            raise HTTPException(400, "entity not found for this client")
+    matrix.set_fact_speaker(conn, fact_id, body.entity_id)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 

@@ -128,6 +128,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "facts", "verification_at", "TIMESTAMP")
     _add_column_if_missing(conn, "facts", "entity", "TEXT NOT NULL DEFAULT ''")
     _add_column_if_missing(conn, "facts", "state", "TEXT NOT NULL DEFAULT 'active'")
+    # speaker attribution: which founder (entities row, kind='founder') this fact
+    # is from — interviews with several founders (e.g. both Libermans) otherwise
+    # leave facts unattributed to a specific person.
+    _add_column_if_missing(conn, "facts", "speaker_entity_id", "INTEGER")
     # fact-trust (phase 1): identity anchor outside the narrative matrix — the
     # company, its founders, and known decoys (different people with overlapping
     # names). Bare, source-linked facts only; the narrative lives in L1/L2 cells.

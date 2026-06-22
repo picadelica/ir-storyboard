@@ -370,6 +370,8 @@ export interface Fact {
   verification_note?: string;
   entity?: string;              // attributed subject on conflation
   state?: string;               // active | review | rejected
+  speaker_entity_id?: number | null;  // which founder this fact is from
+  speaker_name?: string | null;
   n_sources?: number;           // corroboration count
 }
 

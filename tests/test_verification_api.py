@@ -197,6 +197,22 @@ def test_merge_facts(ctx):
     assert keep["n_sources"] == 2
 
 
+def test_fact_speaker_attribution(ctx):
+    """Attribute a fact to a founder, see it on the cell fact, then clear it."""
+    client, fid, _ = ctx
+    fo = client.post("/api/clients/co/entities", json={"kind": "founder", "name": "David Liberman"}).json()
+    r = client.post(f"/api/facts/{fid}/speaker", json={"entity_id": fo["id"]}).json()
+    assert r["speaker_entity_id"] == fo["id"] and r["speaker_name"] == "David Liberman"
+    # visible on the cell fact
+    fact = next(f for f in client.get("/api/clients/co/cells/2.1/facts").json() if f["id"] == fid)
+    assert fact["speaker_name"] == "David Liberman"
+    # an entity from another client is rejected
+    assert client.post(f"/api/facts/{fid}/speaker", json={"entity_id": 99999}).status_code == 400
+    # clear
+    cleared = client.post(f"/api/facts/{fid}/speaker", json={"entity_id": None}).json()
+    assert cleared["speaker_entity_id"] is None and cleared["speaker_name"] is None
+
+
 def test_entities_crud(ctx):
     client, _, _ = ctx
     e = client.post("/api/clients/co/entities",

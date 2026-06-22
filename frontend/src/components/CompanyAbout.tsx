@@ -67,7 +67,61 @@ export default function CompanyAbout({ clientId }: Props) {
         <SectionBlock section={{ id: "", label: "Прочее", hint: "факты без секции", keyPh: "ключ", valPh: "значение" }}
           entityId={company.id} facts={ungrouped} onChanged={inval} />
       )}
+      <FoundersBlock clientId={clientId} founders={(entities.data ?? []).filter(e => e.kind === "founder")} onChanged={inval} />
     </div>
+  );
+}
+
+// Founders list — kind='founder' entities of the company. They're who facts get
+// attributed to (the "кто говорит" picker on each fact in the cell drawer).
+function FoundersBlock({ clientId, founders, onChanged }: { clientId: string; founders: Entity[]; onChanged: () => void }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("");
+  const create = useMutation({
+    mutationFn: () => api.createEntity(clientId, { kind: "founder", name: name.trim(), role: role.trim(), confirmed: true }),
+    onSuccess: () => { setAdding(false); setName(""); setRole(""); onChanged(); },
+  });
+  const remove = useMutation({ mutationFn: (id: number) => api.deleteEntity(id), onSuccess: onChanged });
+  const inp = "text-xs border border-ink-line rounded px-2 py-1";
+
+  return (
+    <section className="bg-white rounded-lg border border-ink-line p-4">
+      <div className="flex items-baseline justify-between gap-3 mb-1">
+        <h3 className="text-sm font-semibold">Фаундеры</h3>
+        <span className="text-[11px] text-ink-mute text-right">к ним привязываются факты — кто именно говорит</span>
+      </div>
+      {founders.length === 0 ? (
+        <div className="text-xs text-ink-mute italic py-1">Пусто. Добавь фаундеров — тогда на фактах можно будет указывать, кто говорит.</div>
+      ) : (
+        <ul className="space-y-1 py-1">
+          {founders.map(f => (
+            <li key={f.id} className="text-sm flex items-baseline gap-2 group">
+              <span className="font-medium">{f.name}</span>
+              {f.role && <span className="text-xs text-ink-mute">· {f.role}</span>}
+              {Object.entries(f.links || {}).map(([k, url]) => (
+                <a key={k} href={url} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:underline">{k}</a>
+              ))}
+              <button onClick={() => remove.mutate(f.id)}
+                className="ml-auto text-ink-mute hover:text-red-600 opacity-0 group-hover:opacity-100 text-xs">удалить</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {adding ? (
+        <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+          <input className={`${inp} w-40`} placeholder="имя фаундера *" value={name} onChange={e => setName(e.target.value)} autoFocus
+            onKeyDown={e => { if (e.key === "Enter" && name.trim()) create.mutate(); }} />
+          <input className={`${inp} w-36`} placeholder="роль (напр. CEO)" value={role} onChange={e => setRole(e.target.value)} />
+          <button onClick={() => create.mutate()} disabled={create.isPending || !name.trim()}
+            className="text-[11px] px-2 py-1 rounded bg-ink text-white hover:bg-black disabled:bg-slate-300">{create.isPending ? "…" : "добавить"}</button>
+          <button onClick={() => setAdding(false)} className="text-[11px] text-ink-mute hover:text-ink">отмена</button>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)}
+          className="mt-2 text-[11px] px-2 py-0.5 rounded border border-dashed border-ink-line text-ink-mute hover:bg-slate-50">+ фаундер</button>
+      )}
+    </section>
   );
 }
 

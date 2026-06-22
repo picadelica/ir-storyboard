@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { api } from "../api";
-import type { Channel, Fact, Flag, Layer } from "../types";
+import type { Channel, Entity, Fact, Flag, Layer } from "../types";
 import SourceLine from "./SourceLine";
 import AudioSourcePanel, { type AudioSourceHandle } from "./AudioSourcePanel";
 import FlagDot from "./FlagDot";
@@ -96,6 +96,14 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
   });
   const restoreFact = useMutation({
     mutationFn: (id: number) => api.restoreFact(id),
+    onSuccess: invalidate,
+  });
+
+  // founder attribution: who (of the company's founders) this fact is from
+  const entities = useQuery<Entity[]>({ queryKey: ["entities", clientId], queryFn: () => api.entities(clientId) });
+  const founders = (entities.data ?? []).filter(e => e.kind === "founder");
+  const setSpeaker = useMutation({
+    mutationFn: ({ id, entityId }: { id: number; entityId: number | null }) => api.setFactSpeaker(id, entityId),
     onSuccess: invalidate,
   });
 
@@ -208,6 +216,20 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                     </span>
                     {f.entity && <span className="text-[11px] font-mono text-ink-mute border border-ink-line rounded px-1.5">≠ {f.entity}</span>}
                     {f.verification_note && <span className="text-[11px] text-ink-mute">{f.verification_note}</span>}
+                  </div>
+                )}
+                {founders.length > 0 && f.state !== "rejected" && (
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <span className="text-[11px] text-ink-mute" title="кто из фаундеров это говорит/чей факт">🗣</span>
+                    <select
+                      value={f.speaker_entity_id ?? ""}
+                      onChange={e => setSpeaker.mutate({ id: f.id, entityId: e.target.value ? Number(e.target.value) : null })}
+                      className={`text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white max-w-[15rem]
+                        ${f.speaker_entity_id ? "text-ink" : "text-ink-mute"}`}
+                    >
+                      <option value="">— кто говорит? —</option>
+                      {founders.map(fo => <option key={fo.id} value={fo.id}>{fo.name}</option>)}
+                    </select>
                   </div>
                 )}
                 {(f.n_sources ?? 1) > 1 && (

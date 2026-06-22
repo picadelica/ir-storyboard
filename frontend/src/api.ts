@@ -337,6 +337,8 @@ export const api = {
   setVerification: (factId: number, body: { verification: string; note?: string; entity?: string }):
     Promise<Fact> =>
     call<Fact>(`/facts/${factId}/verification`, { method: "POST", body: JSON.stringify(body) }),
+  setFactSpeaker: (factId: number, entityId: number | null): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/speaker`, { method: "POST", body: JSON.stringify({ entity_id: entityId }) }),
   rejectFact: (factId: number): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/reject`, { method: "POST" }),
   restoreFact: (factId: number): Promise<Fact> =>
