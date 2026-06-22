@@ -1806,6 +1806,79 @@ def research_ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(
     )
 
 
+@app.post("/api/clients/{client_id}/ingest/other-pdf/preview", response_model=ResearchPreviewOut)
+async def other_pdf_preview(client_id: str, file: UploadFile = File(...), conn=Depends(get_conn)):
+    """'Other' path: an ARBITRARY pdf (incl. image/scanned). Claude vision reads it
+    and maps atomic facts to the matrix. Returns candidates for analyst review;
+    commit goes through /ingest/confirm as archival (source = the file)."""
+    from ir_storyboard.llm import extract_facts_from_pdf
+    _check_client(client_id, conn)
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(400, "Нужен PDF-файл")
+    pdf_bytes = await file.read()
+    # archival document → L2–L8 (L1 personal story stays interview-only)
+    available_subsections = [s.id for L in LAYERS for s in L.subsections if L.id >= 2]
+    facts = extract_facts_from_pdf(
+        pdf_bytes, available_subsections,
+        subsection_descriptions=matrix.get_subsection_descriptions(conn),
+        client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
+    )
+    candidates: List[FactCandidateOut] = []
+    for f in facts:
+        try:
+            sub = subsection_by_id(f.subsection_id)
+            layer_id = int(f.subsection_id.split(".")[0])
+            layer_name = layer_by_id(layer_id).name
+        except KeyError:
+            continue
+        candidates.append(FactCandidateOut(
+            text=f.text, suggested_subsection_id=f.subsection_id,
+            suggested_subsection_name=sub.name, suggested_layer_id=layer_id,
+            suggested_layer_name=layer_name, suggested_flag=f.flag,
+            confidence=f.confidence, rationale=(f.rationale or "")[:160]))
+    return ResearchPreviewOut(channel="archival", source_url="",
+                              source_title=file.filename or "Документ", candidates=candidates)
+
+
+class OtherPdfFactIn(BaseModel):
+    text: str
+    subsection_id: str
+    flag: str = "green"
+    rationale: str = ""
+
+
+class OtherPdfCommitIn(BaseModel):
+    source_title: str = "Документ"
+    facts: List[OtherPdfFactIn]
+
+
+@app.post("/api/clients/{client_id}/ingest/other-pdf/commit", response_model=IngestConfirmOut)
+def other_pdf_commit(client_id: str, body: OtherPdfCommitIn, conn=Depends(get_conn)):
+    """Commit analyst-accepted facts from an arbitrary PDF as archival — the source
+    is the uploaded file itself (title only, no URL). The file IS the provenance."""
+    _check_client(client_id, conn)
+    src_id = matrix.add_source(conn, channel="archival", title=body.source_title or "Документ")
+    written: List[int] = []
+    skipped = 0
+    for f in body.facts:
+        if not f.text.strip() or not f.subsection_id:
+            skipped += 1
+            continue
+        rationale = f.rationale.strip()
+        if f.flag == "red" and not rationale:
+            rationale = "из документа (требует уточнения на интервью)"
+        try:
+            fid = matrix.add_fact(conn, client_id=client_id, subsection_id=f.subsection_id,
+                                  text=f.text, flag=f.flag, source_id=src_id,
+                                  evidence_snippet=f.text[:400], rationale=rationale or None)
+            written.append(fid)
+        except ValueError:
+            skipped += 1
+    if written:
+        synthesize_work_items(conn, client_id)
+    return IngestConfirmOut(written=written, skipped=skipped)
+
+
 @app.post("/api/clients/{client_id}/ingest/confirm", response_model=IngestConfirmOut)
 def research_ingest_confirm(client_id: str, body: IngestConfirmIn, conn=Depends(get_conn)):
     written: List[int] = []

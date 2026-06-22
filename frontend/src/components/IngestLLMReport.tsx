@@ -30,6 +30,8 @@ const FLAG_COLORS: Record<string, string> = {
   grey: "text-slate-500 bg-slate-50 border-slate-200",
 };
 
+type PdfCand = { text: string; subsection_id: string; subsection_name: string; flag: string; rationale: string };
+
 export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
   const [screen, setScreen] = useState<"upload" | "preview" | "done">("upload");
   const [preview, setPreview] = useState<LLMIngestPreview | null>(null);
@@ -56,7 +58,7 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
 
   // ── "Промпт + ответ" mode: generate a deep-research prompt, run it externally,
   // paste the answer back (parsed by the same pipeline as an uploaded file).
-  const [mode, setMode] = useState<"file" | "prompt">("file");
+  const [mode, setMode] = useState<"file" | "prompt" | "pdf">("file");
   const [promptAgent, setPromptAgent] = useState("chatgpt");
   const [promptText, setPromptText] = useState("");
   const [answer, setAnswer] = useState("");
@@ -78,6 +80,37 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
     { value: "chatgpt", label: "ChatGPT Deep Research" }, { value: "claude", label: "Claude" },
     { value: "perplexity", label: "Perplexity" }, { value: "gemini", label: "Gemini" },
   ];
+
+  // ── "Произвольный PDF" mode: Claude vision reads any PDF (incl. scanned) →
+  // facts mapped to the matrix → analyst picks → committed as archival.
+  const pdfRef = useRef<HTMLInputElement>(null);
+  const [pdfTitle, setPdfTitle] = useState("");
+  const [pdfCands, setPdfCands] = useState<PdfCand[] | null>(null);
+  const [pdfAccepted, setPdfAccepted] = useState<Set<number>>(new Set());
+  const pdfPreviewMut = useMutation({
+    mutationFn: (file: File) => api.otherPdfPreview(clientId, file),
+    onSuccess: (r) => {
+      setPdfTitle(r.source_title || "Документ");
+      const cands: PdfCand[] = r.candidates.map(c => ({
+        text: c.text, subsection_id: c.suggested_subsection_id || "",
+        subsection_name: c.suggested_subsection_name, flag: c.suggested_flag, rationale: c.rationale || "",
+      }));
+      setPdfCands(cands);
+      setPdfAccepted(new Set(cands.map((_, i) => i)));
+    },
+  });
+  const pdfCommitMut = useMutation({
+    mutationFn: () => api.otherPdfCommit(clientId, pdfTitle,
+      (pdfCands ?? []).filter((_, i) => pdfAccepted.has(i)).map(c => ({
+        text: c.text, subsection_id: c.subsection_id, flag: c.flag, rationale: c.rationale || undefined,
+      }))),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["matrix", clientId] });
+      qc.invalidateQueries({ queryKey: ["punch", clientId] });
+      setPdfCands(null); setPdfAccepted(new Set());
+    },
+  });
+  const togglePdf = (i: number) => setPdfAccepted(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
 
   const commitMut = useMutation({
     mutationFn: () =>
@@ -135,6 +168,8 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
             className={`px-3.5 py-1.5 ${mode === "file" ? "bg-ink text-white" : "text-ink-mute hover:bg-ink/[0.04]"}`}>Файл</button>
           <button onClick={() => setMode("prompt")}
             className={`px-3.5 py-1.5 ${mode === "prompt" ? "bg-ink text-white" : "text-ink-mute hover:bg-ink/[0.04]"}`}>Промпт + ответ</button>
+          <button onClick={() => setMode("pdf")}
+            className={`px-3.5 py-1.5 ${mode === "pdf" ? "bg-ink text-white" : "text-ink-mute hover:bg-ink/[0.04]"}`}>Произвольный PDF</button>
         </div>
 
         {mode === "file" && (
@@ -218,6 +253,67 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
                 {analyzeText.isError && <span className="text-xs text-red-600">{String(analyzeText.error)}</span>}
               </div>
             </div>
+          </div>
+        )}
+
+        {mode === "pdf" && (
+          <div className="space-y-3">
+            {!pdfCands && (
+              <div
+                className="border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition border-ink-line hover:border-slate-400"
+                onClick={() => pdfRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) pdfPreviewMut.mutate(f); }}
+              >
+                <input ref={pdfRef} type="file" accept=".pdf" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) pdfPreviewMut.mutate(f); }} />
+                {pdfPreviewMut.isPending ? (
+                  <div className="text-sm text-ink-mute">Распознаю PDF и извлекаю факты…</div>
+                ) : (
+                  <>
+                    <div className="text-sm font-medium text-ink mb-1">Брось произвольный PDF или кликни</div>
+                    <div className="text-xs text-ink-mute">любой документ, включая картиночный/скан — Claude распознает и разложит факты по матрице</div>
+                  </>
+                )}
+              </div>
+            )}
+            {pdfPreviewMut.isError && (
+              <div className="text-sm text-red-600 bg-red-50 rounded p-3">{String(pdfPreviewMut.error)}</div>
+            )}
+
+            {pdfCands && (
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between">
+                  <h3 className="text-sm font-semibold">Извлечено из «{pdfTitle}» <span className="font-normal text-ink-mute">({pdfCands.length})</span></h3>
+                  <button onClick={() => { setPdfCands(null); pdfPreviewMut.reset(); }} className="text-[11px] text-ink-mute hover:text-ink">другой файл</button>
+                </div>
+                {pdfCands.length === 0 ? (
+                  <div className="text-sm text-ink-mute italic">Фактов не извлечено (или нет ключа LLM). Попробуй другой PDF.</div>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-ink-mute">Источник — этот файл (archival). Отметь, что внести; проверь ячейку и флаг.</p>
+                    <ul className="space-y-1.5 max-h-[55vh] overflow-y-auto">
+                      {pdfCands.map((c, i) => (
+                        <li key={i} className="flex gap-2 text-sm items-baseline border border-ink-line rounded p-2">
+                          <input type="checkbox" checked={pdfAccepted.has(i)} onChange={() => togglePdf(i)} className="mt-1" />
+                          <span className="text-[10px] font-mono text-ink-mute border border-ink-line rounded px-1 shrink-0">{c.subsection_id}</span>
+                          <FlagDot flag={c.flag as "green" | "red" | "grey"} className="mt-1.5 shrink-0" />
+                          <span className="flex-1">{c.text}<span className="text-[11px] text-ink-mute"> · {c.subsection_name}</span></span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button onClick={() => pdfCommitMut.mutate()} disabled={pdfCommitMut.isPending || pdfAccepted.size === 0}
+                        className="text-sm px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                        {pdfCommitMut.isPending ? "Вношу…" : `Внести в матрицу (${pdfAccepted.size})`}
+                      </button>
+                      {pdfCommitMut.isSuccess && <span className="text-xs text-emerald-700">внесено ✓</span>}
+                      {pdfCommitMut.isError && <span className="text-xs text-red-600">{String(pdfCommitMut.error)}</span>}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 

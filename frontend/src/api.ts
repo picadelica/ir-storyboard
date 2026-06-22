@@ -196,6 +196,18 @@ export const api = {
     method: "POST", body: JSON.stringify({ facts }),
   }),
 
+  otherPdfPreview: (clientId: string, file: File): Promise<IngestPreviewOut> => {
+    const form = new FormData();
+    form.append("file", file);
+    return fetch(`${API_BASE}/clients/${clientId}/ingest/other-pdf/preview`, { method: "POST", body: form })
+      .then(async r => { if (!r.ok) throw new Error(`${r.status} ${await r.text().catch(() => "")}`); return r.json(); });
+  },
+  otherPdfCommit: (clientId: string, sourceTitle: string,
+    facts: { text: string; subsection_id: string; flag: string; rationale?: string }[]): Promise<IngestConfirmOut> =>
+    call<IngestConfirmOut>(`/clients/${clientId}/ingest/other-pdf/commit`, {
+      method: "POST", body: JSON.stringify({ source_title: sourceTitle, facts }),
+    }),
+
   synthesizeWorkItems: (clientId: string, quarter?: string) => {
     const q = quarter ? `?quarter=${quarter}` : "";
     return call<SynthesizeResult>(`/clients/${clientId}/work-items/synthesize${q}`, { method: "POST" });

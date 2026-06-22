@@ -709,6 +709,72 @@ def extract_facts_from_full_document(
     return results
 
 
+_PDF_VISION_MODEL = os.environ.get("PDF_VISION_MODEL", "claude-sonnet-4-6")
+
+
+def extract_facts_from_pdf(pdf_bytes: bytes, available_subsections: List[str], *,
+                           subsection_descriptions: Optional[dict] = None,
+                           client_subsection_notes: Optional[dict] = None,
+                           tone_instruction: str = "", model: Optional[str] = None) -> List[ExtractedFact]:
+    """Vision extraction from an ARBITRARY PDF (text OR image/scanned). Claude reads
+    the document directly (no separate OCR) and maps atomic facts to matrix
+    subsections. No citations — facts are sourced to the uploaded file by the caller.
+    Stub-safe: no API key → []."""
+    from .ingest.classifiers.flag_heuristics import classify_with_reason
+    import base64
+    client = globals().get("_client")
+    if client is None or not pdf_bytes:
+        return []
+
+    subsection_list = _build_subsection_list(available_subsections, subsection_descriptions, client_subsection_notes)
+    system_prompt = (
+        _BATCH_EXTRACT_SYSTEM_TMPL
+        .replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+        .replace("__RATIONALE_RULES__", _RATIONALE_RULES.strip())
+    )
+    if tone_instruction:
+        system_prompt = ("TONE INSTRUCTION (applies to every fact you emit):\n"
+                         + tone_instruction.strip() + "\n\n" + system_prompt)
+
+    b64 = base64.standard_b64encode(pdf_bytes).decode()
+    user_text = ("Перед тобой произвольный документ (возможно картиночный/скан). Распознай его "
+                 "содержимое и извлеки атомарные факты по правилам системного промпта, разложив их "
+                 "по подсекциям матрицы. Источников-цитат нет — оставь cite_ids пустым. "
+                 "Верни СТРОГО JSON {\"facts\":[...]}, без преамбулы.")
+    try:
+        resp = client.messages.create(
+            model=model or _PDF_VISION_MODEL, max_tokens=8000, system=system_prompt,
+            messages=[{"role": "user", "content": [
+                {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}},
+                {"type": "text", "text": user_text},
+            ]}])
+        raw = next((b.text for b in resp.content if b.type == "text"), "")
+    except Exception as e:  # noqa: BLE001
+        logger.error("extract_facts_from_pdf failed (%s): %s", type(e).__name__, e)
+        return []
+
+    data = extract_json(raw)
+    if not isinstance(data, dict):
+        return []
+    results: List[ExtractedFact] = []
+    for item in (data.get("facts") or []):
+        text = (item.get("text") or "").strip()
+        sid = item.get("subsection_id") or ""
+        if not text or sid not in available_subsections:
+            continue
+        llm_flag = item.get("flag", "green")
+        if llm_flag not in ("green", "red", "grey"):
+            llm_flag = "green"
+        final_flag, heur_reason = classify_with_reason(text, llm_flag)
+        rationale = (item.get("rationale") or "").strip() or heur_reason
+        results.append(ExtractedFact(
+            text=text[:400], subsection_id=sid, flag=final_flag,
+            confidence=max(0.0, min(1.0, float(item.get("confidence", 0.5)))),
+            raw_paraphrase=(item.get("raw_paraphrase") or text)[:400],
+            rationale=_normalize_rationale(final_flag, rationale)))
+    return results
+
+
 # ─────────────────── Transcript extractor (YouTube ingest) ──────────────────
 
 _TRANSCRIPT_CHUNK_SYSTEM = """\

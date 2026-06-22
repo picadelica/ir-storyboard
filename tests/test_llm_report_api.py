@@ -252,3 +252,31 @@ def test_llm_report_preview_text(client):
     # empty text rejected
     assert client.post("/api/clients/libermans-gonka/ingest/llm-report/preview-text",
                        json={"text": "   "}).status_code == 400
+
+
+# ── 'Other' arbitrary-PDF path (proposal #3 part A) ─────────────────────────────
+
+def test_other_pdf_preview(client, monkeypatch):
+    from ir_storyboard import llm
+    from ir_storyboard.llm import ExtractedFact
+    monkeypatch.setattr(llm, "extract_facts_from_pdf", lambda *a, **k: [
+        ExtractedFact(text="Decentralized GPU network for AI.", subsection_id="6.1", flag="green", confidence=0.8),
+        ExtractedFact(text="Founded 2023.", subsection_id="2.1", flag="green", confidence=0.7),
+    ])
+    files = {"file": ("workspace.pdf", BytesIO(b"%PDF-1.4 image only"), "application/pdf")}
+    r = client.post("/api/clients/libermans-gonka/ingest/other-pdf/preview", files=files)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["source_title"] == "workspace.pdf" and len(d["candidates"]) == 2
+    c0 = d["candidates"][0]
+    assert c0["suggested_subsection_id"] == "6.1" and c0["suggested_subsection_name"]
+    # commit as archival (source = the file itself, no URL)
+    facts = [{"text": c["text"], "subsection_id": c["suggested_subsection_id"], "flag": c["suggested_flag"]}
+             for c in d["candidates"]]
+    cr = client.post("/api/clients/libermans-gonka/ingest/other-pdf/commit",
+                     json={"source_title": d["source_title"], "facts": facts}).json()
+    assert len(cr["written"]) == 2
+
+    # non-pdf rejected
+    bad = {"file": ("note.txt", BytesIO(b"hi"), "text/plain")}
+    assert client.post("/api/clients/libermans-gonka/ingest/other-pdf/preview", files=bad).status_code == 400
