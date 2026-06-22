@@ -43,6 +43,11 @@ class FactCandidate:
     rationale: str = ""                       # short LLM-supplied reason for the classification
 
 
+class PdfRejectedError(Exception):
+    """The vision API rejected the uploaded PDF itself (corrupt / encrypted / not a
+    real PDF). Surfaced to the analyst as a clear error rather than silent 0 facts."""
+
+
 @dataclass
 class ExtractedFact:
     """Fact produced by extract_facts_from_llm_report."""
@@ -755,6 +760,16 @@ def extract_facts_from_pdf(pdf_bytes: bytes, available_subsections: List[str], *
         raw = next((b.text for b in resp.content if b.type == "text"), "")
     except Exception as e:  # noqa: BLE001
         logger.error("extract_facts_from_pdf failed (%s): %s", type(e).__name__, e)
+        # Distinguish "the file itself is rejected" (corrupt / encrypted / not a real
+        # PDF) from transient errors: the former must surface to the analyst, not hide
+        # as "0 facts found". Anthropic returns 400 "The PDF specified was not valid."
+        msg = str(e).lower()
+        if "pdf" in msg and ("not valid" in msg or "invalid" in msg or "could not" in msg):
+            raise PdfRejectedError(
+                "Не удалось прочитать PDF: файл повреждён, зашифрован или это скан без "
+                "текстового/картиночного слоя, который мы можем разобрать. Попробуйте "
+                "пересохранить файл (печать в PDF) или впишите факты вручную."
+            ) from e
         return []
 
     data = extract_json(raw)

@@ -123,3 +123,19 @@ def test_client_facts_pdf_rejects_non_pdf(ctx):
     files = {"file": ("notes.txt", b"hello", "text/plain")}
     r = client.post("/api/clients/co/ingest/client-facts/preview", files=files)
     assert r.status_code == 400
+
+
+def test_client_facts_pdf_corrupt_surfaces_422(ctx, monkeypatch):
+    """A PDF the vision API rejects (corrupt/encrypted) must surface as a clear 422,
+    not a silent 200 with zero facts."""
+    from ir_storyboard import llm
+    client, _ = ctx
+
+    def _reject(*a, **k):
+        raise llm.PdfRejectedError("Не удалось прочитать PDF: файл повреждён…")
+    monkeypatch.setattr(llm, "extract_facts_from_pdf", _reject)
+
+    files = {"file": ("broken.pdf", b"%PDF-1.4 broken", "application/pdf")}
+    r = client.post("/api/clients/co/ingest/client-facts/preview", files=files)
+    assert r.status_code == 422
+    assert "PDF" in r.json()["detail"]

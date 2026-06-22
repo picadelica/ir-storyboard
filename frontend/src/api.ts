@@ -27,6 +27,14 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+// Pull a human-readable message out of a failed upload response. FastAPI puts the
+// message in JSON {detail: "..."}; fall back to raw text / status.
+async function uploadError(r: Response): Promise<string> {
+  const raw = await r.text().catch(() => "");
+  try { const j = JSON.parse(raw); if (j?.detail) return String(j.detail); } catch { /* not json */ }
+  return raw || `${r.status} ${r.statusText}`;
+}
+
 interface JobOut<T> {
   job_id: string;
   status: "processing" | "done" | "error";
@@ -200,7 +208,7 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     return fetch(`${API_BASE}/clients/${clientId}/ingest/other-pdf/preview`, { method: "POST", body: form })
-      .then(async r => { if (!r.ok) throw new Error(`${r.status} ${await r.text().catch(() => "")}`); return r.json(); });
+      .then(async r => { if (!r.ok) throw new Error(await uploadError(r)); return r.json(); });
   },
   otherPdfCommit: (clientId: string, sourceTitle: string,
     facts: { text: string; subsection_id: string; flag: string; rationale?: string }[]): Promise<IngestConfirmOut> =>
@@ -219,7 +227,7 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     return fetch(`${API_BASE}/clients/${clientId}/ingest/client-facts/preview`, { method: "POST", body: form })
-      .then(async r => { if (!r.ok) throw new Error(`${r.status} ${await r.text().catch(() => "")}`); return r.json(); });
+      .then(async r => { if (!r.ok) throw new Error(await uploadError(r)); return r.json(); });
   },
 
   synthesizeWorkItems: (clientId: string, quarter?: string) => {

@@ -1827,18 +1827,21 @@ async def other_pdf_preview(client_id: str, file: UploadFile = File(...), conn=D
     """'Other' path: an ARBITRARY pdf (incl. image/scanned). Claude vision reads it
     and maps atomic facts to the matrix. Returns candidates for analyst review;
     commit goes through /ingest/confirm as archival (source = the file)."""
-    from ir_storyboard.llm import extract_facts_from_pdf
+    from ir_storyboard.llm import extract_facts_from_pdf, PdfRejectedError
     _check_client(client_id, conn)
     if not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(400, "Нужен PDF-файл")
     pdf_bytes = await file.read()
     # archival document → L2–L8 (L1 personal story stays interview-only)
     available_subsections = [s.id for L in LAYERS for s in L.subsections if L.id >= 2]
-    facts = extract_facts_from_pdf(
-        pdf_bytes, available_subsections,
-        subsection_descriptions=matrix.get_subsection_descriptions(conn),
-        client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
-    )
+    try:
+        facts = extract_facts_from_pdf(
+            pdf_bytes, available_subsections,
+            subsection_descriptions=matrix.get_subsection_descriptions(conn),
+            client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
+        )
+    except PdfRejectedError as e:
+        raise HTTPException(422, str(e))
     candidates: List[FactCandidateOut] = []
     for f in facts:
         try:
@@ -1940,17 +1943,20 @@ async def client_facts_preview(client_id: str, file: UploadFile = File(...), con
     ALL layers are open (L1–L8) — client material is often personal founder info, and
     the source is the client (offline_interview), not the web. Returns candidates the
     analyst reviews; commit goes through /ingest/client-facts as must-have (blue)."""
-    from ir_storyboard.llm import extract_facts_from_pdf
+    from ir_storyboard.llm import extract_facts_from_pdf, PdfRejectedError
     _check_client(client_id, conn)
     if not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(400, "Нужен PDF-файл")
     pdf_bytes = await file.read()
     available_subsections = [s.id for L in LAYERS for s in L.subsections]  # all L1–L8
-    facts = extract_facts_from_pdf(
-        pdf_bytes, available_subsections,
-        subsection_descriptions=matrix.get_subsection_descriptions(conn),
-        client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
-    )
+    try:
+        facts = extract_facts_from_pdf(
+            pdf_bytes, available_subsections,
+            subsection_descriptions=matrix.get_subsection_descriptions(conn),
+            client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
+        )
+    except PdfRejectedError as e:
+        raise HTTPException(422, str(e))
     candidates: List[FactCandidateOut] = []
     for f in facts:
         try:
