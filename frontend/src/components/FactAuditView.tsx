@@ -58,9 +58,11 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   const promote = useMutation({ mutationFn: (id: number) => api.promoteFact(id), onSuccess: invalidate });
   const rejectReview = useMutation({ mutationFn: (id: number) => api.rejectFact(id), onSuccess: invalidate });
 
+  const [dupsAvail, setDupsAvail] = useState(true);   // false = verifier was unavailable
   const findDups = useMutation({
     mutationFn: async () => {
       const r = await api.findDuplicates(clientId);
+      setDupsAvail(r.available);
       const groups = r.available ? r.groups : [];
       patchLS(lsKey, { dups: groups });   // lands even if unmounted mid-run
       return groups;
@@ -205,7 +207,10 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
             Дубли <span className="font-normal text-ink-mute">({dups.length} групп)</span>
           </h3>
           {dups.length === 0 ? (
-            <div className="text-xs text-ink-mute italic">Дублей не найдено (или верификатор недоступен).</div>
+            <div className="text-xs text-ink-mute italic">
+              {dupsAvail ? "Дублей не найдено — все факты в подсекциях различны."
+                         : "Верификатор не ответил (модель/баланс) — попробуйте ещё раз."}
+            </div>
           ) : dups.map((g, gi) => {
             const sel = selOf(gi, g);
             const selIds = g.ids.filter(i => sel.has(i));

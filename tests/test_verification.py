@@ -286,6 +286,25 @@ def test_attribute_fact_creates_named_fact(conn):
     assert matrix.get_fact(conn, f)["state"] == "rejected"
 
 
+def test_dedup_per_subsection_available_flags(conn, monkeypatch):
+    """Per-subsection dedup: available=False only when there were subsections to check
+    and every LLM call failed; available=True (0 groups) when nothing to check."""
+    # nothing to check (each subsection has <2 facts) → available True, no LLM needed
+    matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="solo fact", flag="green")
+    called = {"n": 0}
+    def _gen(*a, **k):
+        called["n"] += 1
+        return ""
+    monkeypatch.setattr(llm, "generate", _gen)
+    r = verification.find_duplicate_groups(conn, "co")
+    assert r["available"] is True and r["groups"] == [] and called["n"] == 0
+
+    # now a subsection with 2 facts but LLM unavailable → available False
+    matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="another fact", flag="green")
+    r2 = verification.find_duplicate_groups(conn, "co")
+    assert r2["available"] is False and called["n"] >= 1
+
+
 def test_find_duplicates_stub(conn, monkeypatch):
     matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="x", flag="green")
     matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="y", flag="green")

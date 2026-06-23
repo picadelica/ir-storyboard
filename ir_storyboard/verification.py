@@ -223,6 +223,16 @@ merged_text — твой ПРЕДЛАГАЕМЫЙ единый текст фак
 Группа — минимум 2 id из ОДНОЙ подсекции. Факты с разными деталями/числами НЕ объединяй. Дублей нет → "groups": []."""
 
 
+_DEDUP_SUB_SYSTEM = """Ты — дедупликатор фактов одной подсекции IR-матрицы. Дан список фактов `[id] текст` (все из ОДНОЙ подсекции). Найди группы, где факты утверждают ОДНО И ТО ЖЕ (околодубли — та же мысль, возможно иными словами).
+
+Верни СТРОГО валидный JSON (без markdown):
+{"groups": [{"keep": <id с самой полной/точной формулировкой>, "ids": [<все id группы, включая keep>], "reason": "<коротко что общего>", "merged_text": "<одна точная формулировка, вбирающая все детали группы>"}]}
+
+merged_text — предлагаемый единый текст факта, вбирающий всё важное из группы (особенно при >2 фактах): без потери деталей, тем же языком. Аналитик потом отредактирует.
+
+Группа — минимум 2 id. Факты с разными деталями/числами НЕ объединяй. Дублей нет → "groups": []."""
+
+
 def _active_facts(conn, client_id: str) -> List[dict]:
     rows = conn.execute(
         """SELECT f.id AS id, c.subsection_id AS sid, f.text AS text
@@ -233,44 +243,53 @@ def _active_facts(conn, client_id: str) -> List[dict]:
 
 
 def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) -> Dict[str, Any]:
-    """LLM-cluster same-meaning active facts (per subsection) for merge proposals.
+    """LLM-cluster same-meaning active facts for merge proposals. Runs PER SUBSECTION
+    (dupes can only live within one) — many small prompts instead of one huge one, so
+    it scales to clients with hundreds of facts (a single all-facts call truncated /
+    failed to parse → looked like "verifier unavailable").
 
-    Returns {available, groups:[{subsection_id, keep, ids:[...], reason, facts:[{id,text}]}]}.
-    Stub-safe."""
+    Returns {available, groups:[{subsection_id, keep, ids:[...], reason, merged_text,
+    facts:[{id,text}]}]}. available=False only if there were subsections to check and
+    EVERY LLM call failed. Stub-safe."""
+    from collections import defaultdict
     facts = _active_facts(conn, client_id)
     by_id = {f["id"]: f for f in facts}
-    if len(facts) < 2:
-        return {"available": True, "groups": []}
-    lines = [f"[{f['id']}|{f['sid']}] {(f['text'] or '')[:200]}" for f in facts]
-    data = _generate_json(_DEDUP_SYSTEM, "Факты:\n" + "\n".join(lines), max_tokens=6000,
-                          model=model or _audit_model())
-    if data is None:
-        return {"available": False, "groups": []}
+    bysub: Dict[str, list] = defaultdict(list)
+    for f in facts:
+        bysub[f["sid"]].append(f)
 
     groups: List[dict] = []
-    for g in data.get("groups", []) or []:
-        ids = [int(i) for i in (g.get("ids") or []) if isinstance(i, (int, str)) and str(i).isdigit()]
-        ids = [i for i in ids if i in by_id]
-        if len(ids) < 2:
+    calls = 0
+    ok = 0
+    mdl = model or _audit_model()
+    for sid, sfacts in bysub.items():
+        if len(sfacts) < 2:
+            continue   # no possible dupes in a 0/1-fact subsection
+        calls += 1
+        lines = [f"[{f['id']}] {(f['text'] or '')[:200]}" for f in sfacts]
+        data = _generate_json(_DEDUP_SUB_SYSTEM, f"Подсекция {sid}. Факты:\n" + "\n".join(lines),
+                              max_tokens=2000, model=mdl)
+        if data is None:
             continue
-        # all in one subsection
-        sids = {by_id[i]["sid"] for i in ids}
-        if len(sids) != 1:
-            continue
-        keep = g.get("keep")
-        keep = int(keep) if str(keep).isdigit() and int(keep) in ids else ids[0]
-        merged = (g.get("merged_text") or "").strip()[:400]
-        if not merged:
-            merged = by_id[keep]["text"] or ""
-        groups.append({
-            "subsection_id": next(iter(sids)),
-            "keep": keep,
-            "ids": ids,
-            "reason": (g.get("reason") or "").strip()[:300],
-            "merged_text": merged,
-            "facts": [{"id": i, "text": by_id[i]["text"]} for i in ids],
-        })
-    return {"available": True, "groups": groups}
+        ok += 1
+        for g in data.get("groups", []) or []:
+            ids = [int(i) for i in (g.get("ids") or []) if str(i).isdigit() and int(i) in by_id]
+            ids = [i for i in ids if by_id[i]["sid"] == sid]
+            if len(ids) < 2:
+                continue
+            keep = g.get("keep")
+            keep = int(keep) if str(keep).isdigit() and int(keep) in ids else ids[0]
+            merged = (g.get("merged_text") or "").strip()[:400] or (by_id[keep]["text"] or "")
+            groups.append({
+                "subsection_id": sid,
+                "keep": keep,
+                "ids": ids,
+                "reason": (g.get("reason") or "").strip()[:300],
+                "merged_text": merged,
+                "facts": [{"id": i, "text": by_id[i]["text"]} for i in ids],
+            })
+    # available unless we tried subsections and every call failed (LLM down)
+    return {"available": calls == 0 or ok > 0, "groups": groups}
 
 
 _ATTRIB_SYSTEM = """Ты — редактор IR-матрицы. Дан список фактов `[id|подсекция|текст]`. Найди факты, где субъект высказывания/действия назван ОБЕЗЛИЧЕННО: «фаундер», «основатель», «сооснователь», «founder», «co-founder», «он/она» в роли говорящего — вместо конкретного имени. Это плохо: в матрице и материалах должно быть конкретное лицо.
