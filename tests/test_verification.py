@@ -243,6 +243,21 @@ def test_find_unattributed_multi_founder_needs_choice(conn, monkeypatch):
     assert "[ИМЯ]" in it["proposed_text"]   # not auto-filled — analyst must pick
 
 
+def test_find_unattributed_keyword_fallback_offline(conn, monkeypatch):
+    """No LLM (no key/balance) → deterministic keyword scan still flags generic-speaker
+    facts, so the tool works offline (available=True, items found)."""
+    matrix.add_entity(conn, client_id="co", kind="founder", name="Давид Вайсман")
+    matrix.add_fact(conn, client_id="co", subsection_id="2.2",
+                    text="Фаундер предложил сменить модель.", flag="green")
+    matrix.add_fact(conn, client_id="co", subsection_id="2.2",
+                    text="Выручка выросла втрое.", flag="green")  # no generic word
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "")  # LLM unavailable
+    res = verification.find_unattributed_facts(conn, "co")
+    assert res["available"] is True
+    assert len(res["items"]) == 1
+    assert res["items"][0]["proposed_text"].startswith("Давид Вайсман")  # 1 founder autofill
+
+
 def test_attribute_fact_creates_named_fact(conn):
     eid = matrix.add_entity(conn, client_id="co", kind="founder", name="Давид Вайсман")
     f = matrix.add_fact(conn, client_id="co", subsection_id="1.2",

@@ -213,6 +213,27 @@ def test_fact_speaker_attribution(ctx):
     assert cleared["speaker_entity_id"] is None and cleared["speaker_name"] is None
 
 
+def test_attribute_with_new_founder_creates_card(ctx):
+    """Naming a founder not yet on the card creates the founder entity, then attributes
+    a NEW fact to them (immutability) and rejects the original generic-speaker fact."""
+    client, fid, _ = ctx
+    before = len(client.get("/api/clients/co/entities").json())
+    r = client.post(f"/api/facts/{fid}/attribute",
+                    json={"new_founder_name": "Мария Либерман",
+                          "text": "Мария Либерман — CEO."})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["speaker_name"] == "Мария Либерман" and body["state"] == "active"
+    # founder card was created
+    ents = client.get("/api/clients/co/entities").json()
+    assert len(ents) == before + 1
+    assert any(e["kind"] == "founder" and e["name"] == "Мария Либерман" for e in ents)
+    # the cell endpoint returns rejected too (struck-through); check states directly
+    facts = client.get("/api/clients/co/cells/2.1/facts").json()
+    assert next(f["state"] for f in facts if f["id"] == body["id"]) == "active"
+    assert next(f["state"] for f in facts if f["id"] == fid) == "rejected"
+
+
 def test_entities_crud(ctx):
     client, _, _ = ctx
     e = client.post("/api/clients/co/entities",

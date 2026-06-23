@@ -69,16 +69,27 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   });
   // analyst-editable merged wording per group (seeded from the LLM proposal)
   const [mergeText, setMergeText] = useState<Record<number, string>>({});
+  // per-group selected fact ids (default = all); lets you merge a subset of 3+ and
+  // leave the rest in the matrix.
+  const [mergeSel, setMergeSel] = useState<Record<number, Set<number>>>({});
+  const selOf = (gi: number, g: DuplicateGroup) => mergeSel[gi] ?? new Set(g.ids);
+  const toggleMergeSel = (gi: number, g: DuplicateGroup, id: number) =>
+    setMergeSel(m => {
+      const cur = new Set(m[gi] ?? new Set(g.ids));
+      cur.has(id) ? cur.delete(id) : cur.add(id);
+      return { ...m, [gi]: cur };
+    });
   const merge = useMutation({
-    mutationFn: ({ g, text }: { g: DuplicateGroup; text?: string }) =>
-      api.mergeFacts(g.keep, g.ids.filter(i => i !== g.keep), text),
-    onSuccess: (_d, { g }) => { dropDupGroup(x => x.keep === g.keep); invalidate(); },
+    mutationFn: ({ keep, ids, text }: { gi: number; keep: number; ids: number[]; text?: string }) =>
+      api.mergeFacts(keep, ids.filter(i => i !== keep), text),
+    onSuccess: (_d, { gi }) => { dropDupGroup((_g, i) => i === gi); invalidate(); },
   });
 
   // speaker attribution: facts with generic "Фаундер …" wording → name a person
   const [attrib, setAttrib] = useState<AttribItem[] | null>(saved.attrib ?? null);
   const [founders, setFounders] = useState<{ id: number; name: string }[]>(saved.founders ?? []);
   const [attChoice, setAttChoice] = useState<Record<number, number>>({});  // factId → entityId
+  const [attNewName, setAttNewName] = useState<Record<number, string>>({}); // factId → typed founder name
   const [attText, setAttText] = useState<Record<number, string>>({});       // factId → edited text
   const dropAttrib = (id: number) =>
     setAttrib(prev => {
@@ -96,9 +107,9 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     onSuccess: (r) => { setAttrib(r.available ? r.items : []); setFounders(r.founders); },
   });
   const applyAttrib = useMutation({
-    mutationFn: ({ it, entityId, text }: { it: AttribItem; entityId: number | null; text: string }) =>
-      api.attributeFact(it.id, entityId, text),
-    onSuccess: (_d, { it }) => { dropAttrib(it.id); invalidate(); },
+    mutationFn: ({ it, entityId, text, newName }: { it: AttribItem; entityId: number | null; text: string; newName?: string }) =>
+      api.attributeFact(it.id, entityId, text, newName),
+    onSuccess: (_d, { it }) => { qc.invalidateQueries({ queryKey: ["entities", clientId] }); dropAttrib(it.id); invalidate(); },
   });
 
   const run = useMutation({
@@ -190,7 +201,13 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
           </h3>
           {dups.length === 0 ? (
             <div className="text-xs text-ink-mute italic">Дублей не найдено (или верификатор недоступен).</div>
-          ) : dups.map((g, gi) => (
+          ) : dups.map((g, gi) => {
+            const sel = selOf(gi, g);
+            const selIds = g.ids.filter(i => sel.has(i));
+            // keep = the LLM's keep if still selected, else the first selected fact
+            const keep = sel.has(g.keep) ? g.keep : (selIds[0] ?? g.keep);
+            const mtext = mergeText[gi] ?? g.merged_text;
+            return (
             <div key={gi} className="border border-ink-line rounded p-3">
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="text-[11px] font-mono text-ink-mute">{g.subsection_id}</span>
@@ -198,44 +215,49 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                 <button onClick={() => onJumpToCell(g.subsection_id)}
                   className="text-[11px] text-blue-600 hover:underline ml-auto">{g.subsection_id} →</button>
               </div>
+              {g.ids.length > 2 && (
+                <div className="text-[11px] text-ink-mute mb-1">Отметьте, какие факты сливать ({selIds.length} из {g.ids.length}); неотмеченные останутся в матрице.</div>
+              )}
               <ul className="space-y-1 mb-2">
                 {g.facts.map(f => (
-                  <li key={f.id} className="text-sm flex gap-2">
-                    <span className="text-[10px] mt-0.5 px-1 rounded shrink-0 bg-slate-100 text-ink-mute">
-                      #{f.id}
-                    </span>
-                    <span>{f.text}</span>
+                  <li key={f.id} className="text-sm flex gap-2 items-start">
+                    {g.ids.length > 2 && (
+                      <input type="checkbox" checked={sel.has(f.id)} onChange={() => toggleMergeSel(gi, g, f.id)} className="mt-1" />
+                    )}
+                    <span className="text-[10px] mt-0.5 px-1 rounded shrink-0 bg-slate-100 text-ink-mute">#{f.id}</span>
+                    <span className={sel.has(f.id) ? "" : "line-through text-ink-mute"}>{f.text}</span>
                   </li>
                 ))}
               </ul>
               {/* Proposed single wording — analyst edits before it lands in the matrix.
-                  A new merged fact is created with this text; the originals are rejected. */}
+                  A new merged fact is created with this text; the merged originals are rejected. */}
               <label className="block text-[11px] text-ink-mute mb-1">
-                Итоговая формулировка (правится){g.ids.length > 2 ? ` — объединяет ${g.ids.length} факта` : ""}:
+                Итоговая формулировка (правится){selIds.length > 2 ? ` — объединяет ${selIds.length} факта` : ""}:
               </label>
               <textarea
-                value={mergeText[gi] ?? g.merged_text}
+                value={mtext}
                 onChange={e => setMergeText(m => ({ ...m, [gi]: e.target.value }))}
                 rows={2}
                 className="w-full text-sm border border-ink-line rounded px-2 py-1.5 mb-2 resize-y"
               />
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => merge.mutate({ g, text: mergeText[gi] ?? g.merged_text })}
-                  disabled={merge.isPending}
+                <button onClick={() => merge.mutate({ gi, keep, ids: selIds, text: mtext })}
+                  disabled={merge.isPending || selIds.length < 2}
                   className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
-                  слить с этим текстом ({g.ids.length} → 1)
+                  слить с этим текстом ({selIds.length} → 1)
                 </button>
-                <button onClick={() => merge.mutate({ g })}
-                  disabled={merge.isPending}
-                  title="Оставить формулировку выбранного факта (#${g.keep}) без изменений, просто сложить источники"
+                <button onClick={() => merge.mutate({ gi, keep, ids: selIds })}
+                  disabled={merge.isPending || selIds.length < 2}
+                  title={`Оставить формулировку #${keep} без изменений, просто сложить источники`}
                   className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50 disabled:opacity-50">
-                  оставить #{g.keep} как есть
+                  оставить #{keep} как есть
                 </button>
                 <button onClick={() => dropDupGroup((_, i) => i === gi)}
                   className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </section>
       )}
 
@@ -246,16 +268,20 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
           </h3>
           {founders.length === 0 && (
             <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-              На карточке компании нет фаундеров — добавьте их в «About», чтобы подставлять имена.
+              На карточке нет заведённых фаундеров. Впишите имя в поле ниже — карточка фаундера создастся
+              автоматически (или добавьте их заранее в «About»).
             </div>
           )}
           {attrib.length === 0 ? (
             <div className="text-xs text-ink-mute italic">Обезличенных формулировок не найдено (или верификатор недоступен).</div>
           ) : attrib.map(it => {
             const chosen = attChoice[it.id] ?? (founders.length === 1 ? founders[0].id : undefined);
-            const chosenName = founders.find(f => f.id === chosen)?.name;
+            const typed = (attNewName[it.id] ?? "").trim();
+            // typed name wins over the dropdown; lets you attribute even with no founder cards
+            const effName = typed || founders.find(f => f.id === chosen)?.name;
             const text = attText[it.id]
-              ?? (chosenName ? it.rewrite_template.replace("[ИМЯ]", chosenName) : it.proposed_text);
+              ?? (effName ? it.rewrite_template.replace("[ИМЯ]", effName) : it.proposed_text);
+            const canApply = !!effName && !text.includes("[ИМЯ]");
             return (
               <div key={it.id} className={`border rounded p-3 ${it.must_be_concrete ? "border-flag-red/40 bg-flag-red-bg/30" : "border-ink-line"}`}>
                 <div className="flex items-center gap-2 mb-1.5">
@@ -267,21 +293,36 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                     className="text-[11px] text-blue-600 hover:underline ml-auto">{it.subsection_id} →</button>
                 </div>
                 <div className="text-xs text-ink-mute mb-1.5 line-through">{it.text}</div>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span className="text-[11px] text-ink-mute">🗣</span>
-                  <select
-                    value={chosen ?? ""}
+                  {founders.length > 0 && (
+                    <select
+                      value={typed ? "" : (chosen ?? "")}
+                      onChange={e => {
+                        const eid = e.target.value ? Number(e.target.value) : undefined;
+                        setAttChoice(m => ({ ...m, [it.id]: eid as number }));
+                        setAttNewName(m => ({ ...m, [it.id]: "" }));
+                        const nm = founders.find(f => f.id === eid)?.name;
+                        setAttText(m => { const n = { ...m }; delete n[it.id]; return n; });
+                        if (nm) setAttText(m => ({ ...m, [it.id]: it.rewrite_template.replace("[ИМЯ]", nm) }));
+                      }}
+                      className={`text-xs border border-ink-line rounded px-1.5 py-1 bg-white ${chosen && !typed ? "text-ink" : "text-ink-mute"}`}
+                    >
+                      <option value="">— кто это? —</option>
+                      {founders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select>
+                  )}
+                  <input
+                    type="text"
+                    value={typed}
+                    placeholder={founders.length ? "или впишите имя" : "впишите имя фаундера"}
                     onChange={e => {
-                      const eid = e.target.value ? Number(e.target.value) : undefined;
-                      setAttChoice(m => ({ ...m, [it.id]: eid as number }));
-                      const nm = founders.find(f => f.id === eid)?.name;
-                      if (nm) setAttText(m => ({ ...m, [it.id]: it.rewrite_template.replace("[ИМЯ]", nm) }));
+                      const v = e.target.value;
+                      setAttNewName(m => ({ ...m, [it.id]: v }));
+                      setAttText(m => ({ ...m, [it.id]: it.rewrite_template.replace("[ИМЯ]", v.trim() || "[ИМЯ]") }));
                     }}
-                    className={`text-xs border border-ink-line rounded px-1.5 py-1 bg-white ${chosen ? "text-ink" : "text-ink-mute"}`}
-                  >
-                    <option value="">— кто это? —</option>
-                    {founders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                  </select>
+                    className="text-xs border border-ink-line rounded px-1.5 py-1 bg-white w-44"
+                  />
                 </div>
                 <textarea
                   value={text}
@@ -291,8 +332,8 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                 />
                 <div className="flex gap-2">
                   <button
-                    onClick={() => applyAttrib.mutate({ it, entityId: chosen ?? null, text })}
-                    disabled={applyAttrib.isPending || (it.needs_choice && !chosen) || text.includes("[ИМЯ]")}
+                    onClick={() => applyAttrib.mutate({ it, entityId: typed ? null : (chosen ?? null), text, newName: typed || undefined })}
+                    disabled={applyAttrib.isPending || !canApply}
                     className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                     применить имя
                   </button>

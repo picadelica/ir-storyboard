@@ -1125,7 +1125,7 @@ def export_must_have_facts(client_id: str, conn=Depends(get_conn)):
         lines.append("— нет must-have фактов —")
     else:
         for i, f in enumerate(facts, 1):
-            lines.append(f"{i} — {f['text']}")
+            lines.append(f"{i} ({f['subsection_id']}) — {f['text']}")
     body = "\n".join(lines) + "\n"
     fname = f"must_have_{client_id}.txt"
     return Response(
@@ -1236,6 +1236,7 @@ class UnattributedOut(BaseModel):
 
 class AttributeIn(BaseModel):
     entity_id: Optional[int] = None
+    new_founder_name: Optional[str] = None   # if set + no entity_id: create the founder card
     text: str
 
 
@@ -1256,11 +1257,16 @@ def attribute_fact_ep(fact_id: int, body: AttributeIn, conn=Depends(get_conn)):
     old = matrix.get_fact(conn, fact_id)
     if old is None:
         raise HTTPException(404, "fact not found")
-    if body.entity_id is not None:
-        ent = conn.execute("SELECT client_id FROM entities WHERE id=?", (body.entity_id,)).fetchone()
+    entity_id = body.entity_id
+    if entity_id is not None:
+        ent = conn.execute("SELECT client_id FROM entities WHERE id=?", (entity_id,)).fetchone()
         if ent is None or ent["client_id"] != old["client_id"]:
             raise HTTPException(400, "entity not found for this client")
-    new_id = matrix.attribute_fact(conn, fact_id, body.entity_id, body.text)
+    elif (body.new_founder_name or "").strip():
+        # analyst named a founder not yet on the card → create the founder card
+        entity_id = matrix.add_entity(conn, client_id=old["client_id"], kind="founder",
+                                      name=body.new_founder_name.strip(), confirmed=True)
+    new_id = matrix.attribute_fact(conn, fact_id, entity_id, body.text)
     return _row_to_fact(matrix.get_fact(conn, new_id))
 
 

@@ -13,6 +13,7 @@ and no findings, so callers degrade gracefully (CI runs offline).
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from . import llm
@@ -282,6 +283,12 @@ _ATTRIB_SYSTEM = """Ты — редактор IR-матрицы. Дан спис
 Факты с уже конкретным именем НЕ трогай. Нет таких фактов → "items": []."""
 
 
+# Generic speaker words for the offline fallback (LLM gives a smarter scan).
+_GENERIC_SPEAKER_RE = re.compile(
+    r"\b(со-?основател\w+|сооснователь\w*|основател\w+|фаундер\w*|co-?founders?|founders?)\b",
+    re.IGNORECASE)
+
+
 def find_unattributed_facts(conn, client_id: str, *, model: Optional[str] = None) -> Dict[str, Any]:
     """Scan active facts for generic speaker references ("фаундер считает …") and
     propose a rewrite that names a concrete founder. Mirrors find_duplicate_groups.
@@ -301,12 +308,25 @@ def find_unattributed_facts(conn, client_id: str, *, model: Optional[str] = None
     fn = "Фаундеры на карточке: " + (", ".join(x["name"] for x in founders) or "нет") + "\n\n"
     data = _generate_json(_ATTRIB_SYSTEM, fn + "Факты:\n" + "\n".join(lines),
                           max_tokens=6000, model=model or _audit_model())
-    if data is None:
-        return {"available": False, "founders": founders, "items": []}
 
     single = founders[0]["name"] if len(founders) == 1 else None
+
+    # LLM unavailable (no key / no balance) → deterministic keyword fallback so the
+    # tool still works offline: flag facts naming a generic speaker, swap the word
+    # for [ИМЯ]. Grammar is rough but the analyst edits the text before applying.
+    if data is None:
+        raw_items = []
+        for f in facts:
+            m = _GENERIC_SPEAKER_RE.search(f["text"] or "")
+            if not m:
+                continue
+            rewrite = (f["text"][:m.start()] + "[ИМЯ]" + f["text"][m.end():]).strip()[:400]
+            raw_items.append({"id": f["id"], "generic": m.group(0), "rewrite": rewrite})
+    else:
+        raw_items = data.get("items", []) or []
+
     items: List[dict] = []
-    for it in data.get("items", []) or []:
+    for it in raw_items:
         try:
             fid = int(it.get("id"))
         except (TypeError, ValueError):

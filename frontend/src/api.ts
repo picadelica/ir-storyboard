@@ -412,8 +412,11 @@ export const api = {
   // speaker attribution: scan for generic "Фаундер …" wording; rewrite to a name
   findUnattributed: (clientId: string): Promise<UnattributedResult> =>
     runJob<UnattributedResult>(`/clients/${clientId}/find-unattributed/start`),
-  attributeFact: (factId: number, entityId: number | null, text: string): Promise<Fact> =>
-    call<Fact>(`/facts/${factId}/attribute`, { method: "POST", body: JSON.stringify({ entity_id: entityId, text }) }),
+  attributeFact: (factId: number, entityId: number | null, text: string, newFounderName?: string): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/attribute`, {
+      method: "POST",
+      body: JSON.stringify({ entity_id: entityId, new_founder_name: newFounderName ?? null, text }),
+    }),
   interviewGuide: (clientId: string): Promise<InterviewGuide> =>
     runJob<InterviewGuide>(`/clients/${clientId}/interview-guide/start`),
 

@@ -132,7 +132,8 @@ def test_export_must_have_numbered(ctx):
     assert r.status_code == 200, r.text
     assert "attachment" in r.headers.get("content-disposition", "")
     body = r.text
-    assert "1 — " in body and "2 — " in body
+    # ordered by layer→subsection: 3.3 before 4.1
+    assert "1 (3.3) — " in body and "2 (4.1) — " in body   # numbered + matrix cell
     assert "раунд A" in body
     # a non-must-have fact must not appear
     assert "Ordinary web fact" not in body
