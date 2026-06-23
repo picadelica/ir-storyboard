@@ -210,6 +210,51 @@ def test_merge_without_text_keeps_original(conn):
     assert matrix.get_fact(conn, b)["state"] == "rejected"
 
 
+def test_find_unattributed_single_founder_autofills(conn, monkeypatch):
+    """One founder on the card → proposed_text names them automatically; an L1 fact
+    is flagged must_be_concrete."""
+    matrix.add_entity(conn, client_id="co", kind="founder", name="Давид Вайсман")
+    f = matrix.add_fact(conn, client_id="co", subsection_id="1.2",
+                        text="Фаундер считает, что прозрачность — ключевая ценность.", flag="green")
+    canned = {"items": [
+        {"id": f, "generic": "Фаундер считает",
+         "rewrite": "[ИМЯ] считает, что прозрачность — ключевая ценность."},
+    ]}
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: json.dumps(canned, ensure_ascii=False))
+    res = verification.find_unattributed_facts(conn, "co")
+    assert res["available"] and len(res["items"]) == 1
+    it = res["items"][0]
+    assert it["needs_choice"] is False
+    assert it["proposed_text"] == "Давид Вайсман считает, что прозрачность — ключевая ценность."
+    assert it["must_be_concrete"] is True   # L1.2
+
+
+def test_find_unattributed_multi_founder_needs_choice(conn, monkeypatch):
+    matrix.add_entity(conn, client_id="co", kind="founder", name="Алексей Либерман")
+    matrix.add_entity(conn, client_id="co", kind="founder", name="Дмитрий Либерман")
+    f = matrix.add_fact(conn, client_id="co", subsection_id="2.2",
+                        text="Основатель предложил сменить модель монетизации.", flag="green")
+    canned = {"items": [{"id": f, "generic": "Основатель предложил",
+                         "rewrite": "[ИМЯ] предложил сменить модель монетизации."}]}
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: json.dumps(canned, ensure_ascii=False))
+    res = verification.find_unattributed_facts(conn, "co")
+    it = res["items"][0]
+    assert it["needs_choice"] is True
+    assert "[ИМЯ]" in it["proposed_text"]   # not auto-filled — analyst must pick
+
+
+def test_attribute_fact_creates_named_fact(conn):
+    eid = matrix.add_entity(conn, client_id="co", kind="founder", name="Давид Вайсман")
+    f = matrix.add_fact(conn, client_id="co", subsection_id="1.2",
+                        text="Фаундер считает X.", flag="green")
+    new_id = matrix.attribute_fact(conn, f, eid, "Давид Вайсман считает X.")
+    assert new_id != f
+    new = matrix.get_fact(conn, new_id)
+    assert new["state"] == "active" and new["speaker_entity_id"] == eid
+    assert new["text"] == "Давид Вайсман считает X."
+    assert matrix.get_fact(conn, f)["state"] == "rejected"
+
+
 def test_find_duplicates_stub(conn, monkeypatch):
     matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="x", flag="green")
     matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="y", flag="green")

@@ -272,6 +272,66 @@ def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) 
     return {"available": True, "groups": groups}
 
 
+_ATTRIB_SYSTEM = """Ты — редактор IR-матрицы. Дан список фактов `[id|подсекция|текст]`. Найди факты, где субъект высказывания/действия назван ОБЕЗЛИЧЕННО: «фаундер», «основатель», «сооснователь», «founder», «co-founder», «он/она» в роли говорящего — вместо конкретного имени. Это плохо: в матрице и материалах должно быть конкретное лицо.
+
+Для КАЖДОГО такого факта верни перепись, где обезличенный субъект заменён плейсхолдером `[ИМЯ]` (именно так, в квадратных скобках), а остальной текст сохранён дословно. Падеж/грамматику подгони под подстановку имени в именительном падеже («[ИМЯ] считает…», «[ИМЯ] предложил…»).
+
+Верни СТРОГО валидный JSON (без markdown):
+{"items": [{"id": <id>, "generic": "<обезличенная фраза как в тексте>", "rewrite": "<текст с [ИМЯ]>"}]}
+
+Факты с уже конкретным именем НЕ трогай. Нет таких фактов → "items": []."""
+
+
+def find_unattributed_facts(conn, client_id: str, *, model: Optional[str] = None) -> Dict[str, Any]:
+    """Scan active facts for generic speaker references ("фаундер считает …") and
+    propose a rewrite that names a concrete founder. Mirrors find_duplicate_groups.
+
+    - 1 founder on the company card → proposed_text auto-fills that name.
+    - >1 founder → needs_choice; analyst picks who, then the name fills [ИМЯ].
+    - L1–L2 facts must name a concrete person → flagged must_be_concrete=True.
+    Returns {available, founders:[{id,name}], items:[...]}. Stub-safe."""
+    from . import matrix
+    founders = [{"id": e["id"], "name": e["name"]}
+                for e in matrix.entities_for_client(conn, client_id) if e["kind"] == "founder"]
+    facts = _active_facts(conn, client_id)
+    by_id = {f["id"]: f for f in facts}
+    if not facts:
+        return {"available": True, "founders": founders, "items": []}
+    lines = [f"[{f['id']}|{f['sid']}] {(f['text'] or '')[:200]}" for f in facts]
+    fn = "Фаундеры на карточке: " + (", ".join(x["name"] for x in founders) or "нет") + "\n\n"
+    data = _generate_json(_ATTRIB_SYSTEM, fn + "Факты:\n" + "\n".join(lines),
+                          max_tokens=6000, model=model or _audit_model())
+    if data is None:
+        return {"available": False, "founders": founders, "items": []}
+
+    single = founders[0]["name"] if len(founders) == 1 else None
+    items: List[dict] = []
+    for it in data.get("items", []) or []:
+        try:
+            fid = int(it.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if fid not in by_id:
+            continue
+        rewrite = (it.get("rewrite") or "").strip()[:400]
+        if not rewrite or "[ИМЯ]" not in rewrite:
+            continue
+        sid = by_id[fid]["sid"]
+        layer_id = int(sid.split(".")[0])
+        items.append({
+            "id": fid,
+            "subsection_id": sid,
+            "layer_id": layer_id,
+            "text": by_id[fid]["text"],
+            "generic": (it.get("generic") or "").strip()[:120],
+            "rewrite_template": rewrite,
+            "proposed_text": rewrite.replace("[ИМЯ]", single) if single else rewrite,
+            "needs_choice": single is None,
+            "must_be_concrete": layer_id in (1, 2),
+        })
+    return {"available": True, "founders": founders, "items": items}
+
+
 def _generate_json(system: str, user: str, *, max_tokens: int,
                    model: Optional[str], attempts: int = 2) -> Optional[dict]:
     """Thin object-only wrapper over the universal llm.generate_json primitive

@@ -84,6 +84,27 @@ def test_committed_at_pending_until_commit(tmp_path):
         assert row2["committed_at"] is not None, "commit must set committed_at"
 
 
+def test_commit_applies_speaker_entity(tmp_path):
+    """speaker_entity_id passed to commit → set on every committed fact (interviewee)."""
+    from ir_storyboard import matrix
+    from ir_storyboard.ingest.youtube_pipeline import run_youtube_preview, run_youtube_commit
+
+    conn = _make_conn(tmp_path)
+    eid = matrix.add_entity(conn, client_id="test_founder", kind="founder", name="Иван Петров")
+    with ExitStack() as stack:
+        _yt_patches(stack, MockTranscriber())
+        result = run_youtube_preview("test_founder", "https://youtu.be/abc123", conn, cache_dir=tmp_path)
+        run_youtube_commit(preview_id=result.preview_id,
+                           accepted_fact_ids=list(range(len(result.facts))),
+                           overrides=[], conn=conn, expert_email="a@b.com",
+                           speaker_entity_id=eid)
+    # every committed (active) youtube fact carries the interviewee
+    rows = conn.execute(
+        "SELECT speaker_entity_id FROM facts WHERE state='active' AND ingest_audit_id=?",
+        (result.preview_id,)).fetchall()
+    assert rows and all(r["speaker_entity_id"] == eid for r in rows)
+
+
 def test_cache_hit_reports_cached_stage(tmp_path):
     from ir_storyboard.ingest.youtube_pipeline import run_youtube_preview
 

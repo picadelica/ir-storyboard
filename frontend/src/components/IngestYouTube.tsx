@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import type { Layer, YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
+import type { Entity, Layer, YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
 import SourceLine from "./SourceLine";
 import FlagDot from "./FlagDot";
 
@@ -56,6 +56,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   const [factEdits, setFactEdits] = useState<Record<number, FactEdit>>({});
   const [skippedEdits, setSkippedEdits] = useState<Record<number, FactEdit>>({});
   const [expertEmail, setExpertEmail] = useState("");
+  const [speakerId, setSpeakerId] = useState<number | null>(null);   // interviewee founder
   const [jobId, setJobId] = useState<string | null>(lsSaved.jobId || null);
   const [jobStatus, setJobStatus] = useState<string>(lsSaved.jobStatus || "");
   const [jobStage, setJobStage] = useState<string>("");
@@ -111,6 +112,13 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
     queryKey: ["yt-ingest-history", clientId],
     queryFn: () => api.youtubeHistory(clientId),
   });
+  const entities = useQuery<Entity[]>({
+    queryKey: ["entities", clientId],
+    queryFn: () => api.entities(clientId),
+  });
+  const founders = (entities.data ?? []).filter(e => e.kind === "founder");
+  // 1 founder → auto-attribute; >1 → analyst must pick who the interview is with.
+  const effectiveSpeaker = speakerId ?? (founders.length === 1 ? founders[0].id : null);
 
   function stopPolling() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -214,6 +222,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         accepted,
         ov,
         expertEmail || "anonymous@example.com",
+        effectiveSpeaker,
       );
     },
     onSuccess: () => {
@@ -890,6 +899,24 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
       {/* Commit bar — hidden in read-only review mode */}
       {!readOnly && (
       <div className="sticky bottom-0 bg-white border-t border-ink-line pt-4 pb-2 space-y-3">
+        {/* Interviewee: 1 founder → auto; >1 → must pick who this interview is with. */}
+        {founders.length > 1 && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-ink-mute">🗣 С кем интервью?</span>
+            <select
+              value={effectiveSpeaker ?? ""}
+              onChange={(e) => setSpeakerId(e.target.value ? Number(e.target.value) : null)}
+              className={`text-sm border rounded px-2 py-1 bg-white ${effectiveSpeaker ? "border-ink-line text-ink" : "border-amber-300 text-amber-700"}`}
+            >
+              <option value="">— выберите фаундера —</option>
+              {founders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+            {!effectiveSpeaker && <span className="text-[11px] text-amber-600">факты получат имя спикера</span>}
+          </div>
+        )}
+        {founders.length === 1 && (
+          <div className="text-[11px] text-ink-mute">🗣 Спикер: {founders[0].name} (подставится автоматически)</div>
+        )}
         <div className="flex items-center gap-3">
           <input
             type="email"

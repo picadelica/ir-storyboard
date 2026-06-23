@@ -374,6 +374,38 @@ def set_fact_speaker(conn: sqlite3.Connection, fact_id: int, entity_id: Optional
     conn.commit()
 
 
+def attribute_fact(conn: sqlite3.Connection, fact_id: int, entity_id: Optional[int],
+                   new_text: str) -> int:
+    """Replace a fact's generic-speaker wording ("Фаундер считает …") with a concrete
+    name. Immutability: instead of editing text in place, create a NEW fact carrying
+    new_text + speaker_entity_id, fold the original's source onto it, and reject the
+    original. Returns the new fact id."""
+    text = (new_text or "").strip()
+    old = get_fact(conn, fact_id)
+    if old is None:
+        raise ValueError(f"fact {fact_id} not found")
+    if not text or text == (old["text"] or "").strip():
+        # nothing to rewrite; just (re)attach the speaker
+        set_fact_speaker(conn, fact_id, entity_id)
+        return fact_id
+    cur = conn.execute(
+        """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until,
+                              evidence_snippet, rationale, created_by, must_have, speaker_entity_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (old["cell_id"], text, old["flag"], old["source_id"], old["confidence"],
+         old["valid_until"], old["evidence_snippet"], old["rationale"],
+         "attribute", old["must_have"], entity_id),
+    )
+    new_id = cur.lastrowid
+    _fold_source(conn, new_id, fact_id)
+    conn.execute(
+        """UPDATE facts SET state='rejected', verification='refuted',
+                            verification_note=? WHERE id=?""",
+        (f"переименован спикер → #{new_id}", fact_id))
+    conn.commit()
+    return new_id
+
+
 def set_fact_state(conn: sqlite3.Connection, fact_id: int, state: str) -> None:
     """Lifecycle: 'active' (in matrix + generators), 'review' (quarantine — held
     at the ingest gate, NOT in the matrix, awaiting human promote/reject), or

@@ -391,6 +391,24 @@ export interface DuplicatesResult {
   groups: DuplicateGroup[];
 }
 
+export interface AttribItem {
+  id: number;
+  subsection_id: string;
+  layer_id: number;
+  text: string;
+  generic: string;
+  rewrite_template: string;
+  proposed_text: string;
+  needs_choice: boolean;
+  must_be_concrete: boolean;
+}
+
+export interface UnattributedResult {
+  available: boolean;
+  founders: { id: number; name: string }[];
+  items: AttribItem[];
+}
+
 export interface GuideGround {
   id: number;
   text: string;

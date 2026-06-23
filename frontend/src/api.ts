@@ -2,7 +2,7 @@ import type {
   AudioTranscript,
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
-  AuditResult, Entity, EntityFact, ReviewFact, DuplicatesResult, InterviewGuide,
+  AuditResult, Entity, EntityFact, ReviewFact, DuplicatesResult, UnattributedResult, InterviewGuide,
   AboutProposal, AboutAutofillResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
@@ -289,6 +289,7 @@ export const api = {
     acceptedFactIds: number[],
     overrides: Array<{ fact_idx: number; force_keep: boolean }>,
     expertEmail: string,
+    speakerEntityId?: number | null,
   ): Promise<YouTubeCommitOut> =>
     call<YouTubeCommitOut>(`/clients/${clientId}/ingest/youtube/commit`, {
       method: "POST",
@@ -297,6 +298,7 @@ export const api = {
         accepted_fact_ids: acceptedFactIds,
         overrides,
         expert_email: expertEmail,
+        speaker_entity_id: speakerEntityId ?? null,
       }),
     }),
 
@@ -407,6 +409,11 @@ export const api = {
     runJob<DuplicatesResult>(`/clients/${clientId}/find-duplicates/start`),
   mergeFacts: (keepId: number, mergeIds: number[], mergedText?: string): Promise<Fact> =>
     call<Fact>(`/facts/merge`, { method: "POST", body: JSON.stringify({ keep_id: keepId, merge_ids: mergeIds, merged_text: mergedText ?? null }) }),
+  // speaker attribution: scan for generic "Фаундер …" wording; rewrite to a name
+  findUnattributed: (clientId: string): Promise<UnattributedResult> =>
+    runJob<UnattributedResult>(`/clients/${clientId}/find-unattributed/start`),
+  attributeFact: (factId: number, entityId: number | null, text: string): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/attribute`, { method: "POST", body: JSON.stringify({ entity_id: entityId, text }) }),
   interviewGuide: (clientId: string): Promise<InterviewGuide> =>
     runJob<InterviewGuide>(`/clients/${clientId}/interview-guide/start`),
 

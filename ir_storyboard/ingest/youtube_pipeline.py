@@ -436,6 +436,7 @@ def run_youtube_commit(
     overrides: list[dict],          # see below
     conn: sqlite3.Connection,
     expert_email: str = "anonymous@example.com",
+    speaker_entity_id: Optional[int] = None,   # interviewee founder → set on every fact
 ) -> YouTubeCommitResult:
     """Write accepted facts to matrix.
 
@@ -524,9 +525,9 @@ def run_youtube_commit(
             )
             conn.execute(
                 "UPDATE facts SET ingest_audit_id = ?, source_url = ?, "
-                "snippet_start_sec = ? WHERE id = ?",
+                "snippet_start_sec = ?, speaker_entity_id = ? WHERE id = ?",
                 (preview_id, fdict.get("source_url", ""),
-                 fdict.get("snippet_start_sec"), fact_id),
+                 fdict.get("snippet_start_sec"), speaker_entity_id, fact_id),
             )
             committed += 1
         except Exception:
@@ -554,9 +555,9 @@ def run_youtube_commit(
             )
             conn.execute(
                 "UPDATE facts SET ingest_audit_id = ?, source_url = ?, "
-                "snippet_start_sec = ? WHERE id = ?",
+                "snippet_start_sec = ?, speaker_entity_id = ? WHERE id = ?",
                 (preview_id, sdict.get("source_url", ""),
-                 sdict.get("snippet_start_sec"), fact_id),
+                 sdict.get("snippet_start_sec"), speaker_entity_id, fact_id),
             )
             committed += 1
         except Exception:

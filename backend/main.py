@@ -1208,6 +1208,62 @@ def _compute_dups(conn, client_id: str) -> dict:
     return verification.find_duplicate_groups(conn, client_id)
 
 
+# ---------- speaker attribution: name a concrete founder in generic-speaker facts ----
+
+
+class AttribFounderOut(BaseModel):
+    id: int
+    name: str = ""
+
+
+class AttribItemOut(BaseModel):
+    id: int
+    subsection_id: str = ""
+    layer_id: int = 0
+    text: str = ""
+    generic: str = ""
+    rewrite_template: str = ""
+    proposed_text: str = ""
+    needs_choice: bool = False
+    must_be_concrete: bool = False
+
+
+class UnattributedOut(BaseModel):
+    available: bool
+    founders: List[AttribFounderOut] = []
+    items: List[AttribItemOut] = []
+
+
+class AttributeIn(BaseModel):
+    entity_id: Optional[int] = None
+    text: str
+
+
+def _compute_unattributed(conn, client_id: str) -> dict:
+    return verification.find_unattributed_facts(conn, client_id)
+
+
+@app.post("/api/clients/{client_id}/find-unattributed", response_model=UnattributedOut)
+def find_unattributed(client_id: str, conn=Depends(get_conn)):
+    """Synchronous; prefer /find-unattributed/start + /jobs/{id} for the UI."""
+    return UnattributedOut(**_compute_unattributed(conn, client_id))
+
+
+@app.post("/api/facts/{fact_id}/attribute", response_model=FactOut)
+def attribute_fact_ep(fact_id: int, body: AttributeIn, conn=Depends(get_conn)):
+    """Replace a fact's generic "Фаундер …" wording with a concrete name: creates a
+    NEW fact (immutability) carrying body.text + speaker, rejects the original."""
+    old = matrix.get_fact(conn, fact_id)
+    if old is None:
+        raise HTTPException(404, "fact not found")
+    if body.entity_id is not None:
+        ent = conn.execute("SELECT client_id FROM entities WHERE id=?", (body.entity_id,)).fetchone()
+        if ent is None or ent["client_id"] != old["client_id"]:
+            raise HTTPException(400, "entity not found for this client")
+    new_id = matrix.attribute_fact(conn, fact_id, body.entity_id, body.text)
+    return _row_to_fact(matrix.get_fact(conn, new_id))
+
+
 @app.post("/api/clients/{client_id}/find-duplicates", response_model=DuplicatesOut)
 def find_duplicates(client_id: str, conn=Depends(get_conn)):
     """Synchronous; prefer /find-duplicates/start + /jobs/{id} for the UI."""
@@ -2469,6 +2525,11 @@ def start_find_duplicates(client_id: str):
     return LLMJobOut(job_id=_start_llm_job(_compute_dups, client_id), status="processing")
 
 
+@app.post("/api/clients/{client_id}/find-unattributed/start", response_model=LLMJobOut)
+def start_find_unattributed(client_id: str):
+    return LLMJobOut(job_id=_start_llm_job(_compute_unattributed, client_id), status="processing")
+
+
 @app.post("/api/clients/{client_id}/interview-guide/start", response_model=LLMJobOut)
 def start_interview_guide(client_id: str):
     return LLMJobOut(job_id=_start_llm_job(_compute_guide, client_id), status="processing")
@@ -2649,6 +2710,7 @@ class YouTubeCommitIn(BaseModel):
     accepted_fact_ids: Optional[List[int]] = None   # None = accept all
     overrides: List[Dict[str, Any]] = []
     expert_email: str = "anonymous@example.com"
+    speaker_entity_id: Optional[int] = None   # interviewee founder → set on all facts
 
 
 class YouTubeCommitOut(BaseModel):
@@ -2804,6 +2866,7 @@ def youtube_commit(client_id: str, body: YouTubeCommitIn, conn=Depends(get_conn)
             overrides=body.overrides,
             conn=conn,
             expert_email=body.expert_email,
+            speaker_entity_id=body.speaker_entity_id,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

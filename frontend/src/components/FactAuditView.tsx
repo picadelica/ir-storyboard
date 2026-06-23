@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { readLS, patchLS } from "../persist";
 import { RunProgress, useElapsed } from "./RunProgress";
-import type { AuditResult, Entity, EntityFact, ReviewFact, DuplicateGroup } from "../types";
+import type { AuditResult, Entity, EntityFact, ReviewFact, DuplicateGroup, AttribItem } from "../types";
 
 interface Props {
   clientId: string;
@@ -19,7 +19,10 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   // analyst navigated away while the audit was still running; on remount the
   // useState initializer reads it back.
   const lsKey = `fact-audit-${clientId}`;
-  const saved = readLS<{ audit?: AuditResult | null; dups?: DuplicateGroup[] | null }>(lsKey);
+  const saved = readLS<{
+    audit?: AuditResult | null; dups?: DuplicateGroup[] | null;
+    attrib?: AttribItem[] | null; founders?: { id: number; name: string }[];
+  }>(lsKey);
   const [audit, setAudit] = useState<AuditResult | null>(saved.audit ?? null);
   const [dups, setDups] = useState<DuplicateGroup[] | null>(saved.dups ?? null);
   const dropFromAudit = (id: number) =>
@@ -72,6 +75,32 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     onSuccess: (_d, { g }) => { dropDupGroup(x => x.keep === g.keep); invalidate(); },
   });
 
+  // speaker attribution: facts with generic "Фаундер …" wording → name a person
+  const [attrib, setAttrib] = useState<AttribItem[] | null>(saved.attrib ?? null);
+  const [founders, setFounders] = useState<{ id: number; name: string }[]>(saved.founders ?? []);
+  const [attChoice, setAttChoice] = useState<Record<number, number>>({});  // factId → entityId
+  const [attText, setAttText] = useState<Record<number, string>>({});       // factId → edited text
+  const dropAttrib = (id: number) =>
+    setAttrib(prev => {
+      const nx = (prev ?? []).filter(x => x.id !== id);
+      patchLS(lsKey, { attrib: nx });
+      return nx;
+    });
+  const findAttrib = useMutation({
+    mutationFn: async () => {
+      const r = await api.findUnattributed(clientId);
+      const items = r.available ? r.items : [];
+      patchLS(lsKey, { attrib: items, founders: r.founders });
+      return r;
+    },
+    onSuccess: (r) => { setAttrib(r.available ? r.items : []); setFounders(r.founders); },
+  });
+  const applyAttrib = useMutation({
+    mutationFn: ({ it, entityId, text }: { it: AttribItem; entityId: number | null; text: string }) =>
+      api.attributeFact(it.id, entityId, text),
+    onSuccess: (_d, { it }) => { dropAttrib(it.id); invalidate(); },
+  });
+
   const run = useMutation({
     mutationFn: async () => {
       const r = await api.runAudit(clientId);
@@ -102,6 +131,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
 
   const auditElapsed = useElapsed(run.isPending);
   const dupsElapsed = useElapsed(findDups.isPending);
+  const attribElapsed = useElapsed(findAttrib.isPending);
 
   return (
     <div className="p-5 space-y-5 max-w-4xl">
@@ -121,6 +151,14 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
             {findDups.isPending ? "Ищу дубли…" : "Найти дубли"}
           </button>
           <button
+            onClick={() => findAttrib.mutate()}
+            disabled={findAttrib.isPending}
+            title="Найти факты с обезличенным субъектом («фаундер считает…») и проставить имя"
+            className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50"
+          >
+            {findAttrib.isPending ? "Ищу…" : "Проверить спикеров"}
+          </button>
+          <button
             onClick={() => run.mutate()}
             disabled={run.isPending}
             className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300"
@@ -132,6 +170,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
 
       <RunProgress active={run.isPending} elapsed={auditElapsed} label="Проверяю факты на склейку сущностей…" />
       <RunProgress active={findDups.isPending} elapsed={dupsElapsed} label="Ищу дубли фактов…" />
+      <RunProgress active={findAttrib.isPending} elapsed={attribElapsed} label="Ищу обезличенные формулировки…" />
 
       {run.isError && (
         <div className="bg-flag-red-bg border border-flag-red/40 rounded p-3 text-sm text-flag-red">
@@ -197,6 +236,72 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
               </div>
             </div>
           ))}
+        </section>
+      )}
+
+      {attrib !== null && (
+        <section className="bg-white rounded-lg border border-ink-line p-4 space-y-3">
+          <h3 className="text-sm font-semibold">
+            Спикеры <span className="font-normal text-ink-mute">({attrib.length} обезличенных)</span>
+          </h3>
+          {founders.length === 0 && (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+              На карточке компании нет фаундеров — добавьте их в «About», чтобы подставлять имена.
+            </div>
+          )}
+          {attrib.length === 0 ? (
+            <div className="text-xs text-ink-mute italic">Обезличенных формулировок не найдено (или верификатор недоступен).</div>
+          ) : attrib.map(it => {
+            const chosen = attChoice[it.id] ?? (founders.length === 1 ? founders[0].id : undefined);
+            const chosenName = founders.find(f => f.id === chosen)?.name;
+            const text = attText[it.id]
+              ?? (chosenName ? it.rewrite_template.replace("[ИМЯ]", chosenName) : it.proposed_text);
+            return (
+              <div key={it.id} className={`border rounded p-3 ${it.must_be_concrete ? "border-flag-red/40 bg-flag-red-bg/30" : "border-ink-line"}`}>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[11px] font-mono text-ink-mute">{it.subsection_id}</span>
+                  {it.must_be_concrete && (
+                    <span className="text-[10px] px-1 rounded bg-flag-red/10 text-flag-red" title="L1–L2: обязательно конкретное лицо">L{it.layer_id} — нужно имя</span>
+                  )}
+                  <button onClick={() => onJumpToCell(it.subsection_id)}
+                    className="text-[11px] text-blue-600 hover:underline ml-auto">{it.subsection_id} →</button>
+                </div>
+                <div className="text-xs text-ink-mute mb-1.5 line-through">{it.text}</div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[11px] text-ink-mute">🗣</span>
+                  <select
+                    value={chosen ?? ""}
+                    onChange={e => {
+                      const eid = e.target.value ? Number(e.target.value) : undefined;
+                      setAttChoice(m => ({ ...m, [it.id]: eid as number }));
+                      const nm = founders.find(f => f.id === eid)?.name;
+                      if (nm) setAttText(m => ({ ...m, [it.id]: it.rewrite_template.replace("[ИМЯ]", nm) }));
+                    }}
+                    className={`text-xs border border-ink-line rounded px-1.5 py-1 bg-white ${chosen ? "text-ink" : "text-ink-mute"}`}
+                  >
+                    <option value="">— кто это? —</option>
+                    {founders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                </div>
+                <textarea
+                  value={text}
+                  onChange={e => setAttText(m => ({ ...m, [it.id]: e.target.value }))}
+                  rows={2}
+                  className="w-full text-sm border border-ink-line rounded px-2 py-1.5 mb-2 resize-y"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => applyAttrib.mutate({ it, entityId: chosen ?? null, text })}
+                    disabled={applyAttrib.isPending || (it.needs_choice && !chosen) || text.includes("[ИМЯ]")}
+                    className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+                    применить имя
+                  </button>
+                  <button onClick={() => dropAttrib(it.id)}
+                    className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>
+                </div>
+              </div>
+            );
+          })}
         </section>
       )}
 
