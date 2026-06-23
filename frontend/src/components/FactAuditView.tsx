@@ -3,10 +3,37 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { readLS, patchLS } from "../persist";
 import { RunProgress, useElapsed } from "./RunProgress";
-import MatrixFactCard from "./MatrixFactCard";
 import FlagDot from "./FlagDot";
-import SourceLine from "./SourceLine";
-import type { AuditResult, Entity, EntityFact, ReviewFact, DuplicateGroup, AttribItem } from "../types";
+import type { AuditResult, Entity, EntityFact, ReviewFact, DuplicateGroup, DupFact, AttribItem } from "../types";
+
+// A merge the analyst formed on the left, staged on the right awaiting batch transfer.
+interface StagedCard {
+  group: DuplicateGroup;   // kept so we can return it to the work list
+  keep: number;
+  ids: number[];
+  text: string;
+  flag: string;
+  subsection_id: string;
+  facts: DupFact[];        // merged sources → pictograms
+  approved: boolean;       // "в продуктив"
+}
+
+function fmtTimecode(sec: number): string {
+  const t = Math.floor(sec), m = Math.floor(t / 60), s = t % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// Tiny source pictogram for a staged card (link back to the original fact's cell).
+function sourcePictogram(f: DupFact): { icon: string; suffix: string } {
+  const ch = f.source_channel;
+  const ts = f.snippet_start_sec != null && f.snippet_start_sec > 0 ? ` ${fmtTimecode(f.snippet_start_sec)}` : "";
+  if (ch === "online_interview") return { icon: "▶", suffix: ts };
+  if (ch === "offline_interview") return { icon: "🎙", suffix: "" };
+  if (f.ingest_kind === "audio_file") return { icon: "🎧", suffix: ts };
+  if (f.source_url) return { icon: "🔗", suffix: "" };
+  if (f.ingest_audit_id) return { icon: "📄", suffix: "" };
+  return { icon: "•", suffix: "" };
+}
 
 interface Props {
   clientId: string;
@@ -72,14 +99,9 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     },
     onSuccess: (groups) => setDups(groups),
   });
-  // analyst-editable merged wording + subset selection, keyed by the group's keep id
-  // (STABLE — keying by array index leaked a group's edited text onto the next group
-  // after a merge shifted indices).
+  // analyst-editable merged wording + subset selection, keyed by the group's keep id.
   const [mergeText, setMergeText] = useState<Record<number, string>>({});
   const [mergeSel, setMergeSel] = useState<Record<number, Set<number>>>({});
-  // two-step: "Сформировать" locks the Joint card (preview), then "Записать в матрицу"
-  // actually writes — nothing hits the matrix until the analyst confirms the formed card.
-  const [formed, setFormed] = useState<Record<number, boolean>>({});
   const selOf = (g: DuplicateGroup) => mergeSel[g.keep] ?? new Set(g.ids);
   const toggleMergeSel = (g: DuplicateGroup, id: number) =>
     setMergeSel(m => {
@@ -87,11 +109,30 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
       cur.has(id) ? cur.delete(id) : cur.add(id);
       return { ...m, [g.keep]: cur };
     });
-  const merge = useMutation({
-    mutationFn: ({ keep, ids, text }: { keep: number; ids: number[]; text?: string }) =>
-      api.mergeFacts(keep, ids.filter(i => i !== keep), text),
-    onSuccess: (_d, { keep }) => { dropDupGroup(g => g.keep === keep); invalidate(); },
+
+  // Right pane: cards the analyst FORMED on the left accumulate here ("в продуктив").
+  // Nothing hits the matrix until "Перенести все … в матрицу" (one batch at the end).
+  const [staged, setStaged] = useState<StagedCard[]>([]);
+  const formGroup = (g: DuplicateGroup, keep: number, ids: number[], text: string, flag: string) => {
+    setStaged(s => [...s, { group: g, keep, ids, text, flag,
+      subsection_id: g.subsection_id,
+      facts: g.facts.filter(f => ids.includes(f.id)), approved: true }]);
+    dropDupGroup(x => x.keep === g.keep);   // leaves the work list on the left
+  };
+  const unstage = (card: StagedCard) => {   // вернуть в разбор
+    setStaged(s => s.filter(c => c.keep !== card.keep));
+    setDups(d => { const nx = [card.group, ...(d ?? [])]; patchLS(lsKey, { dups: nx }); return nx; });
+  };
+  const transferAll = useMutation({
+    mutationFn: async () => {
+      const approved = staged.filter(c => c.approved);
+      for (const c of approved)            // sequential — keeps fact_sources/rejects ordered
+        await api.mergeFacts(c.keep, c.ids.filter(i => i !== c.keep), c.text);
+      return approved.length;
+    },
+    onSuccess: () => { setStaged(s => s.filter(c => !c.approved)); invalidate(); },
   });
+  const approvedCount = staged.filter(c => c.approved).length;
 
   // speaker attribution: facts with generic "Фаундер …" wording → name a person
   const [attrib, setAttrib] = useState<AttribItem[] | null>(saved.attrib ?? null);
@@ -157,7 +198,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   const attribElapsed = useElapsed(findAttrib.isPending);
 
   return (
-    <div className="p-5 space-y-5 max-w-4xl">
+    <div className="p-5 space-y-5">
       <div className="flex items-baseline justify-between">
         <div>
           <h2 className="text-lg font-semibold">Проверка фактов</h2>
@@ -210,137 +251,125 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
       {dups !== null && (
         <section className="bg-white rounded-lg border border-ink-line p-4 space-y-3">
           <h3 className="text-sm font-semibold">
-            Дубли <span className="font-normal text-ink-mute">({dups.length} групп)</span>
+            Дубли <span className="font-normal text-ink-mute">— слева правишь и формируешь, справа копятся карточки «в продуктив»</span>
           </h3>
-          {dups.length === 0 ? (
+          {dups.length === 0 && staged.length === 0 ? (
             <div className="text-xs text-ink-mute italic">
               {dupsAvail ? "Дублей не найдено — все факты в подсекциях различны."
                          : "Верификатор не ответил (модель/баланс) — попробуйте ещё раз."}
             </div>
-          ) : dups.map((g) => {
-            const sel = selOf(g);
-            const selIds = g.ids.filter(i => sel.has(i));
-            // keep = the LLM's keep if still selected, else the first selected fact
-            const keep = sel.has(g.keep) ? g.keep : (selIds[0] ?? g.keep);
-            const mtext = mergeText[g.keep] ?? g.merged_text;
-            const selFacts = g.facts.filter(f => sel.has(f.id));
-            const multi = g.ids.length > 2;
-            const isFormed = !!formed[g.keep];   // preview locked, awaiting "Записать"
-            return (
-            <div key={g.keep} className="border border-ink-line rounded-lg p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono text-ink-mute">{g.subsection_id}</span>
-                {g.reason && <span className="text-xs text-ink-mute">· {g.reason}</span>}
-                <button onClick={() => onJumpToCell(g.subsection_id)}
-                  className="text-[11px] text-blue-600 hover:underline ml-auto">{g.subsection_id} →</button>
-              </div>
-              {multi && (
-                <div className="text-[11px] text-ink-mute">Отметьте, какие факты сливать ({selIds.length} из {g.ids.length}); неотмеченные останутся в матрице.</div>
-              )}
+          ) : (
+          <div className="grid grid-cols-2 gap-5 items-start">
 
-              {/* Original cards (left) → Joint card (right), both in matrix format */}
-              <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-start">
-                <div className="space-y-1.5">
-                  <div className="text-[10px] uppercase tracking-wide text-ink-mute">Оригиналы</div>
-                  {g.facts.map(f => (
-                    <div key={f.id} className="flex items-start gap-1.5">
-                      {multi && (
-                        <input type="checkbox" checked={sel.has(f.id)} disabled={isFormed}
-                          onChange={() => toggleMergeSel(g, f.id)} className="mt-3.5 disabled:opacity-40" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <MatrixFactCard fact={f} clientId={clientId} faded={!sel.has(f.id)} />
-                      </div>
+            {/* LEFT — work list: edit the merged text, then "Сформировать →" */}
+            <div className="space-y-3">
+              <div className="text-[10px] uppercase tracking-wide text-ink-mute">К разбору ({dups.length})</div>
+              {dups.length === 0 && <div className="text-xs text-ink-mute italic">Все разобраны — смотри справа.</div>}
+              {dups.map((g) => {
+                const sel = selOf(g);
+                const selIds = g.ids.filter(i => sel.has(i));
+                const keep = sel.has(g.keep) ? g.keep : (selIds[0] ?? g.keep);
+                const mtext = mergeText[g.keep] ?? g.merged_text;
+                const keepFlag = g.facts.find(f => f.id === keep)?.flag ?? "green";
+                const multi = g.ids.length > 2;
+                return (
+                  <div key={g.keep} className="border border-ink-line rounded-lg p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono text-ink-mute">{g.subsection_id}</span>
+                      {g.reason && <span className="text-xs text-ink-mute truncate">· {g.reason}</span>}
+                      <button onClick={() => onJumpToCell(g.subsection_id)}
+                        className="text-[11px] text-blue-600 hover:underline ml-auto shrink-0">{g.subsection_id} →</button>
                     </div>
-                  ))}
-                </div>
-
-                <div className="self-center text-ink-mute text-lg pt-5">→</div>
-
-                {/* Joint card — what lands in the matrix, in matrix format */}
-                <div className="space-y-1.5">
-                  <div className="text-[10px] uppercase tracking-wide text-emerald-700 flex items-center gap-1.5">
-                    После слияния (в матрицу)
-                    {isFormed && <span className="text-emerald-700 normal-case font-medium">· ✓ сформировано, готово к записи</span>}
-                  </div>
-                  <div className={`border border-l-4 rounded-lg p-3 ${isFormed ? "bg-emerald-50 ring-1 ring-emerald-300" : "bg-emerald-50/40"} ${
-                    keep && selFacts.find(f => f.id === keep)?.flag === "red" ? "border-l-red-400"
-                      : selFacts.find(f => f.id === keep)?.flag === "grey" ? "border-l-slate-300" : "border-l-emerald-400"
-                  }`}>
-                    <div className="flex items-start gap-2">
-                      <FlagDot flag={selFacts.find(f => f.id === keep)?.flag ?? "green"} className="mt-1.5" />
-                      {isFormed ? (
-                        <div className="flex-1 text-sm text-slate-800 whitespace-pre-wrap py-1">{mtext}</div>
-                      ) : (
-                        <textarea
-                          value={mtext}
-                          onChange={e => setMergeText(m => ({ ...m, [g.keep]: e.target.value }))}
-                          rows={2}
-                          className="flex-1 text-sm border border-ink-line rounded px-2 py-1 bg-white resize-y"
-                        />
-                      )}
-                    </div>
-                    {/* combined sources of all merged facts (interview → file/time) */}
-                    <div className="mt-2 pl-4 space-y-0.5">
-                      <div className="text-[10px] text-ink-mute">Источники ({selFacts.length}):</div>
-                      {selFacts.map(f => (
-                        <SourceLine key={f.id}
-                          client_id={clientId}
-                          channel={f.source_channel}
-                          source_url={f.source_url}
-                          source_title={f.source_title}
-                          source_publisher={f.source_publisher}
-                          source_archive_url={f.source_archive_url}
-                          ingest_audit_id={f.ingest_audit_id || null}
-                          ingest_kind={f.ingest_kind || null}
-                          timestamp_sec={f.snippet_start_sec ?? undefined}
-                          captured_at={f.captured_at}
-                        />
-                      ))}
-                    </div>
-                    {!isFormed && mtext !== g.merged_text && (
-                      <button onClick={() => setMergeText(m => { const n = { ...m }; delete n[g.keep]; return n; })}
-                        className="mt-1 text-[10px] text-ink-mute hover:text-ink underline">сбросить к предложению</button>
+                    {multi && (
+                      <div className="text-[11px] text-ink-mute">Отметьте, какие сливать ({selIds.length}/{g.ids.length}); неотмеченные останутся в матрице.</div>
                     )}
+                    <ul className="space-y-1">
+                      {g.facts.map(f => (
+                        <li key={f.id} className="text-sm flex gap-2 items-start">
+                          {multi && (
+                            <input type="checkbox" checked={sel.has(f.id)}
+                              onChange={() => toggleMergeSel(g, f.id)} className="mt-1" />
+                          )}
+                          <FlagDot flag={f.flag} className="mt-1.5 shrink-0" />
+                          <span className={`flex-1 ${sel.has(f.id) ? "" : "line-through text-ink-mute"}`}>{f.text}</span>
+                          <span className="text-[10px] font-mono text-ink-mute shrink-0">#{f.id}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <label className="block text-[11px] text-ink-mute">Итоговая формулировка (правится):</label>
+                    <textarea
+                      value={mtext}
+                      onChange={e => setMergeText(m => ({ ...m, [g.keep]: e.target.value }))}
+                      rows={2}
+                      className="w-full text-sm border border-ink-line rounded px-2 py-1.5 resize-y"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => formGroup(g, keep, selIds, mtext, keepFlag)}
+                        disabled={selIds.length < 2}
+                        className="text-[11px] px-2.5 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+                        Сформировать → ({selIds.length}→1)
+                      </button>
+                      {mtext !== g.merged_text && (
+                        <button onClick={() => setMergeText(m => { const n = { ...m }; delete n[g.keep]; return n; })}
+                          className="text-[10px] text-ink-mute hover:text-ink underline">сбросить</button>
+                      )}
+                      <button onClick={() => dropDupGroup(x => x.keep === g.keep)}
+                        className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50 ml-auto">пропустить</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* RIGHT — staged cards "в продуктив"; one batch transfer at the end */}
+            <div className="space-y-3 border-l border-ink-line pl-5">
+              <div className="text-[10px] uppercase tracking-wide text-emerald-700">В продуктив ({approvedCount})</div>
+              {staged.length === 0 ? (
+                <div className="text-xs text-ink-mute italic">Сформируй карточку слева — она появится здесь.</div>
+              ) : staged.map(card => (
+                <div key={card.keep} className={`border border-l-4 rounded-lg p-3 bg-emerald-50/40 ${
+                  card.flag === "red" ? "border-l-red-400" : card.flag === "grey" ? "border-l-slate-300" : "border-l-emerald-400"
+                } ${card.approved ? "" : "opacity-50"}`}>
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" checked={card.approved} title="в продуктив"
+                      onChange={() => setStaged(s => s.map(c => c.keep === card.keep ? { ...c, approved: !c.approved } : c))}
+                      className="mt-1 accent-emerald-600" />
+                    <FlagDot flag={card.flag} className="mt-1.5 shrink-0" />
+                    <div className="flex-1 text-sm text-slate-800">{card.text}</div>
+                    <button onClick={() => unstage(card)} title="вернуть в разбор"
+                      className="text-ink-mute hover:text-ink shrink-0">↩</button>
+                  </div>
+                  {/* источники — пиктограммы-ссылки на исходные карточки (в ячейку матрицы) */}
+                  <div className="mt-1.5 pl-6 flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] font-mono text-ink-mute">{card.subsection_id} ·</span>
+                    {card.facts.map(f => {
+                      const p = sourcePictogram(f);
+                      return (
+                        <button key={f.id}
+                          onClick={() => onJumpToCell(card.subsection_id)}
+                          title={`#${f.id} · ${f.source_title || f.source_channel || "источник"}\n${f.text}`}
+                          className="text-[11px] px-1 py-0.5 rounded border border-ink-line text-ink-mute hover:bg-blue-50 hover:text-blue-600">
+                          {p.icon}<span className="font-mono">{p.suffix}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-              </div>
+              ))}
 
-              {/* Two-step: form the Joint card first, then write to the matrix. Nothing
-                  is written until "Записать в матрицу". */}
-              <div className="flex flex-wrap gap-2 pt-1 items-center">
-                {!isFormed ? (
-                  <>
-                    <button onClick={() => setFormed(m => ({ ...m, [g.keep]: true }))}
-                      disabled={selIds.length < 2}
-                      className="text-[11px] px-2.5 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
-                      Сформировать карточку →
-                    </button>
-                    <button onClick={() => dropDupGroup(x => x.keep === g.keep)}
-                      className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>
-                  </>
-                ) : (
-                  <>
-                    <button onClick={() => merge.mutate({ keep, ids: selIds, text: mtext })}
-                      disabled={merge.isPending}
-                      className="text-[11px] px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
-                      {merge.isPending ? "Записываю…" : `Записать в матрицу (${selIds.length} → 1)`}
-                    </button>
-                    <button onClick={() => setFormed(m => { const n = { ...m }; delete n[g.keep]; return n; })}
-                      disabled={merge.isPending}
-                      className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">← изменить</button>
-                    <button onClick={() => merge.mutate({ keep, ids: selIds })}
-                      disabled={merge.isPending}
-                      title={`Влить источники в #${keep} без создания нового факта (текст #${keep} без изменений)`}
-                      className="text-[11px] text-ink-mute hover:text-ink underline ml-1">
-                      влить в #{keep} без нового факта
-                    </button>
-                  </>
-                )}
-              </div>
+              {staged.length > 0 && (
+                <button onClick={() => transferAll.mutate()}
+                  disabled={transferAll.isPending || approvedCount === 0}
+                  className="w-full mt-1 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+                  {transferAll.isPending ? "Переношу…" : `Перенести все ${approvedCount} карточек в матрицу`}
+                </button>
+              )}
+              {transferAll.isError && (
+                <div className="text-xs text-flag-red">Ошибка переноса: {(transferAll.error as Error)?.message}</div>
+              )}
             </div>
-            );
-          })}
+          </div>
+          )}
         </section>
       )}
 
