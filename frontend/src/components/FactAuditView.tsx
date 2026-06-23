@@ -77,6 +77,9 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   // after a merge shifted indices).
   const [mergeText, setMergeText] = useState<Record<number, string>>({});
   const [mergeSel, setMergeSel] = useState<Record<number, Set<number>>>({});
+  // two-step: "Сформировать" locks the Joint card (preview), then "Записать в матрицу"
+  // actually writes — nothing hits the matrix until the analyst confirms the formed card.
+  const [formed, setFormed] = useState<Record<number, boolean>>({});
   const selOf = (g: DuplicateGroup) => mergeSel[g.keep] ?? new Set(g.ids);
   const toggleMergeSel = (g: DuplicateGroup, id: number) =>
     setMergeSel(m => {
@@ -222,6 +225,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
             const mtext = mergeText[g.keep] ?? g.merged_text;
             const selFacts = g.facts.filter(f => sel.has(f.id));
             const multi = g.ids.length > 2;
+            const isFormed = !!formed[g.keep];   // preview locked, awaiting "Записать"
             return (
             <div key={g.keep} className="border border-ink-line rounded-lg p-3 space-y-2">
               <div className="flex items-center gap-2">
@@ -241,8 +245,8 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                   {g.facts.map(f => (
                     <div key={f.id} className="flex items-start gap-1.5">
                       {multi && (
-                        <input type="checkbox" checked={sel.has(f.id)}
-                          onChange={() => toggleMergeSel(g, f.id)} className="mt-3.5" />
+                        <input type="checkbox" checked={sel.has(f.id)} disabled={isFormed}
+                          onChange={() => toggleMergeSel(g, f.id)} className="mt-3.5 disabled:opacity-40" />
                       )}
                       <div className="flex-1 min-w-0">
                         <MatrixFactCard fact={f} clientId={clientId} faded={!sel.has(f.id)} />
@@ -255,19 +259,26 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
 
                 {/* Joint card — what lands in the matrix, in matrix format */}
                 <div className="space-y-1.5">
-                  <div className="text-[10px] uppercase tracking-wide text-emerald-700">После слияния (в матрицу)</div>
-                  <div className={`border border-l-4 rounded-lg p-3 bg-emerald-50/40 ${
+                  <div className="text-[10px] uppercase tracking-wide text-emerald-700 flex items-center gap-1.5">
+                    После слияния (в матрицу)
+                    {isFormed && <span className="text-emerald-700 normal-case font-medium">· ✓ сформировано, готово к записи</span>}
+                  </div>
+                  <div className={`border border-l-4 rounded-lg p-3 ${isFormed ? "bg-emerald-50 ring-1 ring-emerald-300" : "bg-emerald-50/40"} ${
                     keep && selFacts.find(f => f.id === keep)?.flag === "red" ? "border-l-red-400"
                       : selFacts.find(f => f.id === keep)?.flag === "grey" ? "border-l-slate-300" : "border-l-emerald-400"
                   }`}>
                     <div className="flex items-start gap-2">
                       <FlagDot flag={selFacts.find(f => f.id === keep)?.flag ?? "green"} className="mt-1.5" />
-                      <textarea
-                        value={mtext}
-                        onChange={e => setMergeText(m => ({ ...m, [g.keep]: e.target.value }))}
-                        rows={2}
-                        className="flex-1 text-sm border border-ink-line rounded px-2 py-1 bg-white resize-y"
-                      />
+                      {isFormed ? (
+                        <div className="flex-1 text-sm text-slate-800 whitespace-pre-wrap py-1">{mtext}</div>
+                      ) : (
+                        <textarea
+                          value={mtext}
+                          onChange={e => setMergeText(m => ({ ...m, [g.keep]: e.target.value }))}
+                          rows={2}
+                          className="flex-1 text-sm border border-ink-line rounded px-2 py-1 bg-white resize-y"
+                        />
+                      )}
                     </div>
                     {/* combined sources of all merged facts (interview → file/time) */}
                     <div className="mt-2 pl-4 space-y-0.5">
@@ -287,7 +298,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                         />
                       ))}
                     </div>
-                    {mtext !== g.merged_text && (
+                    {!isFormed && mtext !== g.merged_text && (
                       <button onClick={() => setMergeText(m => { const n = { ...m }; delete n[g.keep]; return n; })}
                         className="mt-1 text-[10px] text-ink-mute hover:text-ink underline">сбросить к предложению</button>
                     )}
@@ -295,20 +306,37 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2 pt-1">
-                <button onClick={() => merge.mutate({ keep, ids: selIds, text: mtext })}
-                  disabled={merge.isPending || selIds.length < 2}
-                  className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
-                  слить с этим текстом ({selIds.length} → 1)
-                </button>
-                <button onClick={() => merge.mutate({ keep, ids: selIds })}
-                  disabled={merge.isPending || selIds.length < 2}
-                  title={`Оставить формулировку #${keep} без изменений, просто сложить источники`}
-                  className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50 disabled:opacity-50">
-                  оставить #{keep} как есть
-                </button>
-                <button onClick={() => dropDupGroup(x => x.keep === g.keep)}
-                  className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>
+              {/* Two-step: form the Joint card first, then write to the matrix. Nothing
+                  is written until "Записать в матрицу". */}
+              <div className="flex flex-wrap gap-2 pt-1 items-center">
+                {!isFormed ? (
+                  <>
+                    <button onClick={() => setFormed(m => ({ ...m, [g.keep]: true }))}
+                      disabled={selIds.length < 2}
+                      className="text-[11px] px-2.5 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+                      Сформировать карточку →
+                    </button>
+                    <button onClick={() => dropDupGroup(x => x.keep === g.keep)}
+                      className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => merge.mutate({ keep, ids: selIds, text: mtext })}
+                      disabled={merge.isPending}
+                      className="text-[11px] px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                      {merge.isPending ? "Записываю…" : `Записать в матрицу (${selIds.length} → 1)`}
+                    </button>
+                    <button onClick={() => setFormed(m => { const n = { ...m }; delete n[g.keep]; return n; })}
+                      disabled={merge.isPending}
+                      className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">← изменить</button>
+                    <button onClick={() => merge.mutate({ keep, ids: selIds })}
+                      disabled={merge.isPending}
+                      title={`Влить источники в #${keep} без создания нового факта (текст #${keep} без изменений)`}
+                      className="text-[11px] text-ink-mute hover:text-ink underline ml-1">
+                      влить в #{keep} без нового факта
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             );
