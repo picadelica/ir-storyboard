@@ -118,6 +118,33 @@ def test_client_facts_pdf_preview_allows_L1(ctx, monkeypatch):
     assert any(f["must_have"] and "инженеров" in f["text"] for f in l1)
 
 
+def test_export_must_have_numbered(ctx):
+    """Export endpoint returns a numbered "N — text" list of must-have facts only."""
+    client, _ = ctx  # the seeded "Ordinary web fact" stays NON-must-have
+    client.post("/api/clients/co/ingest/client-facts", json={
+        "source_title": "От клиента",
+        "facts": [
+            {"text": "Клиент: закрыли раунд A.", "subsection_id": "4.1", "flag": "green"},
+            {"text": "Клиент: партнёрство с банком.", "subsection_id": "3.3", "flag": "green"},
+        ],
+    })
+    r = client.get("/api/clients/co/facts/must-have/export")
+    assert r.status_code == 200, r.text
+    assert "attachment" in r.headers.get("content-disposition", "")
+    body = r.text
+    assert "1 — " in body and "2 — " in body
+    assert "раунд A" in body
+    # a non-must-have fact must not appear
+    assert "Ordinary web fact" not in body
+
+
+def test_export_must_have_empty(ctx):
+    client, _ = ctx
+    r = client.get("/api/clients/co/facts/must-have/export")
+    assert r.status_code == 200
+    assert "нет must-have" in r.text
+
+
 def test_client_facts_pdf_rejects_non_pdf(ctx):
     client, _ = ctx
     files = {"file": ("notes.txt", b"hello", "text/plain")}

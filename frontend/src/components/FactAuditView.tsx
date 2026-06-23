@@ -64,9 +64,12 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     },
     onSuccess: (groups) => setDups(groups),
   });
+  // analyst-editable merged wording per group (seeded from the LLM proposal)
+  const [mergeText, setMergeText] = useState<Record<number, string>>({});
   const merge = useMutation({
-    mutationFn: (g: DuplicateGroup) => api.mergeFacts(g.keep, g.ids.filter(i => i !== g.keep)),
-    onSuccess: (_d, g) => { dropDupGroup(x => x.keep === g.keep); invalidate(); },
+    mutationFn: ({ g, text }: { g: DuplicateGroup; text?: string }) =>
+      api.mergeFacts(g.keep, g.ids.filter(i => i !== g.keep), text),
+    onSuccess: (_d, { g }) => { dropDupGroup(x => x.keep === g.keep); invalidate(); },
   });
 
   const run = useMutation({
@@ -159,18 +162,35 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
               <ul className="space-y-1 mb-2">
                 {g.facts.map(f => (
                   <li key={f.id} className="text-sm flex gap-2">
-                    <span className={`text-[10px] mt-0.5 px-1 rounded shrink-0
-                      ${f.id === g.keep ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-ink-mute"}`}>
-                      {f.id === g.keep ? "оставить" : "слить"}
+                    <span className="text-[10px] mt-0.5 px-1 rounded shrink-0 bg-slate-100 text-ink-mute">
+                      #{f.id}
                     </span>
                     <span>{f.text}</span>
                   </li>
                 ))}
               </ul>
-              <div className="flex gap-2">
-                <button onClick={() => merge.mutate(g)}
-                  className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50">
-                  слить в один ({g.ids.length} → 1)
+              {/* Proposed single wording — analyst edits before it lands in the matrix.
+                  A new merged fact is created with this text; the originals are rejected. */}
+              <label className="block text-[11px] text-ink-mute mb-1">
+                Итоговая формулировка (правится){g.ids.length > 2 ? ` — объединяет ${g.ids.length} факта` : ""}:
+              </label>
+              <textarea
+                value={mergeText[gi] ?? g.merged_text}
+                onChange={e => setMergeText(m => ({ ...m, [gi]: e.target.value }))}
+                rows={2}
+                className="w-full text-sm border border-ink-line rounded px-2 py-1.5 mb-2 resize-y"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => merge.mutate({ g, text: mergeText[gi] ?? g.merged_text })}
+                  disabled={merge.isPending}
+                  className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+                  слить с этим текстом ({g.ids.length} → 1)
+                </button>
+                <button onClick={() => merge.mutate({ g })}
+                  disabled={merge.isPending}
+                  title="Оставить формулировку выбранного факта (#${g.keep}) без изменений, просто сложить источники"
+                  className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50 disabled:opacity-50">
+                  оставить #{g.keep} как есть
                 </button>
                 <button onClick={() => dropDupGroup((_, i) => i === gi)}
                   className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>

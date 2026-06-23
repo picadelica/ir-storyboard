@@ -382,6 +382,7 @@ export interface DuplicateGroup {
   keep: number;
   ids: number[];
   reason: string;
+  merged_text: string;
   facts: { id: number; text: string }[];
 }
 

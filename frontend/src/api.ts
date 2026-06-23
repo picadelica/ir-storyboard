@@ -382,6 +382,19 @@ export const api = {
     call<Fact>(`/facts/${factId}/speaker`, { method: "POST", body: JSON.stringify({ entity_id: entityId }) }),
   setMustHave: (factId: number, mustHave: boolean): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/must-have`, { method: "POST", body: JSON.stringify({ must_have: mustHave }) }),
+  // Скачать must-have (синие) факты нумерованным списком (для согласования с заказчиком)
+  downloadMustHaveFacts: async (clientId: string, clientName: string): Promise<void> => {
+    const r = await fetch(`${API_BASE}/clients/${clientId}/facts/must-have/export`);
+    if (!r.ok) throw new Error(`${r.status} ${await r.text().catch(() => "")}`);
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `must_have_${clientName || clientId}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  },
   rejectFact: (factId: number): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/reject`, { method: "POST" }),
   restoreFact: (factId: number): Promise<Fact> =>
@@ -392,8 +405,8 @@ export const api = {
     call<Fact>(`/facts/${factId}/promote`, { method: "POST" }),
   findDuplicates: (clientId: string): Promise<DuplicatesResult> =>
     runJob<DuplicatesResult>(`/clients/${clientId}/find-duplicates/start`),
-  mergeFacts: (keepId: number, mergeIds: number[]): Promise<Fact> =>
-    call<Fact>(`/facts/merge`, { method: "POST", body: JSON.stringify({ keep_id: keepId, merge_ids: mergeIds }) }),
+  mergeFacts: (keepId: number, mergeIds: number[], mergedText?: string): Promise<Fact> =>
+    call<Fact>(`/facts/merge`, { method: "POST", body: JSON.stringify({ keep_id: keepId, merge_ids: mergeIds, merged_text: mergedText ?? null }) }),
   interviewGuide: (clientId: string): Promise<InterviewGuide> =>
     runJob<InterviewGuide>(`/clients/${clientId}/interview-guide/start`),
 

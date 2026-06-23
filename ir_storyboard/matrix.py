@@ -299,6 +299,24 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
     ))
 
 
+def must_have_facts(conn: sqlite3.Connection, client_id: str) -> List[dict]:
+    """All client-provided must-have (blue) facts, ordered by layer→subsection→time.
+    Used to export a numbered list for client sign-off of exact wording."""
+    out: List[dict] = []
+    for layer in LAYERS:
+        for sub in layer.subsections:
+            for r in facts_for_cell(conn, client_id, sub.id):
+                if not r["must_have"]:
+                    continue
+                out.append({
+                    "subsection_id": sub.id,
+                    "subsection_name": sub.name,
+                    "text": r["text"],
+                    "flag": r["flag"],
+                })
+    return out
+
+
 def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
     return conn.execute(
         """SELECT f.id, f.cell_id, f.text, f.flag, f.source_id, f.confidence,
@@ -483,28 +501,71 @@ def fact_corroboration(conn: sqlite3.Connection, fact_id: int) -> int:
     return 1 + int(n)
 
 
-def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int]) -> int:
-    """Merge duplicate facts into `keep_id`: fold each duplicate's source into
-    keep's corroboration (fact_sources) and soft-reject the duplicate (kept for
-    audit, note points to the canonical). Returns keep's new corroboration count."""
-    for mid in merge_ids:
-        if mid == keep_id:
-            continue
-        row = conn.execute(
-            """SELECT f.source_id AS source_id, s.channel AS channel, s.title AS title,
-                      COALESCE(NULLIF(f.source_url, ''), s.url) AS url
-                FROM facts f LEFT JOIN sources s ON s.id = f.source_id WHERE f.id=?""",
-            (mid,)).fetchone()
-        if row:
+def _fold_source(conn: sqlite3.Connection, into_id: int, from_fact_id: int) -> None:
+    row = conn.execute(
+        """SELECT f.source_id AS source_id, s.channel AS channel, s.title AS title,
+                  COALESCE(NULLIF(f.source_url, ''), s.url) AS url
+            FROM facts f LEFT JOIN sources s ON s.id = f.source_id WHERE f.id=?""",
+        (from_fact_id,)).fetchone()
+    if row:
+        conn.execute(
+            "INSERT INTO fact_sources (fact_id, source_id, channel, title, url) VALUES (?,?,?,?,?)",
+            (into_id, row["source_id"], row["channel"] or "", row["title"] or "", row["url"] or ""))
+
+
+def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int],
+                merged_text: Optional[str] = None) -> int:
+    """Merge duplicate facts. Two modes:
+
+    - Default (merged_text=None): fold each duplicate's source into `keep_id`'s
+      corroboration and soft-reject the duplicates. keep's text is unchanged.
+      Returns keep's id (corroboration grows).
+
+    - Curated text (merged_text given): the analyst supplied a single synthesized
+      wording. Honouring fact immutability (no UPDATE on text), this creates a NEW
+      fact carrying merged_text in keep's cell, folds the sources of ALL originals
+      (keep + merges) onto it, and soft-rejects every original (incl. the old keep).
+      must_have/speaker carry over if any original had them. Returns the NEW fact id.
+    """
+    merge_ids = [m for m in merge_ids if m != keep_id]
+    text = (merged_text or "").strip()
+    keep = get_fact(conn, keep_id)
+    if keep is None:
+        raise ValueError(f"keep fact {keep_id} not found")
+
+    if not text or text == (keep["text"] or "").strip():
+        for mid in merge_ids:
+            _fold_source(conn, keep_id, mid)
             conn.execute(
-                "INSERT INTO fact_sources (fact_id, source_id, channel, title, url) VALUES (?,?,?,?,?)",
-                (keep_id, row["source_id"], row["channel"] or "", row["title"] or "", row["url"] or ""))
+                """UPDATE facts SET state='rejected', verification='refuted',
+                                    verification_note=? WHERE id=?""",
+                (f"дубль — слит в #{keep_id}", mid))
+        conn.commit()
+        fact_corroboration(conn, keep_id)
+        return keep_id
+
+    # curated merged text → new immutable fact, all originals rejected
+    all_ids = [keep_id] + merge_ids
+    must = any((get_fact(conn, i) or {})["must_have"] for i in all_ids)
+    speaker = next((get_fact(conn, i)["speaker_entity_id"] for i in all_ids
+                    if get_fact(conn, i)["speaker_entity_id"] is not None), None)
+    cur = conn.execute(
+        """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until,
+                              evidence_snippet, rationale, created_by, must_have, speaker_entity_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (keep["cell_id"], text, keep["flag"], keep["source_id"], keep["confidence"],
+         keep["valid_until"], keep["evidence_snippet"], keep["rationale"],
+         "merge", 1 if must else 0, speaker),
+    )
+    new_id = cur.lastrowid
+    for oid in all_ids:
+        _fold_source(conn, new_id, oid)
         conn.execute(
             """UPDATE facts SET state='rejected', verification='refuted',
                                 verification_note=? WHERE id=?""",
-            (f"дубль — слит в #{keep_id}", mid))
+            (f"слит (с правкой текста) в #{new_id}", oid))
     conn.commit()
-    return fact_corroboration(conn, keep_id)
+    return new_id
 
 
 def fact_sources(conn: sqlite3.Connection, fact_id: int) -> List[dict]:

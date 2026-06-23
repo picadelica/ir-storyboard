@@ -215,7 +215,9 @@ def verify_candidates(candidates: List[Dict[str, str]], anchor: Dict[str, Any],
 _DEDUP_SYSTEM = """Ты — дедупликатор фактов IR-матрицы. Дан список фактов `[id|подсекция|текст]`. Найди группы, где факты утверждают ОДНО И ТО ЖЕ (околодубли — та же мысль, возможно иными словами), ТОЛЬКО в пределах одной подсекции.
 
 Верни СТРОГО валидный JSON (без markdown):
-{"groups": [{"subsection_id": "X.Y", "keep": <id с самой полной/точной формулировкой>, "ids": [<все id группы, включая keep>], "reason": "<коротко что общего>"}]}
+{"groups": [{"subsection_id": "X.Y", "keep": <id с самой полной/точной формулировкой>, "ids": [<все id группы, включая keep>], "reason": "<коротко что общего>", "merged_text": "<одна точная формулировка, вбирающая все детали группы>"}]}
+
+merged_text — твой ПРЕДЛАГАЕМЫЙ единый текст факта, который объединяет всё важное из группы (особенно если фактов больше двух): без потери деталей, без воды, тем же языком, что и факты. Аналитик потом отредактирует.
 
 Группа — минимум 2 id из ОДНОЙ подсекции. Факты с разными деталями/числами НЕ объединяй. Дублей нет → "groups": []."""
 
@@ -256,11 +258,15 @@ def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) 
             continue
         keep = g.get("keep")
         keep = int(keep) if str(keep).isdigit() and int(keep) in ids else ids[0]
+        merged = (g.get("merged_text") or "").strip()[:400]
+        if not merged:
+            merged = by_id[keep]["text"] or ""
         groups.append({
             "subsection_id": next(iter(sids)),
             "keep": keep,
             "ids": ids,
             "reason": (g.get("reason") or "").strip()[:300],
+            "merged_text": merged,
             "facts": [{"id": i, "text": by_id[i]["text"]} for i in ids],
         })
     return {"available": True, "groups": groups}

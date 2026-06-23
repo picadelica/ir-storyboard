@@ -1112,6 +1112,29 @@ def set_must_have(fact_id: int, body: MustHaveIn, conn=Depends(get_conn)):
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
+@app.get("/api/clients/{client_id}/facts/must-have/export")
+def export_must_have_facts(client_id: str, conn=Depends(get_conn)):
+    """Download the client's must-have (blue) facts as a numbered "N — text" list
+    for client sign-off of exact wording."""
+    _check_client(client_id, conn)
+    facts = matrix.must_have_facts(conn, client_id)
+    crow = conn.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
+    name = crow["name"] if crow else client_id
+    lines = [f"Must-have факты — {name}", "(для согласования точных формулировок с заказчиком)", ""]
+    if not facts:
+        lines.append("— нет must-have фактов —")
+    else:
+        for i, f in enumerate(facts, 1):
+            lines.append(f"{i} — {f['text']}")
+    body = "\n".join(lines) + "\n"
+    fname = f"must_have_{client_id}.txt"
+    return Response(
+        content=body,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @app.post("/api/facts/{fact_id}/reject", response_model=FactOut)
 def reject_fact(fact_id: int, conn=Depends(get_conn)):
     if matrix.get_fact(conn, fact_id) is None:
@@ -1166,6 +1189,7 @@ class DupGroupOut(BaseModel):
     keep: int
     ids: List[int] = []
     reason: str = ""
+    merged_text: str = ""   # LLM-proposed single wording for the group (analyst-editable)
     facts: List[DupFactOut] = []
 
 
@@ -1177,6 +1201,7 @@ class DuplicatesOut(BaseModel):
 class MergeIn(BaseModel):
     keep_id: int
     merge_ids: List[int]
+    merged_text: Optional[str] = None   # if set, a NEW fact with this text replaces the group
 
 
 def _compute_dups(conn, client_id: str) -> dict:
@@ -1191,12 +1216,14 @@ def find_duplicates(client_id: str, conn=Depends(get_conn)):
 
 @app.post("/api/facts/merge", response_model=FactOut)
 def merge_facts_ep(body: MergeIn, conn=Depends(get_conn)):
-    """Merge duplicates into keep_id: fold their sources into keep's corroboration,
-    soft-reject the rest. Returns the canonical fact with updated n_sources."""
+    """Merge duplicates. Without merged_text: fold sources into keep, soft-reject the
+    rest. With merged_text: create a NEW fact carrying the analyst's wording, fold all
+    sources onto it, reject every original (immutability — no in-place text edit).
+    Returns the resulting canonical fact."""
     if matrix.get_fact(conn, body.keep_id) is None:
         raise HTTPException(404, "keep fact not found")
-    matrix.merge_facts(conn, body.keep_id, body.merge_ids)
-    return _row_to_fact(matrix.get_fact(conn, body.keep_id))
+    result_id = matrix.merge_facts(conn, body.keep_id, body.merge_ids, body.merged_text)
+    return _row_to_fact(matrix.get_fact(conn, result_id))
 
 
 # ---------- grounded interview guide ----------

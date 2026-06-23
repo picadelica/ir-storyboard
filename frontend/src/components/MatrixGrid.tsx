@@ -93,12 +93,25 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
   }
 
   const cellBySid = new Map(cells.data.map(c => [c.subsection_id, c]));
+  const totalMust = cells.data.reduce((n, c) => n + (c.n_must || 0), 0);
 
   return (
     <div className={`p-5 ${present ? "px-6" : ""}`}>
       <div className="flex items-end justify-between mb-4">
         {present ? <span /> : <h2 className="text-lg font-semibold tracking-tight">Narrative matrix</h2>}
-        <Legend />
+        <div className="flex items-center gap-3">
+          {!present && totalMust > 0 && (
+            <button
+              onClick={() => api.downloadMustHaveFacts(clientId, clientId).catch(() => {})}
+              title="Скачать must-have факты нумерованным списком для согласования с заказчиком"
+              className="flex items-center gap-1.5 text-xs text-flag-blue border border-flag-blue/40 rounded px-2.5 py-1 hover:bg-flag-blue/5"
+            >
+              <span className="inline-block w-2 h-2 rounded-full bg-flag-blue" />
+              Выгрузить must-have (★{totalMust})
+            </button>
+          )}
+          <Legend />
+        </div>
       </div>
 
       <div className="space-y-2">

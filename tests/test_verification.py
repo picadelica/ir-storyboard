@@ -181,6 +181,35 @@ def test_find_duplicate_groups(conn, monkeypatch):
     assert set(g["ids"]) == {a, b} and g["keep"] == a and d not in g["ids"]
 
 
+def test_merge_with_curated_text_creates_new_fact(conn):
+    """merged_text → a NEW fact carries the analyst wording; all originals (incl.
+    the old keep) are rejected; sources fold onto the new fact (immutability)."""
+    a = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="Raised $50M.", flag="green")
+    b = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="Bitfury put in $50M.", flag="green")
+    c = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="Round led by Bitfury.", flag="green")
+
+    new_id = matrix.merge_facts(conn, a, [b, c], "Привлекли $50M в раунде под лид Bitfury.")
+    assert new_id not in (a, b, c)
+
+    new = matrix.get_fact(conn, new_id)
+    assert new["state"] == "active"
+    assert "под лид Bitfury" in new["text"]
+    for oid in (a, b, c):
+        assert matrix.get_fact(conn, oid)["state"] == "rejected"
+    # the merged fact carries corroboration from the originals
+    assert matrix.fact_corroboration(conn, new_id) >= 2
+
+
+def test_merge_without_text_keeps_original(conn):
+    """No merged_text → legacy behavior: keep stays active, dupes rejected."""
+    a = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="Raised $50M.", flag="green")
+    b = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="Bitfury put in $50M.", flag="green")
+    res = matrix.merge_facts(conn, a, [b])
+    assert res == a
+    assert matrix.get_fact(conn, a)["state"] == "active"
+    assert matrix.get_fact(conn, b)["state"] == "rejected"
+
+
 def test_find_duplicates_stub(conn, monkeypatch):
     matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="x", flag="green")
     matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="y", flag="green")
