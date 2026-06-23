@@ -223,6 +223,16 @@ merged_text — твой ПРЕДЛАГАЕМЫЙ единый текст фак
 Группа — минимум 2 id из ОДНОЙ подсекции. Факты с разными деталями/числами НЕ объединяй. Дублей нет → "groups": []."""
 
 
+# Max facts per dedup LLM call — keeps the prompt/response from truncating when one
+# subsection holds many facts. ~30 atomic facts fit comfortably in a 2000-token reply.
+_DEDUP_BATCH = 30
+
+
+def _chunked(seq: list, n: int):
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]
+
+
 _DEDUP_SUB_SYSTEM = """Ты — дедупликатор фактов одной подсекции IR-матрицы. Дан список фактов `[id] текст` (все из ОДНОЙ подсекции). Найди группы, где факты утверждают ОДНО И ТО ЖЕ (околодубли — та же мысль, возможно иными словами).
 
 Верни СТРОГО валидный JSON (без markdown):
@@ -265,29 +275,37 @@ def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) 
     for sid, sfacts in bysub.items():
         if len(sfacts) < 2:
             continue   # no possible dupes in a 0/1-fact subsection
-        calls += 1
-        lines = [f"[{f['id']}] {(f['text'] or '')[:200]}" for f in sfacts]
-        data = _generate_json(_DEDUP_SUB_SYSTEM, f"Подсекция {sid}. Факты:\n" + "\n".join(lines),
-                              max_tokens=2000, model=mdl)
-        if data is None:
-            continue
-        ok += 1
-        for g in data.get("groups", []) or []:
-            ids = [int(i) for i in (g.get("ids") or []) if str(i).isdigit() and int(i) in by_id]
-            ids = [i for i in ids if by_id[i]["sid"] == sid]
-            if len(ids) < 2:
+        # Guard against a fat subsection (hundreds of facts) blowing the prompt /
+        # truncating the response: chunk into bounded batches. Trade-off — a dup pair
+        # split across batches is missed this run; a re-run after merges catches it.
+        # TODO(scale): replace blind chunking with cheap pre-clustering (Jaccard/embeddings)
+        # so likely-similar facts land in the same batch. See NEXT.md.
+        for batch in _chunked(sfacts, _DEDUP_BATCH):
+            if len(batch) < 2:
                 continue
-            keep = g.get("keep")
-            keep = int(keep) if str(keep).isdigit() and int(keep) in ids else ids[0]
-            merged = (g.get("merged_text") or "").strip()[:400] or (by_id[keep]["text"] or "")
-            groups.append({
-                "subsection_id": sid,
-                "keep": keep,
-                "ids": ids,
-                "reason": (g.get("reason") or "").strip()[:300],
-                "merged_text": merged,
-                "facts": [{"id": i, "text": by_id[i]["text"]} for i in ids],
-            })
+            calls += 1
+            lines = [f"[{f['id']}] {(f['text'] or '')[:200]}" for f in batch]
+            data = _generate_json(_DEDUP_SUB_SYSTEM, f"Подсекция {sid}. Факты:\n" + "\n".join(lines),
+                                  max_tokens=2000, model=mdl)
+            if data is None:
+                continue
+            ok += 1
+            for g in data.get("groups", []) or []:
+                ids = [int(i) for i in (g.get("ids") or []) if str(i).isdigit() and int(i) in by_id]
+                ids = [i for i in ids if by_id[i]["sid"] == sid]
+                if len(ids) < 2:
+                    continue
+                keep = g.get("keep")
+                keep = int(keep) if str(keep).isdigit() and int(keep) in ids else ids[0]
+                merged = (g.get("merged_text") or "").strip()[:400] or (by_id[keep]["text"] or "")
+                groups.append({
+                    "subsection_id": sid,
+                    "keep": keep,
+                    "ids": ids,
+                    "reason": (g.get("reason") or "").strip()[:300],
+                    "merged_text": merged,
+                    "facts": [{"id": i, "text": by_id[i]["text"]} for i in ids],
+                })
     # available unless we tried subsections and every call failed (LLM down)
     return {"available": calls == 0 or ok > 0, "groups": groups}
 

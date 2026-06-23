@@ -305,6 +305,22 @@ def test_dedup_per_subsection_available_flags(conn, monkeypatch):
     assert r2["available"] is False and called["n"] >= 1
 
 
+def test_dedup_chunks_fat_subsection(conn, monkeypatch):
+    """A subsection with many facts is split into bounded batches (≤_DEDUP_BATCH) so the
+    LLM prompt/response can't truncate — > one batch ⇒ > one call."""
+    for i in range(70):
+        matrix.add_fact(conn, client_id="co", subsection_id="2.1", text=f"факт номер {i}", flag="green")
+    seen = {"sizes": []}
+    def _gen(system, user, *a, **k):
+        seen["sizes"].append(user.count("\n["))  # facts in this batch
+        return '{"groups": []}'
+    monkeypatch.setattr(llm, "generate", _gen)
+    r = verification.find_duplicate_groups(conn, "co")
+    assert r["available"] is True
+    assert len(seen["sizes"]) == 3  # 70 facts / 30 → 3 batches
+    assert all(s <= verification._DEDUP_BATCH for s in seen["sizes"])
+
+
 def test_find_duplicates_stub(conn, monkeypatch):
     matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="x", flag="green")
     matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="y", flag="green")
