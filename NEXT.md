@@ -6,14 +6,27 @@
 
 **Последнее обновление:** 2026-06-22
 **Ветка:** `feat/v2` (запушена)
-**HEAD:** `dfc1dfa feat: YouTube ingest — статус-бар прогресса + коммит переоткрытого прогона`
+**HEAD:** `8db669e feat: атрибуция спикера — имя фаундера вместо «Фаундер считает»`
 **Прод:** 216.57.108.107, перекатан 2026-06-22 (deploy_ir_storyboard зелёный, health 200).
-Тесты: `pytest -m "not network"` → **256 passed** (сетевой `test_youtube_e2e` deselected).
+Тесты: `pytest -m "not network"` → **264 passed** (сетевой `test_youtube_e2e` deselected).
 ⚠️ Прод-аккаунт Anthropic БЕЗ БАЛАНСА — LLM-функции (ингест/аудит/гайд/авторазбор) возвращают
 пусто, пока не пополнить (billing). YouTube-транскрипция использует OpenAI Whisper (свой баланс).
 
 ## Предложения аналитиков (правки после деки) — 2026-06-22
 
+- **№6 Три дополнения: экспорт must-have / правка текста при слиянии / атрибуция спикера.**
+  (a) ВЫГРУЗКА must-have: `matrix.must_have_facts` + `GET /clients/{id}/facts/must-have/export`
+  отдаёт нумерованный «N — текст» .txt; кнопка «Выгрузить must-have (★N)» в шапке матрицы.
+  (b) СЛИЯНИЕ ДУБЛЕЙ С ПРАВКОЙ: дедуп-LLM предлагает `merged_text`; `matrix.merge_facts(..., merged_text)`
+  при заданном тексте создаёт НОВЫЙ факт (иммутабельность), складывает источники, отклоняет все
+  оригиналы; в FactAuditView — редактируемое поле + «слить с этим текстом / оставить keep».
+  (c) АТРИБУЦИЯ СПИКЕРА: `verification.find_unattributed_facts` (LLM-скан «фаундер считает…» →
+  перепись с [ИМЯ]; 1 фаундер→авто, >1→needs_choice, L1-L2→must_be_concrete);
+  `matrix.attribute_fact` (новый факт + speaker_entity_id, reject оригинала);
+  `POST /find-unattributed(/start)` + `POST /facts/{id}/attribute`; в FactAuditView — кнопка
+  «Проверить спикеров» + секция с дропдауном фаундеров; YouTube-коммит получил
+  `speaker_entity_id` + пикер «С кем интервью?» (при >1 фаундере). Без новых миграций.
+  Проверено e2e в браузере (мок LLM). ✓ на проде.
 - **№5 YouTube ingest: прогресс + коммит из History.** (a) При распознавании — статус-бар
   (спиннер + текущая стадия + таймер + индетерминантный бар): `_yt_job_run` прокидывает
   `progress_cb` через `run_youtube_preview` → `get_or_transcribe` → `transcribe_audio_chunks`,
