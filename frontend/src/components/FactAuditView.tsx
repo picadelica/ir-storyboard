@@ -3,6 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { readLS, patchLS } from "../persist";
 import { RunProgress, useElapsed } from "./RunProgress";
+import MatrixFactCard from "./MatrixFactCard";
+import FlagDot from "./FlagDot";
+import SourceLine from "./SourceLine";
 import type { AuditResult, Entity, EntityFact, ReviewFact, DuplicateGroup, AttribItem } from "../types";
 
 interface Props {
@@ -69,22 +72,22 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     },
     onSuccess: (groups) => setDups(groups),
   });
-  // analyst-editable merged wording per group (seeded from the LLM proposal)
+  // analyst-editable merged wording + subset selection, keyed by the group's keep id
+  // (STABLE — keying by array index leaked a group's edited text onto the next group
+  // after a merge shifted indices).
   const [mergeText, setMergeText] = useState<Record<number, string>>({});
-  // per-group selected fact ids (default = all); lets you merge a subset of 3+ and
-  // leave the rest in the matrix.
   const [mergeSel, setMergeSel] = useState<Record<number, Set<number>>>({});
-  const selOf = (gi: number, g: DuplicateGroup) => mergeSel[gi] ?? new Set(g.ids);
-  const toggleMergeSel = (gi: number, g: DuplicateGroup, id: number) =>
+  const selOf = (g: DuplicateGroup) => mergeSel[g.keep] ?? new Set(g.ids);
+  const toggleMergeSel = (g: DuplicateGroup, id: number) =>
     setMergeSel(m => {
-      const cur = new Set(m[gi] ?? new Set(g.ids));
+      const cur = new Set(m[g.keep] ?? new Set(g.ids));
       cur.has(id) ? cur.delete(id) : cur.add(id);
-      return { ...m, [gi]: cur };
+      return { ...m, [g.keep]: cur };
     });
   const merge = useMutation({
-    mutationFn: ({ keep, ids, text }: { gi: number; keep: number; ids: number[]; text?: string }) =>
+    mutationFn: ({ keep, ids, text }: { keep: number; ids: number[]; text?: string }) =>
       api.mergeFacts(keep, ids.filter(i => i !== keep), text),
-    onSuccess: (_d, { gi }) => { dropDupGroup((_g, i) => i === gi); invalidate(); },
+    onSuccess: (_d, { keep }) => { dropDupGroup(g => g.keep === keep); invalidate(); },
   });
 
   // speaker attribution: facts with generic "Фаундер …" wording → name a person
@@ -211,58 +214,100 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
               {dupsAvail ? "Дублей не найдено — все факты в подсекциях различны."
                          : "Верификатор не ответил (модель/баланс) — попробуйте ещё раз."}
             </div>
-          ) : dups.map((g, gi) => {
-            const sel = selOf(gi, g);
+          ) : dups.map((g) => {
+            const sel = selOf(g);
             const selIds = g.ids.filter(i => sel.has(i));
             // keep = the LLM's keep if still selected, else the first selected fact
             const keep = sel.has(g.keep) ? g.keep : (selIds[0] ?? g.keep);
-            const mtext = mergeText[gi] ?? g.merged_text;
+            const mtext = mergeText[g.keep] ?? g.merged_text;
+            const selFacts = g.facts.filter(f => sel.has(f.id));
+            const multi = g.ids.length > 2;
             return (
-            <div key={gi} className="border border-ink-line rounded p-3">
-              <div className="flex items-center gap-2 mb-1.5">
+            <div key={g.keep} className="border border-ink-line rounded-lg p-3 space-y-2">
+              <div className="flex items-center gap-2">
                 <span className="text-[11px] font-mono text-ink-mute">{g.subsection_id}</span>
                 {g.reason && <span className="text-xs text-ink-mute">· {g.reason}</span>}
                 <button onClick={() => onJumpToCell(g.subsection_id)}
                   className="text-[11px] text-blue-600 hover:underline ml-auto">{g.subsection_id} →</button>
               </div>
-              {g.ids.length > 2 && (
-                <div className="text-[11px] text-ink-mute mb-1">Отметьте, какие факты сливать ({selIds.length} из {g.ids.length}); неотмеченные останутся в матрице.</div>
+              {multi && (
+                <div className="text-[11px] text-ink-mute">Отметьте, какие факты сливать ({selIds.length} из {g.ids.length}); неотмеченные останутся в матрице.</div>
               )}
-              <ul className="space-y-1 mb-2">
-                {g.facts.map(f => (
-                  <li key={f.id} className="text-sm flex gap-2 items-start">
-                    {g.ids.length > 2 && (
-                      <input type="checkbox" checked={sel.has(f.id)} onChange={() => toggleMergeSel(gi, g, f.id)} className="mt-1" />
+
+              {/* Original cards (left) → Joint card (right), both in matrix format */}
+              <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-start">
+                <div className="space-y-1.5">
+                  <div className="text-[10px] uppercase tracking-wide text-ink-mute">Оригиналы</div>
+                  {g.facts.map(f => (
+                    <div key={f.id} className="flex items-start gap-1.5">
+                      {multi && (
+                        <input type="checkbox" checked={sel.has(f.id)}
+                          onChange={() => toggleMergeSel(g, f.id)} className="mt-3.5" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <MatrixFactCard fact={f} clientId={clientId} faded={!sel.has(f.id)} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="self-center text-ink-mute text-lg pt-5">→</div>
+
+                {/* Joint card — what lands in the matrix, in matrix format */}
+                <div className="space-y-1.5">
+                  <div className="text-[10px] uppercase tracking-wide text-emerald-700">После слияния (в матрицу)</div>
+                  <div className={`border border-l-4 rounded-lg p-3 bg-emerald-50/40 ${
+                    keep && selFacts.find(f => f.id === keep)?.flag === "red" ? "border-l-red-400"
+                      : selFacts.find(f => f.id === keep)?.flag === "grey" ? "border-l-slate-300" : "border-l-emerald-400"
+                  }`}>
+                    <div className="flex items-start gap-2">
+                      <FlagDot flag={selFacts.find(f => f.id === keep)?.flag ?? "green"} className="mt-1.5" />
+                      <textarea
+                        value={mtext}
+                        onChange={e => setMergeText(m => ({ ...m, [g.keep]: e.target.value }))}
+                        rows={2}
+                        className="flex-1 text-sm border border-ink-line rounded px-2 py-1 bg-white resize-y"
+                      />
+                    </div>
+                    {/* combined sources of all merged facts (interview → file/time) */}
+                    <div className="mt-2 pl-4 space-y-0.5">
+                      <div className="text-[10px] text-ink-mute">Источники ({selFacts.length}):</div>
+                      {selFacts.map(f => (
+                        <SourceLine key={f.id}
+                          client_id={clientId}
+                          channel={f.source_channel}
+                          source_url={f.source_url}
+                          source_title={f.source_title}
+                          source_publisher={f.source_publisher}
+                          source_archive_url={f.source_archive_url}
+                          ingest_audit_id={f.ingest_audit_id || null}
+                          ingest_kind={f.ingest_kind || null}
+                          timestamp_sec={f.snippet_start_sec ?? undefined}
+                          captured_at={f.captured_at}
+                        />
+                      ))}
+                    </div>
+                    {mtext !== g.merged_text && (
+                      <button onClick={() => setMergeText(m => { const n = { ...m }; delete n[g.keep]; return n; })}
+                        className="mt-1 text-[10px] text-ink-mute hover:text-ink underline">сбросить к предложению</button>
                     )}
-                    <span className="text-[10px] mt-0.5 px-1 rounded shrink-0 bg-slate-100 text-ink-mute">#{f.id}</span>
-                    <span className={sel.has(f.id) ? "" : "line-through text-ink-mute"}>{f.text}</span>
-                  </li>
-                ))}
-              </ul>
-              {/* Proposed single wording — analyst edits before it lands in the matrix.
-                  A new merged fact is created with this text; the merged originals are rejected. */}
-              <label className="block text-[11px] text-ink-mute mb-1">
-                Итоговая формулировка (правится){selIds.length > 2 ? ` — объединяет ${selIds.length} факта` : ""}:
-              </label>
-              <textarea
-                value={mtext}
-                onChange={e => setMergeText(m => ({ ...m, [gi]: e.target.value }))}
-                rows={2}
-                className="w-full text-sm border border-ink-line rounded px-2 py-1.5 mb-2 resize-y"
-              />
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => merge.mutate({ gi, keep, ids: selIds, text: mtext })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button onClick={() => merge.mutate({ keep, ids: selIds, text: mtext })}
                   disabled={merge.isPending || selIds.length < 2}
                   className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                   слить с этим текстом ({selIds.length} → 1)
                 </button>
-                <button onClick={() => merge.mutate({ gi, keep, ids: selIds })}
+                <button onClick={() => merge.mutate({ keep, ids: selIds })}
                   disabled={merge.isPending || selIds.length < 2}
                   title={`Оставить формулировку #${keep} без изменений, просто сложить источники`}
                   className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50 disabled:opacity-50">
                   оставить #{keep} как есть
                 </button>
-                <button onClick={() => dropDupGroup((_, i) => i === gi)}
+                <button onClick={() => dropDupGroup(x => x.keep === g.keep)}
                   className="text-[11px] px-2 py-1 rounded border border-ink-line text-ink-mute hover:bg-slate-50">пропустить</button>
               </div>
             </div>

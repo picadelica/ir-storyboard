@@ -1182,6 +1182,16 @@ def promote_fact(fact_id: int, conn=Depends(get_conn)):
 class DupFactOut(BaseModel):
     id: int
     text: str = ""
+    flag: str = "green"
+    source_url: str = ""
+    source_title: str = ""
+    source_channel: str = ""
+    source_publisher: str = ""
+    source_archive_url: str = ""
+    snippet_start_sec: Optional[float] = None
+    ingest_audit_id: str = ""
+    ingest_kind: str = ""
+    captured_at: str = ""
 
 
 class DupGroupOut(BaseModel):

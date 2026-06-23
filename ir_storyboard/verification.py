@@ -233,6 +233,27 @@ def _chunked(seq: list, n: int):
         yield seq[i:i + n]
 
 
+def _fact_card_fields(conn, fid: int) -> Optional[dict]:
+    """Source-line fields for a fact so the UI can render it exactly like a matrix
+    card (flag + text + source link/timecode) inside the merge preview."""
+    from . import matrix
+    r = matrix.get_fact(conn, fid)
+    if r is None:
+        return None
+    keys = r.keys()
+    g = lambda k: (r[k] if k in keys else None)  # noqa: E731
+    return {
+        "id": r["id"], "text": r["text"] or "", "flag": r["flag"],
+        "source_url": g("source_url") or "", "source_title": g("source_title") or "",
+        "source_channel": g("source_channel") or "", "source_publisher": g("source_publisher") or "",
+        "source_archive_url": g("source_archive_url") or "",
+        "snippet_start_sec": g("snippet_start_sec"),
+        "ingest_audit_id": g("ingest_audit_id") or "",
+        "ingest_kind": g("ingest_kind") or "",
+        "captured_at": g("captured_at") or "",
+    }
+
+
 _DEDUP_SUB_SYSTEM = """Ты — дедупликатор фактов одной подсекции IR-матрицы. Дан список фактов `[id] текст` (все из ОДНОЙ подсекции). Найди группы, где факты утверждают ОДНО И ТО ЖЕ (околодубли — та же мысль, возможно иными словами).
 
 Верни СТРОГО валидный JSON (без markdown):
@@ -304,7 +325,7 @@ def find_duplicate_groups(conn, client_id: str, *, model: Optional[str] = None) 
                     "ids": ids,
                     "reason": (g.get("reason") or "").strip()[:300],
                     "merged_text": merged,
-                    "facts": [{"id": i, "text": by_id[i]["text"]} for i in ids],
+                    "facts": [c for i in ids if (c := _fact_card_fields(conn, i))],
                 })
     # available unless we tried subsections and every call failed (LLM down)
     return {"available": calls == 0 or ok > 0, "groups": groups}

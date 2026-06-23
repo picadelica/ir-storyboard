@@ -179,6 +179,10 @@ def test_find_duplicate_groups(conn, monkeypatch):
     assert res["available"] and len(res["groups"]) == 1
     g = res["groups"][0]
     assert set(g["ids"]) == {a, b} and g["keep"] == a and d not in g["ids"]
+    # facts carry matrix-card fields (flag + source) so the merge preview can render
+    # them exactly like the matrix
+    fa = next(f for f in g["facts"] if f["id"] == a)
+    assert fa["flag"] == "green" and "source_channel" in fa and "snippet_start_sec" in fa
 
 
 def test_merge_with_curated_text_creates_new_fact(conn):

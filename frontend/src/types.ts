@@ -377,13 +377,28 @@ export interface Fact {
   n_sources?: number;           // corroboration count
 }
 
+export interface DupFact {
+  id: number;
+  text: string;
+  flag: string;
+  source_url: string;
+  source_title: string;
+  source_channel: string;
+  source_publisher: string;
+  source_archive_url: string;
+  snippet_start_sec: number | null;
+  ingest_audit_id: string;
+  ingest_kind: string;
+  captured_at: string;
+}
+
 export interface DuplicateGroup {
   subsection_id: string;
   keep: number;
   ids: number[];
   reason: string;
   merged_text: string;
-  facts: { id: number; text: string }[];
+  facts: DupFact[];
 }
 
 export interface DuplicatesResult {
