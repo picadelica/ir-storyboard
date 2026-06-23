@@ -405,7 +405,7 @@ export interface AttribItem {
 
 export interface UnattributedResult {
   available: boolean;
-  founders: { id: number; name: string }[];
+  founders: { id: number | null; name: string }[];   // id=null → derived from company card
   items: AttribItem[];
 }
 

@@ -87,10 +87,9 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
 
   // speaker attribution: facts with generic "Фаундер …" wording → name a person
   const [attrib, setAttrib] = useState<AttribItem[] | null>(saved.attrib ?? null);
-  const [founders, setFounders] = useState<{ id: number; name: string }[]>(saved.founders ?? []);
-  const [attChoice, setAttChoice] = useState<Record<number, number>>({});  // factId → entityId
-  const [attNewName, setAttNewName] = useState<Record<number, string>>({}); // factId → typed founder name
-  const [attText, setAttText] = useState<Record<number, string>>({});       // factId → edited text
+  const [founders, setFounders] = useState<{ id: number | null; name: string }[]>(saved.founders ?? []);
+  const [attName, setAttName] = useState<Record<number, string>>({});  // factId → chosen/typed founder name
+  const [attText, setAttText] = useState<Record<number, string>>({});  // factId → edited text
   const dropAttrib = (id: number) =>
     setAttrib(prev => {
       const nx = (prev ?? []).filter(x => x.id !== id);
@@ -107,8 +106,13 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     onSuccess: (r) => { setAttrib(r.available ? r.items : []); setFounders(r.founders); },
   });
   const applyAttrib = useMutation({
-    mutationFn: ({ it, entityId, text, newName }: { it: AttribItem; entityId: number | null; text: string; newName?: string }) =>
-      api.attributeFact(it.id, entityId, text, newName),
+    // resolve the chosen name to an existing founder entity, else create one by name
+    mutationFn: ({ it, name, text }: { it: AttribItem; name: string; text: string }) => {
+      const f = founders.find(x => x.name === name);
+      return f && f.id != null
+        ? api.attributeFact(it.id, f.id, text)
+        : api.attributeFact(it.id, null, text, name);
+    },
     onSuccess: (_d, { it }) => { qc.invalidateQueries({ queryKey: ["entities", clientId] }); dropAttrib(it.id); invalidate(); },
   });
 
@@ -172,9 +176,10 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
           <button
             onClick={() => run.mutate()}
             disabled={run.isPending}
-            className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300"
+            title="Скептический аудит: склейка сущностей, мис-атрибуция, выдумка"
+            className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50"
           >
-            {run.isPending ? "Проверяю…" : "Запустить проверку"}
+            {run.isPending ? "Проверяю…" : "Аудит сущностей"}
           </button>
         </div>
       </div>
@@ -275,13 +280,17 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
           {attrib.length === 0 ? (
             <div className="text-xs text-ink-mute italic">Обезличенных формулировок не найдено (или верификатор недоступен).</div>
           ) : attrib.map(it => {
-            const chosen = attChoice[it.id] ?? (founders.length === 1 ? founders[0].id : undefined);
-            const typed = (attNewName[it.id] ?? "").trim();
-            // typed name wins over the dropdown; lets you attribute even with no founder cards
-            const effName = typed || founders.find(f => f.id === chosen)?.name;
+            // one source of truth: the chosen/typed founder name (seeded from a single
+            // founder if there is exactly one — entity-backed or derived from the card)
+            const effName = (attName[it.id] ?? (founders.length === 1 ? founders[0].name : "")).trim();
+            const inDropdown = founders.some(f => f.name === effName);
             const text = attText[it.id]
               ?? (effName ? it.rewrite_template.replace("[ИМЯ]", effName) : it.proposed_text);
             const canApply = !!effName && !text.includes("[ИМЯ]");
+            const setName = (nm: string) => {
+              setAttName(m => ({ ...m, [it.id]: nm }));
+              setAttText(m => ({ ...m, [it.id]: it.rewrite_template.replace("[ИМЯ]", nm.trim() || "[ИМЯ]") }));
+            };
             return (
               <div key={it.id} className={`border rounded p-3 ${it.must_be_concrete ? "border-flag-red/40 bg-flag-red-bg/30" : "border-ink-line"}`}>
                 <div className="flex items-center gap-2 mb-1.5">
@@ -297,30 +306,19 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                   <span className="text-[11px] text-ink-mute">🗣</span>
                   {founders.length > 0 && (
                     <select
-                      value={typed ? "" : (chosen ?? "")}
-                      onChange={e => {
-                        const eid = e.target.value ? Number(e.target.value) : undefined;
-                        setAttChoice(m => ({ ...m, [it.id]: eid as number }));
-                        setAttNewName(m => ({ ...m, [it.id]: "" }));
-                        const nm = founders.find(f => f.id === eid)?.name;
-                        setAttText(m => { const n = { ...m }; delete n[it.id]; return n; });
-                        if (nm) setAttText(m => ({ ...m, [it.id]: it.rewrite_template.replace("[ИМЯ]", nm) }));
-                      }}
-                      className={`text-xs border border-ink-line rounded px-1.5 py-1 bg-white ${chosen && !typed ? "text-ink" : "text-ink-mute"}`}
+                      value={inDropdown ? effName : ""}
+                      onChange={e => setName(e.target.value)}
+                      className={`text-xs border border-ink-line rounded px-1.5 py-1 bg-white ${inDropdown ? "text-ink" : "text-ink-mute"}`}
                     >
                       <option value="">— кто это? —</option>
-                      {founders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                      {founders.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
                     </select>
                   )}
                   <input
                     type="text"
-                    value={typed}
+                    value={inDropdown ? "" : effName}
                     placeholder={founders.length ? "или впишите имя" : "впишите имя фаундера"}
-                    onChange={e => {
-                      const v = e.target.value;
-                      setAttNewName(m => ({ ...m, [it.id]: v }));
-                      setAttText(m => ({ ...m, [it.id]: it.rewrite_template.replace("[ИМЯ]", v.trim() || "[ИМЯ]") }));
-                    }}
+                    onChange={e => setName(e.target.value)}
                     className="text-xs border border-ink-line rounded px-1.5 py-1 bg-white w-44"
                   />
                 </div>
@@ -332,7 +330,7 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
                 />
                 <div className="flex gap-2">
                   <button
-                    onClick={() => applyAttrib.mutate({ it, entityId: typed ? null : (chosen ?? null), text, newName: typed || undefined })}
+                    onClick={() => applyAttrib.mutate({ it, name: effName, text })}
                     disabled={applyAttrib.isPending || !canApply}
                     className="text-[11px] px-2 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                     применить имя

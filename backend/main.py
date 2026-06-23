@@ -1212,7 +1212,7 @@ def _compute_dups(conn, client_id: str) -> dict:
 
 
 class AttribFounderOut(BaseModel):
-    id: int
+    id: Optional[int] = None   # None = derived from company card (created on apply)
     name: str = ""
 
 

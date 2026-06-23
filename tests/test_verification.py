@@ -243,6 +243,22 @@ def test_find_unattributed_multi_founder_needs_choice(conn, monkeypatch):
     assert "[ИМЯ]" in it["proposed_text"]   # not auto-filled — analyst must pick
 
 
+def test_founder_from_company_profile_fact(conn, monkeypatch):
+    """A founder named only on the company 'About' card (profile fact, no kind='founder'
+    entity) is still offered as a candidate — id=None, name stripped of the parenthetical.
+    This is the Accumulator case: card shows the founder but no founder entity exists."""
+    comp = matrix.add_entity(conn, client_id="co", kind="company", name="Co")
+    matrix.add_entity_fact(conn, entity_id=comp, key="founder", value="Dave Waiser (ex-Gett CEO)", section="profile")
+    f = matrix.add_fact(conn, client_id="co", subsection_id="2.2",
+                        text="Фаундер предложил X.", flag="green")
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "")  # offline → keyword scan
+    res = verification.find_unattributed_facts(conn, "co")
+    assert res["founders"] == [{"id": None, "name": "Dave Waiser"}]
+    # exactly one founder → autofilled
+    assert res["items"][0]["proposed_text"].startswith("Dave Waiser")
+    assert res["items"][0]["needs_choice"] is False
+
+
 def test_find_unattributed_keyword_fallback_offline(conn, monkeypatch):
     """No LLM (no key/balance) → deterministic keyword scan still flags generic-speaker
     facts, so the tool works offline (available=True, items found)."""

@@ -289,6 +289,32 @@ _GENERIC_SPEAKER_RE = re.compile(
     re.IGNORECASE)
 
 
+def _founder_candidates(conn, client_id: str) -> List[dict]:
+    """Founder names for attribution, from BOTH dedicated kind='founder' entities AND
+    the company card's "founder" profile fact (e.g. 'Dave Waiser (ex-Gett CEO)').
+    Entity-backed names carry their id; profile-derived names have id=None (selecting
+    one creates the founder card on apply). Deduped, order-preserving."""
+    from . import matrix
+    out: List[dict] = []
+    seen = set()
+
+    def _add(name: str, eid):
+        nm = (name or "").split("(")[0].strip().strip(",.;—-").strip()
+        if nm and nm.lower() not in seen:
+            seen.add(nm.lower())
+            out.append({"id": eid, "name": nm})
+
+    for e in matrix.entities_for_client(conn, client_id):
+        if e["kind"] == "founder":
+            _add(e["name"], e["id"])
+    for e in matrix.entities_for_client(conn, client_id):
+        if e["kind"] == "company":
+            for ef in e.get("facts", []):
+                if "founder" in (ef.get("key", "") or "").lower():
+                    _add(ef.get("value", ""), None)
+    return out
+
+
 def find_unattributed_facts(conn, client_id: str, *, model: Optional[str] = None) -> Dict[str, Any]:
     """Scan active facts for generic speaker references ("фаундер считает …") and
     propose a rewrite that names a concrete founder. Mirrors find_duplicate_groups.
@@ -298,8 +324,7 @@ def find_unattributed_facts(conn, client_id: str, *, model: Optional[str] = None
     - L1–L2 facts must name a concrete person → flagged must_be_concrete=True.
     Returns {available, founders:[{id,name}], items:[...]}. Stub-safe."""
     from . import matrix
-    founders = [{"id": e["id"], "name": e["name"]}
-                for e in matrix.entities_for_client(conn, client_id) if e["kind"] == "founder"]
+    founders = _founder_candidates(conn, client_id)
     facts = _active_facts(conn, client_id)
     by_id = {f["id"]: f for f in facts}
     if not facts:
