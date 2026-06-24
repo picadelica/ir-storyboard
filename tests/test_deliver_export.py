@@ -45,6 +45,18 @@ def test_export_shape_and_colors(conn):
     assert all("source_url" not in c and "source" not in c for c in out["cards"])
 
 
+def test_readme_describes_json_format(conn):
+    matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="x", flag="green")
+    out = deliver.build_matrix_export(conn, "co")
+    md = out["readme"]
+    assert md == deliver.describe_json_format(out)
+    # markdown headings + key fields documented + enum values explained
+    assert md.startswith("# Формат JSON-выгрузки матрицы")
+    for token in ("`cards`", "`card_color`", "`star`", "`matrix_no`", "`company_card`",
+                  "`green`", "`blue`", "`null`"):
+        assert token in md
+
+
 def test_export_excludes_rejected(conn):
     keep = matrix.add_fact(conn, client_id="co", subsection_id="3.1", text="keep", flag="green")
     drop = matrix.add_fact(conn, client_id="co", subsection_id="3.1", text="drop", flag="green")

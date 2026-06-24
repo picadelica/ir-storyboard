@@ -13,9 +13,15 @@ function Star({ star }: { star: "blue" | "purple" | null }) {
 
 export default function ExportView({ clientId }: { clientId: string }) {
   const [copied, setCopied] = useState(false);
+  const [showFormat, setShowFormat] = useState(false);
   const q = useQuery<MatrixExport>({
     queryKey: ["matrix-export", clientId],
     queryFn: () => api.matrixExport(clientId),
+  });
+  const formatQ = useQuery<string>({
+    queryKey: ["matrix-format-md", clientId],
+    queryFn: () => api.matrixFormatMd(clientId),
+    enabled: showFormat,
   });
 
   if (q.isLoading) return <div className="p-6 text-sm text-ink-mute">Готовлю выгрузку…</div>;
@@ -47,6 +53,10 @@ export default function ExportView({ clientId }: { clientId: string }) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
+            onClick={() => setShowFormat(v => !v)}
+            className="text-xs text-ink-mute border border-ink-line rounded px-2.5 py-1.5 hover:bg-slate-50"
+          >{showFormat ? "Скрыть описание" : "Описание формата (md)"}</button>
+          <button
             onClick={copyJson}
             className="text-xs text-ink-mute border border-ink-line rounded px-2.5 py-1.5 hover:bg-slate-50"
           >{copied ? "Скопировано ✓" : "Скопировать JSON"}</button>
@@ -56,6 +66,26 @@ export default function ExportView({ clientId }: { clientId: string }) {
           >Скачать JSON</button>
         </div>
       </div>
+
+      {/* markdown-описание формата JSON (чтобы заказчик мог разобрать JSON) */}
+      {showFormat && (
+        <section className="rounded-lg border border-ink-line bg-white">
+          <div className="flex items-center justify-between px-3.5 pt-3 pb-2">
+            <div className="text-[11px] uppercase tracking-wide text-ink-mute">Описание формата JSON (передать заказчику)</div>
+            <button
+              onClick={() => api.downloadMatrixFormat(clientId, meta.client_name).catch(() => {})}
+              className="text-xs text-white bg-ink rounded px-3 py-1 hover:bg-black"
+            >Скачать .md</button>
+          </div>
+          {formatQ.isLoading ? (
+            <div className="px-3.5 pb-3 text-sm text-ink-mute">Готовлю описание…</div>
+          ) : formatQ.isError ? (
+            <div className="px-3.5 pb-3 text-sm text-red-600">Не удалось собрать описание.</div>
+          ) : (
+            <pre className="px-3.5 pb-3.5 text-[12px] leading-snug text-ink whitespace-pre-wrap font-mono max-h-[28rem] overflow-auto">{formatQ.data}</pre>
+          )}
+        </section>
+      )}
 
       {/* основное описание выгрузки */}
       <section className="rounded-lg border border-ink-line p-3.5 bg-white">

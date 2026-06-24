@@ -416,6 +416,24 @@ export const api = {
     a.remove();
     URL.revokeObjectURL(a.href);
   },
+  // Deliver: markdown-описание формата JSON (чтобы заказчик мог разобрать JSON)
+  matrixFormatMd: async (clientId: string): Promise<string> => {
+    const r = await fetch(`${API_BASE}/clients/${clientId}/matrix/format.md`);
+    if (!r.ok) throw new Error(`${r.status} ${await r.text().catch(() => "")}`);
+    return r.text();
+  },
+  downloadMatrixFormat: async (clientId: string, clientName: string): Promise<void> => {
+    const r = await fetch(`${API_BASE}/clients/${clientId}/matrix/format.md`);
+    if (!r.ok) throw new Error(`${r.status} ${await r.text().catch(() => "")}`);
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `matrix_format_${clientName || clientId}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  },
   rejectFact: (factId: number): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/reject`, { method: "POST" }),
   restoreFact: (factId: number): Promise<Fact> =>

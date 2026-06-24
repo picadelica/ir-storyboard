@@ -548,6 +548,7 @@ export interface MatrixExport {
     facts: { section: string; key: string; value: string }[];
   } | null;
   cards: ExportCard[];
+  readme: string;   // markdown-описание формата (самодокументируемость JSON)
 }
 
 export interface Track {

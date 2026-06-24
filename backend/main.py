@@ -1171,6 +1171,21 @@ def export_matrix_json(client_id: str, conn=Depends(get_conn)):
     return data
 
 
+@app.get("/api/clients/{client_id}/matrix/format.md")
+def export_matrix_format(client_id: str, conn=Depends(get_conn)):
+    """Markdown-описание формата JSON-выгрузки (для передачи заказчику, чтобы он
+    мог разобрать JSON): структура и допустимые значения полей."""
+    _check_client(client_id, conn)
+    data = deliver.build_matrix_export(conn, client_id)
+    body = deliver.describe_json_format(data)
+    fname = f"matrix_format_{client_id}.md"
+    return Response(
+        content=body,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @app.post("/api/facts/{fact_id}/reject", response_model=FactOut)
 def reject_fact(fact_id: int, conn=Depends(get_conn)):
     if matrix.get_fact(conn, fact_id) is None:
