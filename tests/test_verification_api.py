@@ -189,12 +189,15 @@ def test_merge_facts(ctx):
     client, fid, clean = ctx
     # both fid & clean are green in 2.1; merge clean into fid
     r = client.post("/api/facts/merge", json={"keep_id": fid, "merge_ids": [clean]}).json()
-    assert r["id"] == fid and r["n_sources"] == 2 and r["state"] == "active"
-    # the merged duplicate left the matrix
+    assert r["id"] == fid and r["state"] == "active"
+    # the merged duplicate left the matrix, hidden + linked back to keep
     mx = client.get("/api/clients/co/matrix").json()
     assert next(c["n_green"] for c in mx if c["subsection_id"] == "2.1") == 1
+    hidden = next(f for f in client.get("/api/clients/co/cells/2.1/facts").json() if f["id"] == clean)
+    assert hidden["state"] == "rejected" and hidden["merged_into"] == fid
+    # sources are NOT folded — keep stays a single-source fact
     keep = next(f for f in client.get("/api/clients/co/cells/2.1/facts").json() if f["id"] == fid)
-    assert keep["n_sources"] == 2
+    assert keep["n_sources"] == 1
 
 
 def test_fact_speaker_attribution(ctx):

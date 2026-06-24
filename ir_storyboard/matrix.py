@@ -397,7 +397,7 @@ def attribute_fact(conn: sqlite3.Connection, fact_id: int, entity_id: Optional[i
          "attribute", old["must_have"], entity_id),
     )
     new_id = cur.lastrowid
-    _fold_source(conn, new_id, fact_id)
+    # new fact carries the original's source_id; don't also fold it as corroboration
     conn.execute(
         """UPDATE facts SET state='rejected', merged_into=?,
                             verification_note=? WHERE id=?""",
@@ -566,14 +566,14 @@ def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int],
         raise ValueError(f"keep fact {keep_id} not found")
 
     if not text or text == (keep["text"] or "").strip():
+        # NB: don't fold the duplicates' sources into keep — the joint card just LINKS
+        # to the hidden originals (merged_into); each original keeps its own source.
         for mid in merge_ids:
-            _fold_source(conn, keep_id, mid)
             conn.execute(
                 """UPDATE facts SET state='rejected', merged_into=?,
                                     verification_note=? WHERE id=?""",
                 (keep_id, f"дубль — слит в #{keep_id}", mid))
         conn.commit()
-        fact_corroboration(conn, keep_id)
         return keep_id
 
     # curated merged text → new immutable fact, all originals rejected
@@ -590,8 +590,8 @@ def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int],
          "merge", 1 if must else 0, speaker),
     )
     new_id = cur.lastrowid
+    # don't fold sources — the joint references the hidden originals; sources live there
     for oid in all_ids:
-        _fold_source(conn, new_id, oid)
         conn.execute(
             """UPDATE facts SET state='rejected', merged_into=?,
                                 verification_note=? WHERE id=?""",

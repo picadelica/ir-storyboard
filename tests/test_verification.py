@@ -204,8 +204,8 @@ def test_merge_with_curated_text_creates_new_fact(conn):
         # hidden (merged), NOT falsely "refuted"; links back to the joint fact
         assert row["merged_into"] == new_id
         assert row["verification"] != "refuted"
-    # the merged fact carries corroboration from the originals
-    assert matrix.fact_corroboration(conn, new_id) >= 2
+    # sources are NOT folded onto the joint — it just links to the hidden originals
+    assert matrix.fact_corroboration(conn, new_id) == 1
 
 
 def test_merge_without_text_keeps_original(conn):

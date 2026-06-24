@@ -238,39 +238,39 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                         </div>
                       )}
 
-                      {/* links to the hidden cards this one was merged from */}
-                      {kids.length > 0 && (
+                      {kids.length > 0 ? (
+                        /* merged fact: only LINKS to the hidden originals; their own
+                           sources live inside those cards (no source line here). */
                         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
-                          <span>слито из {kids.length} скрытых:</span>
+                          <span>слито из {kids.length} карточек:</span>
                           {kids.map(k => (
                             <button key={k.id} onClick={() => jumpTo(k.id)} title={k.text}
                               className="font-mono px-1.5 py-0.5 rounded border border-ink-line text-blue-600 hover:bg-blue-50">⌀ #{k.id}</button>
                           ))}
                         </div>
+                      ) : (
+                        /* normal fact: its source under a native open/close disclosure */
+                        <details className="mt-2 cd-src">
+                          <summary className="text-[11px] text-ink-mute cursor-pointer">
+                            источник{f.source_channel ? ` · ${f.source_channel}` : ""}
+                          </summary>
+                          <div className="mt-1.5">
+                            {f.evidence_snippet && (
+                              <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{f.evidence_snippet}</blockquote>
+                            )}
+                            <SourceLine client_id={clientId} channel={f.source_channel} source_url={f.source_url}
+                              source_title={f.source_title} source_archive_url={f.source_archive_url}
+                              ingest_audit_id={f.ingest_audit_id} ingest_kind={f.ingest_kind} audio_sha={f.audio_sha}
+                              timestamp_sec={f.snippet_start_sec ?? undefined} captured_at={f.captured_at}
+                              onOpenAudio={(sha, sec) => openAudio(f.id, sha, sec)} />
+                            {audioPanel?.factId === f.id && (
+                              <div className="mt-2 border-t border-ink-line/60 pt-2">
+                                <AudioSourcePanel ref={audioRef} clientId={clientId} sha={audioPanel.sha} />
+                              </div>
+                            )}
+                          </div>
+                        </details>
                       )}
-
-                      {/* the rest — sources/links/quote — collapsed */}
-                      <details className="mt-2">
-                        <summary className="text-[11px] text-ink-mute cursor-pointer list-none">
-                          {(f.n_sources ?? 1) > 1 ? `${f.n_sources} источника` : "источник"} · ссылки
-                        </summary>
-                        <div className="mt-1.5">
-                          {(f.n_sources ?? 1) > 1 && <div className="text-[11px] text-emerald-700 mb-1">✓ {f.n_sources} независимых источника</div>}
-                          {f.evidence_snippet && (
-                            <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{f.evidence_snippet}</blockquote>
-                          )}
-                          <SourceLine client_id={clientId} channel={f.source_channel} source_url={f.source_url}
-                            source_title={f.source_title} source_archive_url={f.source_archive_url}
-                            ingest_audit_id={f.ingest_audit_id} ingest_kind={f.ingest_kind} audio_sha={f.audio_sha}
-                            timestamp_sec={f.snippet_start_sec ?? undefined} captured_at={f.captured_at}
-                            onOpenAudio={(sha, sec) => openAudio(f.id, sha, sec)} />
-                          {audioPanel?.factId === f.id && (
-                            <div className="mt-2 border-t border-ink-line/60 pt-2">
-                              <AudioSourcePanel ref={audioRef} clientId={clientId} sha={audioPanel.sha} />
-                            </div>
-                          )}
-                        </div>
-                      </details>
                     </>
                   )}
                 </div>
