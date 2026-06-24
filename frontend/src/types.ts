@@ -374,6 +374,7 @@ export interface Fact {
   speaker_entity_id?: number | null;  // which founder this fact is from
   speaker_name?: string | null;
   must_have?: boolean;          // client-provided must-have → blue
+  must_have_by?: string;        // '' | 'client' (blue) | 'expert' (purple)
   merged_into?: number | null;  // set → hidden, folded into fact #merged_into
   n_sources?: number;           // corroboration count
 }

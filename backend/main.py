@@ -276,6 +276,7 @@ class FactOut(BaseModel):
     speaker_entity_id: Optional[int] = None   # which founder this fact is from
     speaker_name: Optional[str] = None
     must_have: bool = False   # client-provided, must-have → rendered blue
+    must_have_by: str = ""    # '' | 'client' (blue) | 'expert' (purple)
     merged_into: Optional[int] = None   # set → this fact is hidden, folded into #merged_into
     n_sources: int = 1   # corroboration: 1 (primary) + folded-in sources
 
@@ -436,6 +437,7 @@ def _row_to_fact(row) -> FactOut:
         speaker_entity_id=row["speaker_entity_id"] if "speaker_entity_id" in keys else None,
         speaker_name=row["speaker_name"] if "speaker_name" in keys else None,
         must_have=bool(row["must_have"]) if "must_have" in keys and row["must_have"] else False,
+        must_have_by=(row["must_have_by"] if "must_have_by" in keys and row["must_have_by"] else ""),
         merged_into=row["merged_into"] if "merged_into" in keys and row["merged_into"] else None,
         n_sources=1 + (row["extra_sources"] if "extra_sources" in keys and row["extra_sources"] else 0),
     )
@@ -1102,15 +1104,20 @@ def set_speaker(fact_id: int, body: SpeakerIn, conn=Depends(get_conn)):
 
 
 class MustHaveIn(BaseModel):
-    must_have: bool
+    must_have: Optional[bool] = None   # legacy: True→client, False→none
+    source: Optional[str] = None       # '', 'client' (blue), 'expert' (purple)
 
 
 @app.post("/api/facts/{fact_id}/must-have", response_model=FactOut)
 def set_must_have(fact_id: int, body: MustHaveIn, conn=Depends(get_conn)):
-    """Mark/unmark a fact as a client-provided must-have (blue, weighted in Deliver)."""
+    """Set the must-have origin: 'client' (blue — mandatory in briefs), 'expert'
+    (purple — important) or '' (none). Accepts legacy {must_have: bool} too."""
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
-    matrix.set_fact_must_have(conn, fact_id, body.must_have)
+    source = body.source if body.source is not None else ("client" if body.must_have else "")
+    if source not in ("", "client", "expert"):
+        raise HTTPException(400, "source must be '', 'client' or 'expert'")
+    matrix.set_fact_must_have(conn, fact_id, source)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 

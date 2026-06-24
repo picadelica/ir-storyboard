@@ -53,6 +53,17 @@ def test_toggle_must_have(ctx):
     assert r.json()["must_have"] is False
 
 
+def test_must_have_client_vs_expert(ctx):
+    """source 'client' → blue, 'expert' → purple; both must_have=True, distinct origin."""
+    client, fid = ctx
+    r = client.post(f"/api/facts/{fid}/must-have", json={"source": "expert"}).json()
+    assert r["must_have"] is True and r["must_have_by"] == "expert"
+    r = client.post(f"/api/facts/{fid}/must-have", json={"source": "client"}).json()
+    assert r["must_have"] is True and r["must_have_by"] == "client"
+    r = client.post(f"/api/facts/{fid}/must-have", json={"source": ""}).json()
+    assert r["must_have"] is False and r["must_have_by"] == ""
+
+
 def test_ingest_client_facts_are_must_have(ctx):
     client, _ = ctx
     body = {

@@ -382,8 +382,9 @@ export const api = {
     call<Fact>(`/facts/${factId}/verification`, { method: "POST", body: JSON.stringify(body) }),
   setFactSpeaker: (factId: number, entityId: number | null): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/speaker`, { method: "POST", body: JSON.stringify({ entity_id: entityId }) }),
-  setMustHave: (factId: number, mustHave: boolean): Promise<Fact> =>
-    call<Fact>(`/facts/${factId}/must-have`, { method: "POST", body: JSON.stringify({ must_have: mustHave }) }),
+  // source: '' (none) | 'client' (blue, mandatory) | 'expert' (purple, important)
+  setMustHave: (factId: number, source: "" | "client" | "expert"): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/must-have`, { method: "POST", body: JSON.stringify({ source }) }),
   // Скачать must-have (синие) факты нумерованным списком (для согласования с заказчиком)
   downloadMustHaveFacts: async (clientId: string, clientName: string): Promise<void> => {
     const r = await fetch(`${API_BASE}/clients/${clientId}/facts/must-have/export`);

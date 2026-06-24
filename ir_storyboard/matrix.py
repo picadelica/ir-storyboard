@@ -256,10 +256,11 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
     cell_id = get_or_create_cell(conn, client_id, subsection_id)
     cur = conn.execute(
         """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until,
-                              evidence_snippet, rationale, created_by, must_have)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                              evidence_snippet, rationale, created_by, must_have, must_have_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (cell_id, text, flag, source_id, confidence, valid_until,
-         evidence_snippet, rationale, created_by, 1 if must_have else 0),
+         evidence_snippet, rationale, created_by, 1 if must_have else 0,
+         "client" if must_have else ""),
     )
     conn.commit()
     fact_id = cur.lastrowid
@@ -280,7 +281,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
-                  f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.merged_into,
+                  f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.must_have_by, f.merged_into,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -313,6 +314,7 @@ def must_have_facts(conn: sqlite3.Connection, client_id: str) -> List[dict]:
                     "subsection_name": sub.name,
                     "text": r["text"],
                     "flag": r["flag"],
+                    "must_have_by": (r["must_have_by"] if "must_have_by" in r.keys() else "") or "client",
                 })
     return out
 
@@ -324,7 +326,7 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
-                  f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.merged_into,
+                  f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.must_have_by, f.merged_into,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -360,10 +362,14 @@ def set_fact_verification(conn: sqlite3.Connection, fact_id: int, *,
     conn.commit()
 
 
-def set_fact_must_have(conn: sqlite3.Connection, fact_id: int, must_have: bool) -> None:
-    """Mark/unmark a fact as a client-provided must-have (rendered blue, weighted
-    in Deliver)."""
-    conn.execute("UPDATE facts SET must_have=? WHERE id=?", (1 if must_have else 0, fact_id))
+def set_fact_must_have(conn: sqlite3.Connection, fact_id: int,
+                       source: str = "client") -> None:
+    """Set the must-have origin: 'client' (blue — mandatory in briefs), 'expert'
+    (purple — flagged important) or '' (none). must_have stays the boolean overlay."""
+    if source not in ("", "client", "expert"):
+        raise ValueError(f"bad must-have source {source!r}")
+    conn.execute("UPDATE facts SET must_have=?, must_have_by=? WHERE id=?",
+                 (1 if source else 0, source, fact_id))
     conn.commit()
 
 

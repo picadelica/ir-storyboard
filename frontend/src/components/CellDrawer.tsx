@@ -112,7 +112,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
     onSuccess: invalidate,
   });
   const setMustHave = useMutation({
-    mutationFn: ({ id, mustHave }: { id: number; mustHave: boolean }) => api.setMustHave(id, mustHave),
+    mutationFn: ({ id, source }: { id: number; source: "" | "client" | "expert" }) => api.setMustHave(id, source),
     onSuccess: invalidate,
   });
 
@@ -196,9 +196,16 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-3">
                           <FlagDot flag={f.flag} size={11} />
-                          <button onClick={() => setMustHave.mutate({ id: f.id, mustHave: !f.must_have })}
-                            title={f.must_have ? "must-have (от клиента) — снять" : "отметить must-have (от клиента)"}
-                            className={`text-[15px] leading-none ${f.must_have ? "text-flag-blue" : "text-ink-mute/40 hover:text-flag-blue"}`}>★</button>
+                          {(() => {
+                            const by = f.must_have_by || (f.must_have ? "client" : "");
+                            const next = by === "" ? "client" : by === "client" ? "expert" : "";
+                            const color = by === "client" ? "text-flag-blue" : by === "expert" ? "text-purple-600" : "text-ink-mute/40 hover:text-flag-blue";
+                            const title = by === "client" ? "must-have от клиента (обязательно) → клик: от эксперта"
+                              : by === "expert" ? "важное от эксперта (приоритет) → клик: снять"
+                              : "клик: must-have от клиента (синяя)";
+                            return <button onClick={() => setMustHave.mutate({ id: f.id, source: next as "" | "client" | "expert" })}
+                              title={title} className={`text-[15px] leading-none ${color}`}>★</button>;
+                          })()}
                           <InfoBtn id={f.id} />
                         </div>
                         <div className="flex items-center gap-2 text-ink-mute">

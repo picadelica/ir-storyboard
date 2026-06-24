@@ -121,6 +121,7 @@ def collect_factology(conn, client_id: str, flags: Optional[list] = None,
                     "text": r["text"],
                     "flag": r["flag"],
                     "must_have": bool(r["must_have"]) if "must_have" in r.keys() else False,
+                    "must_have_by": (r["must_have_by"] if "must_have_by" in r.keys() else "") or "",
                     "rationale": r["rationale"] or "",
                     "source": {
                         "url": r["source_url"] or "",
@@ -151,12 +152,19 @@ def render_md(client: dict, template: dict, analyst_prompt: str, factology: list
         lines += ["## Постановка аналитика", analyst_prompt.strip(), ""]
     if (template.get("body") or "").strip():
         lines += ["## Задача", template["body"].strip(), ""]
-    # Must-have block first — client-provided, key facts the material must reflect.
+    # Must-have blocks first — by origin: client = mandatory, expert = important.
     must = [(layer, sub, f) for layer in factology for sub in layer["subsections"]
             for f in sub["facts"] if f.get("must_have")]
-    if must:
-        lines += ["## ★ Must-have от клиента (обязательно отрази)", ""]
-        for layer, sub, f in must:
+    client_must = [t for t in must if t[2].get("must_have_by", "client") != "expert"]
+    expert_must = [t for t in must if t[2].get("must_have_by") == "expert"]
+    if client_must:
+        lines += ["## ★ Must-have от клиента (ОБЯЗАТЕЛЬНО отрази, на видном месте)", ""]
+        for layer, sub, f in client_must:
+            lines.append(f"- {f['text']} _(— {sub['subsection_id']} {sub['subsection_name']})_{_cite(f['source'])}")
+        lines.append("")
+    if expert_must:
+        lines += ["## ★ Важное от эксперта (приоритет, раскрой полнее)", ""]
+        for layer, sub, f in expert_must:
             lines.append(f"- {f['text']} _(— {sub['subsection_id']} {sub['subsection_name']})_{_cite(f['source'])}")
         lines.append("")
 
@@ -186,6 +194,7 @@ def render_json(client: dict, template: dict, analyst_prompt: str, factology: li
                     "text": f["text"],
                     "flag": f["flag"],
                     "must_have": f.get("must_have", False),
+                    "must_have_by": f.get("must_have_by", ""),
                     "layer_id": layer["layer_id"],
                     "layer_name": layer["layer_name"],
                     "subsection_id": sub["subsection_id"],

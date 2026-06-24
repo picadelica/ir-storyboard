@@ -162,6 +162,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # heavily in Deliver. An overlay on the green/red/grey flag (avoids a CHECK
     # rebuild of the facts table for a 4th flag value).
     _add_column_if_missing(conn, "facts", "must_have", "INTEGER NOT NULL DEFAULT 0")
+    # must-have origin: '' (none), 'client' (blue — mandatory in briefs) or 'expert'
+    # (purple — flagged important). must_have stays the boolean "is must-have at all".
+    _add_column_if_missing(conn, "facts", "must_have_by", "TEXT NOT NULL DEFAULT ''")
+    conn.execute("UPDATE facts SET must_have_by='client' WHERE must_have=1 AND must_have_by=''")
     # merged-away facts: this fact was folded into / renamed as fact #merged_into.
     # state stays 'rejected' (excluded from briefs/cycles/counts) but it's HIDDEN,
     # not 'refuted' — the joint card links back to it. NULL = a normal active/rejected
