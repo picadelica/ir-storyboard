@@ -46,6 +46,14 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
 
   const [showAdd, setShowAdd] = useState(false);
   const [showHidden, setShowHidden] = useState(false);   // collapsible for merged-away cards
+  const [infoIds, setInfoIds] = useState<Set<number>>(new Set());   // per-fact "info" footer open
+  const toggleInfo = (id: number) => setInfoIds(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const InfoBtn = ({ id }: { id: number }) => (
+    <button onClick={() => toggleInfo(id)} aria-label="Источник и детали"
+      className={infoIds.has(id) ? "text-ink" : "text-ink-mute/50 hover:text-ink"}>
+      <svg width="15" height="15" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" strokeWidth="1.3"/><path d="M10 9v4.2M10 6.4v.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+    </button>
+  );
   const [newText, setNewText] = useState("");
   const [newFlag, setNewFlag] = useState<Flag>("green");
   const [newChannel, setNewChannel] = useState<Channel>("online_research");
@@ -191,6 +199,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                           <button onClick={() => setMustHave.mutate({ id: f.id, mustHave: !f.must_have })}
                             title={f.must_have ? "must-have (от клиента) — снять" : "отметить must-have (от клиента)"}
                             className={`text-[15px] leading-none ${f.must_have ? "text-flag-blue" : "text-ink-mute/40 hover:text-flag-blue"}`}>★</button>
+                          <InfoBtn id={f.id} />
                         </div>
                         <div className="flex items-center gap-2 text-ink-mute">
                           <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); }}
@@ -238,38 +247,32 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                         </div>
                       )}
 
-                      {kids.length > 0 ? (
-                        /* merged fact: only LINKS to the hidden originals; their own
-                           sources live inside those cards (no source line here). */
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
-                          <span>слито из {kids.length} карточек:</span>
-                          {kids.map(k => (
-                            <button key={k.id} onClick={() => jumpTo(k.id)} title={k.text}
-                              className="font-mono px-1.5 py-0.5 rounded border border-ink-line text-blue-600 hover:bg-blue-50">⌀ #{k.id}</button>
-                          ))}
+                      {/* footer (source + merged-from links) — collapsed behind the info icon */}
+                      {infoIds.has(f.id) && (
+                        <div className="mt-2 pt-2 border-t border-ink-line/60">
+                          {kids.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute mb-1">
+                              <span>слито из {kids.length} карточек:</span>
+                              {kids.map(k => (
+                                <button key={k.id} onClick={() => jumpTo(k.id)} title={k.text}
+                                  className="font-mono px-1.5 py-0.5 rounded border border-ink-line text-blue-600 hover:bg-blue-50">#{k.id}</button>
+                              ))}
+                            </div>
+                          )}
+                          {f.evidence_snippet && (
+                            <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{f.evidence_snippet}</blockquote>
+                          )}
+                          <SourceLine client_id={clientId} channel={f.source_channel} source_url={f.source_url}
+                            source_title={f.source_title} source_archive_url={f.source_archive_url}
+                            ingest_audit_id={f.ingest_audit_id} ingest_kind={f.ingest_kind} audio_sha={f.audio_sha}
+                            timestamp_sec={f.snippet_start_sec ?? undefined} captured_at={f.captured_at}
+                            onOpenAudio={(sha, sec) => openAudio(f.id, sha, sec)} />
+                          {audioPanel?.factId === f.id && (
+                            <div className="mt-2 border-t border-ink-line/60 pt-2">
+                              <AudioSourcePanel ref={audioRef} clientId={clientId} sha={audioPanel.sha} />
+                            </div>
+                          )}
                         </div>
-                      ) : (
-                        /* normal fact: its source under a native open/close disclosure */
-                        <details className="mt-2 cd-src">
-                          <summary className="text-[11px] text-ink-mute cursor-pointer">
-                            источник{f.source_channel ? ` · ${f.source_channel}` : ""}
-                          </summary>
-                          <div className="mt-1.5">
-                            {f.evidence_snippet && (
-                              <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{f.evidence_snippet}</blockquote>
-                            )}
-                            <SourceLine client_id={clientId} channel={f.source_channel} source_url={f.source_url}
-                              source_title={f.source_title} source_archive_url={f.source_archive_url}
-                              ingest_audit_id={f.ingest_audit_id} ingest_kind={f.ingest_kind} audio_sha={f.audio_sha}
-                              timestamp_sec={f.snippet_start_sec ?? undefined} captured_at={f.captured_at}
-                              onOpenAudio={(sha, sec) => openAudio(f.id, sha, sec)} />
-                            {audioPanel?.factId === f.id && (
-                              <div className="mt-2 border-t border-ink-line/60 pt-2">
-                                <AudioSourcePanel ref={audioRef} clientId={clientId} sha={audioPanel.sha} />
-                              </div>
-                            )}
-                          </div>
-                        </details>
                       )}
                     </>
                   )}
@@ -277,22 +280,23 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
               );
             })}
 
-            {/* hidden (merged-away) cards under a collapsible */}
+            {/* merged-away originals under a collapsible (each keeps its own source) */}
             {hidden.length > 0 && (
               <details open={showHidden} onToggle={e => setShowHidden((e.currentTarget as HTMLDetailsElement).open)}
                 className="rounded-lg border border-dashed border-ink-line p-2">
                 <summary className="text-[11px] text-ink-mute cursor-pointer list-none">
-                  показать {hidden.length} скрытых
+                  показать {hidden.length} исходных карточек
                 </summary>
                 <div className="mt-2 space-y-2">
                   {hidden.map(h => (
-                    <div key={h.id} id={`fact-${h.id}`} className="rounded border border-ink-line bg-slate-50/60 p-2.5 opacity-80 transition-shadow">
+                    <div key={h.id} id={`fact-${h.id}`} className="rounded border border-ink-line bg-slate-50/60 p-2.5 transition-shadow">
                       <div className="flex items-center justify-between gap-2 mb-1">
                         <span className="flex items-center gap-2 text-[10px] text-ink-mute">
-                          <FlagDot flag="grey" size={9} />
+                          <FlagDot flag={h.flag} size={9} />
                           <span className="px-1.5 py-0.5 rounded bg-slate-200/70">
-                            ⌀ скрыт{h.merged_into ? ` · слит в #${h.merged_into}` : ""}
+                            исходная{h.merged_into ? ` · в #${h.merged_into}` : ""}
                           </span>
+                          <InfoBtn id={h.id} />
                         </span>
                         <span className="flex items-center gap-2 shrink-0">
                           {h.merged_into && (
@@ -301,7 +305,19 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                           <button onClick={() => restoreFact.mutate(h.id)} className="text-[11px] text-ink-mute hover:text-ink">вернуть</button>
                         </span>
                       </div>
-                      <div className="text-xs leading-snug whitespace-pre-wrap line-through text-ink-mute">{h.text}</div>
+                      <div className="text-xs leading-snug whitespace-pre-wrap text-ink-mute">{h.text}</div>
+                      {infoIds.has(h.id) && (
+                        <div className="mt-1.5 pt-1.5 border-t border-ink-line/60">
+                          {h.evidence_snippet && (
+                            <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{h.evidence_snippet}</blockquote>
+                          )}
+                          <SourceLine client_id={clientId} channel={h.source_channel} source_url={h.source_url}
+                            source_title={h.source_title} source_archive_url={h.source_archive_url}
+                            ingest_audit_id={h.ingest_audit_id} ingest_kind={h.ingest_kind} audio_sha={h.audio_sha}
+                            timestamp_sec={h.snippet_start_sec ?? undefined} captured_at={h.captured_at}
+                            onOpenAudio={(sha, sec) => openAudio(h.id, sha, sec)} />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

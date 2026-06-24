@@ -78,7 +78,8 @@ function ClientPage() {
     <div className="h-screen flex">
       {!present && <Sidebar clientId={clientId} />}
 
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden"
+        style={{ transition: "margin-right 200ms", marginRight: selectedSid && activeTab === "matrix" ? "28rem" : 0 }}>
         {present ? (
           <PresentBar clientId={clientId!} quarter={quarter} onExit={() => setPresent(false)} />
         ) : (
