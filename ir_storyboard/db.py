@@ -26,6 +26,27 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str,
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+def _backfill_merged_into(conn: sqlite3.Connection) -> None:
+    """One-time: facts merged/renamed before the merged_into column existed were
+    wrongly marked verification='refuted'. Recover the link from their note
+    ("слит … в #N" / "переименован спикер → #N") and clear the false refuted."""
+    import re
+    rows = conn.execute(
+        """SELECT id, verification_note FROM facts
+            WHERE merged_into IS NULL AND verification='refuted'
+              AND (verification_note LIKE '%слит%' OR verification_note LIKE '%переименован спикер%')"""
+    ).fetchall()
+    for r in rows:
+        nums = re.findall(r"(\d+)", r[1] or "")
+        if not nums:
+            continue
+        conn.execute(
+            "UPDATE facts SET merged_into=?, verification='unverified' WHERE id=?",
+            (int(nums[-1]), r[0]))
+    if rows:
+        conn.commit()
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     """Create all tables if they don't exist, then apply additive migrations."""
     sql = SCHEMA_PATH.read_text(encoding="utf-8")
@@ -141,6 +162,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # heavily in Deliver. An overlay on the green/red/grey flag (avoids a CHECK
     # rebuild of the facts table for a 4th flag value).
     _add_column_if_missing(conn, "facts", "must_have", "INTEGER NOT NULL DEFAULT 0")
+    # merged-away facts: this fact was folded into / renamed as fact #merged_into.
+    # state stays 'rejected' (excluded from briefs/cycles/counts) but it's HIDDEN,
+    # not 'refuted' — the joint card links back to it. NULL = a normal active/rejected
+    # fact. (Earlier code wrongly set verification='refuted' on merges — see backfill.)
+    _add_column_if_missing(conn, "facts", "merged_into", "INTEGER")
+    _backfill_merged_into(conn)
     # fact-trust (phase 1): identity anchor outside the narrative matrix — the
     # company, its founders, and known decoys (different people with overlapping
     # names). Bare, source-linked facts only; the narrative lives in L1/L2 cells.

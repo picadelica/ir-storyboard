@@ -45,6 +45,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
   };
 
   const [showAdd, setShowAdd] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);   // collapsible for merged-away cards
   const [newText, setNewText] = useState("");
   const [newFlag, setNewFlag] = useState<Flag>("green");
   const [newChannel, setNewChannel] = useState<Channel>("online_research");
@@ -90,10 +91,6 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
     onSuccess: invalidate,
   });
 
-  const rejectFact = useMutation({
-    mutationFn: (id: number) => api.rejectFact(id),
-    onSuccess: invalidate,
-  });
   const restoreFact = useMutation({
     mutationFn: (id: number) => api.restoreFact(id),
     onSuccess: invalidate,
@@ -151,150 +148,167 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
           </div>
         )}
 
-        {facts.data?.map(f => (
-          <div key={f.id} className={`rounded border p-3 ${flagBg(f.flag)} ${flagBorder(f.flag)} ${f.state === "rejected" ? "opacity-60" : ""}`}>
-            {editingId === f.id ? (
-              <div className="space-y-2">
-                <textarea
-                  value={draftText}
-                  onChange={e => setDraftText(e.target.value)}
-                  className="w-full text-sm border border-ink-line rounded px-2 py-1.5 min-h-[5rem]"
-                />
-                <textarea
-                  value={draftRationale}
-                  onChange={e => setDraftRationale(e.target.value)}
-                  placeholder={draftFlag === "red"
-                    ? "Concern: что именно проблема (обязательно для red)"
-                    : "Rationale (опц.)"}
-                  rows={3}
-                  className={`w-full text-xs border rounded px-2 py-1.5 min-h-[3rem] resize-none ${
-                    draftFlag === "red" && !draftRationale.trim()
-                      ? "border-red-400" : "border-ink-line"
-                  }`}
-                />
-                <div className="flex items-center gap-2">
-                  <FlagPicker value={draftFlag} onChange={setDraftFlag} />
-                  <button
-                    onClick={() => patchFact.mutate({ id: f.id, text: draftText, flag: draftFlag, rationale: draftRationale })}
-                    disabled={draftFlag === "red" && !draftRationale.trim()}
-                    title={draftFlag === "red" && !draftRationale.trim() ? "Red facts require a rationale" : undefined}
-                    className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300"
-                  >Save</button>
-                  <button
-                    onClick={() => setEditingId(null)}
-                    className="text-xs px-3 py-1 hover:bg-slate-100 rounded text-ink-mute"
-                  >Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-start gap-2 mb-1.5">
-                  <FlagDot flag={f.flag} mustHave={f.must_have} className="mt-1.5" />
-                  <div className={`text-sm leading-snug whitespace-pre-wrap flex-1
-                    ${f.state === "rejected" || f.verification === "refuted" ? "line-through text-ink-mute" : ""}`}>
-                    {f.must_have && <span className="text-flag-blue font-semibold mr-1" title="must-have — от клиента">★</span>}
-                    {f.text}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {f.state !== "rejected" && (
-                      <button onClick={() => setMustHave.mutate({ id: f.id, mustHave: !f.must_have })}
-                        title="факт от клиента лично (must-have, синий)"
-                        className={`text-[12px] px-1.5 py-0.5 rounded hover:bg-white
-                          ${f.must_have ? "text-flag-blue" : "text-ink-mute hover:text-flag-blue"}`}>★</button>
-                    )}
-                    {f.state === "rejected" ? (
-                      <button onClick={() => restoreFact.mutate(f.id)}
-                        className="text-[11px] text-ink-mute hover:text-ink px-1.5 py-0.5 rounded hover:bg-white">вернуть</button>
-                    ) : (
-                      <button onClick={() => rejectFact.mutate(f.id)}
-                        className="text-[11px] text-red-600 hover:text-red-800 px-1.5 py-0.5 rounded hover:bg-white">снять</button>
-                    )}
-                    <button
-                      onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); }}
-                      className="text-[11px] text-ink-mute hover:text-ink px-1.5 py-0.5 rounded hover:bg-white"
-                    >edit</button>
-                    <button
-                      onClick={() => { if (confirm("Delete this fact?")) deleteFact.mutate(f.id); }}
-                      className="text-[11px] text-red-600 hover:text-red-800 px-1.5 py-0.5 rounded hover:bg-white"
-                    >delete</button>
-                  </div>
-                </div>
-                {f.verification && f.verification !== "unverified" && (
-                  <div className="mb-1.5 flex items-center gap-1.5 flex-wrap">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide
-                      ${f.verification === "verified" ? "bg-emerald-50 text-emerald-700"
-                        : f.verification === "refuted" ? "bg-flag-red-bg text-flag-red"
-                        : "bg-amber-50 text-amber-700"}`}>
-                      {f.verification === "verified" ? "проверено" : f.verification === "refuted" ? "опровергнуто" : "под вопросом"}
-                    </span>
-                    {f.entity && <span className="text-[11px] font-mono text-ink-mute border border-ink-line rounded px-1.5">≠ {f.entity}</span>}
-                    {f.verification_note && <span className="text-[11px] text-ink-mute">{f.verification_note}</span>}
-                  </div>
-                )}
-                {founders.length > 0 && f.state !== "rejected" && (
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <span className="text-[11px] text-ink-mute" title="кто из фаундеров это говорит/чей факт">🗣</span>
-                    <select
-                      value={f.speaker_entity_id ?? ""}
-                      onChange={e => setSpeaker.mutate({ id: f.id, entityId: e.target.value ? Number(e.target.value) : null })}
-                      className={`text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white max-w-[15rem]
-                        ${f.speaker_entity_id ? "text-ink" : "text-ink-mute"}`}
-                    >
-                      <option value="">— кто говорит? —</option>
-                      {founders.map(fo => <option key={fo.id} value={fo.id}>{fo.name}</option>)}
-                    </select>
-                  </div>
-                )}
-                {(f.n_sources ?? 1) > 1 && (
-                  <div className="mb-1.5 text-[11px] text-emerald-700">✓ {f.n_sources} независимых источника</div>
-                )}
-                {f.flag === "red" && (
-                  f.rationale
-                    ? <div className="mt-2 text-xs border-l-2 pl-2 leading-snug border-flag-red/60 text-flag-red">
-                        <span className="font-medium uppercase tracking-wide text-[10px] mr-1">concern:</span>
-                        {f.rationale}
+        {(() => {
+          const all = facts.data ?? [];
+          const active = all.filter(f => f.state !== "rejected");
+          const hidden = all.filter(f => f.state === "rejected");
+          const jumpTo = (id: number) => {
+            setShowHidden(true);
+            setTimeout(() => {
+              const el = document.getElementById(`fact-${id}`);
+              el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+              el?.classList.add("ring-2", "ring-blue-400");
+              setTimeout(() => el?.classList.remove("ring-2", "ring-blue-400"), 1200);
+            }, 60);
+          };
+          return (<>
+            {active.map(f => {
+              const kids = hidden.filter(h => h.merged_into === f.id);
+              return (
+                <div key={f.id} id={`fact-${f.id}`} className={`rounded-lg border p-3 transition-shadow ${flagBg(f.flag)} ${flagBorder(f.flag)}`}>
+                  {editingId === f.id ? (
+                    <div className="space-y-2">
+                      <textarea value={draftText} onChange={e => setDraftText(e.target.value)}
+                        className="w-full text-sm border border-ink-line rounded px-2 py-1.5 min-h-[5rem]" />
+                      <textarea value={draftRationale} onChange={e => setDraftRationale(e.target.value)}
+                        placeholder={draftFlag === "red" ? "Concern: что именно проблема (обязательно для red)" : "Rationale (опц.)"}
+                        rows={3}
+                        className={`w-full text-xs border rounded px-2 py-1.5 min-h-[3rem] resize-none ${draftFlag === "red" && !draftRationale.trim() ? "border-red-400" : "border-ink-line"}`} />
+                      <div className="flex items-center gap-2">
+                        <FlagPicker value={draftFlag} onChange={setDraftFlag} />
+                        <button onClick={() => patchFact.mutate({ id: f.id, text: draftText, flag: draftFlag, rationale: draftRationale })}
+                          disabled={draftFlag === "red" && !draftRationale.trim()}
+                          className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">Save</button>
+                        <button onClick={() => setEditingId(null)} className="text-xs px-3 py-1 hover:bg-slate-100 rounded text-ink-mute">Cancel</button>
                       </div>
-                    : <div className="mt-2 text-xs text-amber-600 italic">
-                        ⚠ Concern: (не указано) — обновите факт через edit
+                    </div>
+                  ) : (
+                    <>
+                      {/* top row: flag + star (left), edit + delete (right) */}
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                          <FlagDot flag={f.flag} size={11} />
+                          <button onClick={() => setMustHave.mutate({ id: f.id, mustHave: !f.must_have })}
+                            title={f.must_have ? "must-have (от клиента) — снять" : "отметить must-have (от клиента)"}
+                            className={`text-[15px] leading-none ${f.must_have ? "text-flag-blue" : "text-ink-mute/40 hover:text-flag-blue"}`}>★</button>
+                        </div>
+                        <div className="flex items-center gap-2 text-ink-mute">
+                          <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); }}
+                            aria-label="Редактировать" className="hover:text-ink">
+                            <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M4 13.5V16h2.5l7.4-7.4-2.5-2.5L4 13.5zM13.1 4.9l2.5 2.5 1-1a1.4 1.4 0 0 0-2-2l-1.5.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>
+                          </button>
+                          <button onClick={() => { if (confirm("Удалить факт безвозвратно?")) deleteFact.mutate(f.id); }}
+                            aria-label="Удалить" className="hover:text-flag-red">
+                            <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M8 6V4.5h4V6M6.5 6l.7 9.5h5.6L13.5 6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          </button>
+                        </div>
                       </div>
-                )}
-                {f.flag === "grey" && f.rationale && (
-                  <div className="mt-2 text-xs border-l-2 pl-2 leading-snug border-flag-grey/60 text-ink-mute">
-                    <span className="font-medium uppercase tracking-wide text-[10px] mr-1">gap:</span>
-                    {f.rationale}
-                  </div>
-                )}
-                {f.evidence_snippet && (
-                  <blockquote className="mt-2 text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug">
-                    {f.evidence_snippet}
-                  </blockquote>
-                )}
-                <SourceLine
-                  client_id={clientId}
-                  channel={f.source_channel}
-                  source_url={f.source_url}
-                  source_title={f.source_title}
-                  source_archive_url={f.source_archive_url}
-                  ingest_audit_id={f.ingest_audit_id}
-                  ingest_kind={f.ingest_kind}
-                  audio_sha={f.audio_sha}
-                  timestamp_sec={f.snippet_start_sec ?? undefined}
-                  captured_at={f.captured_at}
-                  onOpenAudio={(sha, sec) => openAudio(f.id, sha, sec)}
-                />
-                {audioPanel?.factId === f.id && (
-                  <div className="mt-2 border-t border-ink-line/60 pt-2">
-                    <AudioSourcePanel
-                      ref={audioRef}
-                      clientId={clientId}
-                      sha={audioPanel.sha}
-                    />
-                  </div>
-                )}
-              </>
+
+                      {/* fact text — full width, from the second row */}
+                      <div className="text-sm leading-snug whitespace-pre-wrap text-ink">{f.text}</div>
+
+                      {/* speaker — kept in the text body */}
+                      {founders.length > 0 && (
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <span className="text-[11px] text-ink-mute" title="кто из фаундеров это говорит/чей факт">🗣</span>
+                          <select value={f.speaker_entity_id ?? ""}
+                            onChange={e => setSpeaker.mutate({ id: f.id, entityId: e.target.value ? Number(e.target.value) : null })}
+                            className={`text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white max-w-[15rem] ${f.speaker_entity_id ? "text-ink" : "text-ink-mute"}`}>
+                            <option value="">— кто говорит? —</option>
+                            {founders.map(fo => <option key={fo.id} value={fo.id}>{fo.name}</option>)}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* risk / gap — kept in the text body */}
+                      {f.flag === "red" && (f.rationale
+                        ? <div className="mt-1.5 text-xs border-l-2 pl-2 leading-snug border-flag-red/60 text-flag-red">
+                            <span className="font-medium uppercase tracking-wide text-[10px] mr-1">риск:</span>{f.rationale}</div>
+                        : <div className="mt-1.5 text-xs text-amber-600 italic">⚠ риск не указан — добавьте через edit</div>)}
+                      {f.flag === "grey" && f.rationale && (
+                        <div className="mt-1.5 text-xs border-l-2 pl-2 leading-snug border-flag-grey/60 text-ink-mute">
+                          <span className="font-medium uppercase tracking-wide text-[10px] mr-1">gap:</span>{f.rationale}</div>)}
+
+                      {/* verification (only when meaningful) */}
+                      {f.verification && f.verification !== "unverified" && (
+                        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide ${f.verification === "verified" ? "bg-emerald-50 text-emerald-700" : f.verification === "refuted" ? "bg-flag-red-bg text-flag-red" : "bg-amber-50 text-amber-700"}`}>
+                            {f.verification === "verified" ? "проверено" : f.verification === "refuted" ? "опровергнуто" : "под вопросом"}</span>
+                          {f.entity && <span className="text-[11px] font-mono text-ink-mute border border-ink-line rounded px-1.5">≠ {f.entity}</span>}
+                        </div>
+                      )}
+
+                      {/* links to the hidden cards this one was merged from */}
+                      {kids.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
+                          <span>слито из {kids.length} скрытых:</span>
+                          {kids.map(k => (
+                            <button key={k.id} onClick={() => jumpTo(k.id)} title={k.text}
+                              className="font-mono px-1.5 py-0.5 rounded border border-ink-line text-blue-600 hover:bg-blue-50">⌀ #{k.id}</button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* the rest — sources/links/quote — collapsed */}
+                      <details className="mt-2">
+                        <summary className="text-[11px] text-ink-mute cursor-pointer list-none">
+                          {(f.n_sources ?? 1) > 1 ? `${f.n_sources} источника` : "источник"} · ссылки
+                        </summary>
+                        <div className="mt-1.5">
+                          {(f.n_sources ?? 1) > 1 && <div className="text-[11px] text-emerald-700 mb-1">✓ {f.n_sources} независимых источника</div>}
+                          {f.evidence_snippet && (
+                            <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{f.evidence_snippet}</blockquote>
+                          )}
+                          <SourceLine client_id={clientId} channel={f.source_channel} source_url={f.source_url}
+                            source_title={f.source_title} source_archive_url={f.source_archive_url}
+                            ingest_audit_id={f.ingest_audit_id} ingest_kind={f.ingest_kind} audio_sha={f.audio_sha}
+                            timestamp_sec={f.snippet_start_sec ?? undefined} captured_at={f.captured_at}
+                            onOpenAudio={(sha, sec) => openAudio(f.id, sha, sec)} />
+                          {audioPanel?.factId === f.id && (
+                            <div className="mt-2 border-t border-ink-line/60 pt-2">
+                              <AudioSourcePanel ref={audioRef} clientId={clientId} sha={audioPanel.sha} />
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* hidden (merged-away) cards under a collapsible */}
+            {hidden.length > 0 && (
+              <details open={showHidden} onToggle={e => setShowHidden((e.currentTarget as HTMLDetailsElement).open)}
+                className="rounded-lg border border-dashed border-ink-line p-2">
+                <summary className="text-[11px] text-ink-mute cursor-pointer list-none">
+                  показать {hidden.length} скрытых
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {hidden.map(h => (
+                    <div key={h.id} id={`fact-${h.id}`} className="rounded border border-ink-line bg-slate-50/60 p-2.5 opacity-80 transition-shadow">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="flex items-center gap-2 text-[10px] text-ink-mute">
+                          <FlagDot flag="grey" size={9} />
+                          <span className="px-1.5 py-0.5 rounded bg-slate-200/70">
+                            ⌀ скрыт{h.merged_into ? ` · слит в #${h.merged_into}` : ""}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2 shrink-0">
+                          {h.merged_into && (
+                            <button onClick={() => jumpTo(h.merged_into!)} className="text-[11px] text-blue-600 hover:underline">↑ к общей #{h.merged_into}</button>
+                          )}
+                          <button onClick={() => restoreFact.mutate(h.id)} className="text-[11px] text-ink-mute hover:text-ink">вернуть</button>
+                        </span>
+                      </div>
+                      <div className="text-xs leading-snug whitespace-pre-wrap line-through text-ink-mute">{h.text}</div>
+                    </div>
+                  ))}
+                </div>
+              </details>
             )}
-          </div>
-        ))}
+          </>);
+        })()}
       </div>
 
       <div className="border-t border-ink-line p-4 bg-slate-50">

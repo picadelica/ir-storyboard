@@ -276,6 +276,7 @@ class FactOut(BaseModel):
     speaker_entity_id: Optional[int] = None   # which founder this fact is from
     speaker_name: Optional[str] = None
     must_have: bool = False   # client-provided, must-have → rendered blue
+    merged_into: Optional[int] = None   # set → this fact is hidden, folded into #merged_into
     n_sources: int = 1   # corroboration: 1 (primary) + folded-in sources
 
 
@@ -435,6 +436,7 @@ def _row_to_fact(row) -> FactOut:
         speaker_entity_id=row["speaker_entity_id"] if "speaker_entity_id" in keys else None,
         speaker_name=row["speaker_name"] if "speaker_name" in keys else None,
         must_have=bool(row["must_have"]) if "must_have" in keys and row["must_have"] else False,
+        merged_into=row["merged_into"] if "merged_into" in keys and row["merged_into"] else None,
         n_sources=1 + (row["extra_sources"] if "extra_sources" in keys and row["extra_sources"] else 0),
     )
 

@@ -280,7 +280,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
-                  f.speaker_entity_id, se.name AS speaker_name, f.must_have,
+                  f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.merged_into,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -324,7 +324,7 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
-                  f.speaker_entity_id, se.name AS speaker_name, f.must_have,
+                  f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.merged_into,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -399,9 +399,9 @@ def attribute_fact(conn: sqlite3.Connection, fact_id: int, entity_id: Optional[i
     new_id = cur.lastrowid
     _fold_source(conn, new_id, fact_id)
     conn.execute(
-        """UPDATE facts SET state='rejected', verification='refuted',
+        """UPDATE facts SET state='rejected', merged_into=?,
                             verification_note=? WHERE id=?""",
-        (f"переименован спикер → #{new_id}", fact_id))
+        (new_id, f"переименован спикер → #{new_id}", fact_id))
     conn.commit()
     return new_id
 
@@ -569,9 +569,9 @@ def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int],
         for mid in merge_ids:
             _fold_source(conn, keep_id, mid)
             conn.execute(
-                """UPDATE facts SET state='rejected', verification='refuted',
+                """UPDATE facts SET state='rejected', merged_into=?,
                                     verification_note=? WHERE id=?""",
-                (f"дубль — слит в #{keep_id}", mid))
+                (keep_id, f"дубль — слит в #{keep_id}", mid))
         conn.commit()
         fact_corroboration(conn, keep_id)
         return keep_id
@@ -593,9 +593,9 @@ def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int],
     for oid in all_ids:
         _fold_source(conn, new_id, oid)
         conn.execute(
-            """UPDATE facts SET state='rejected', verification='refuted',
+            """UPDATE facts SET state='rejected', merged_into=?,
                                 verification_note=? WHERE id=?""",
-            (f"слит (с правкой текста) в #{new_id}", oid))
+            (new_id, f"слит (с правкой текста) в #{new_id}", oid))
     conn.commit()
     return new_id
 

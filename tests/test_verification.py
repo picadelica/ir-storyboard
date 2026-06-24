@@ -199,7 +199,11 @@ def test_merge_with_curated_text_creates_new_fact(conn):
     assert new["state"] == "active"
     assert "под лид Bitfury" in new["text"]
     for oid in (a, b, c):
-        assert matrix.get_fact(conn, oid)["state"] == "rejected"
+        row = matrix.get_fact(conn, oid)
+        assert row["state"] == "rejected"
+        # hidden (merged), NOT falsely "refuted"; links back to the joint fact
+        assert row["merged_into"] == new_id
+        assert row["verification"] != "refuted"
     # the merged fact carries corroboration from the originals
     assert matrix.fact_corroboration(conn, new_id) >= 2
 
@@ -287,7 +291,25 @@ def test_attribute_fact_creates_named_fact(conn):
     new = matrix.get_fact(conn, new_id)
     assert new["state"] == "active" and new["speaker_entity_id"] == eid
     assert new["text"] == "Давид Вайсман считает X."
-    assert matrix.get_fact(conn, f)["state"] == "rejected"
+    old = matrix.get_fact(conn, f)
+    assert old["state"] == "rejected" and old["merged_into"] == new_id
+    assert old["verification"] != "refuted"   # hidden, not falsely refuted
+
+
+def test_backfill_merged_into(conn):
+    """db._backfill_merged_into recovers merged_into + clears false 'refuted' from
+    pre-column merges (note like 'слит … в #N')."""
+    a = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="x", flag="green")
+    b = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="y", flag="green")
+    # simulate the OLD buggy state: refuted + note, no merged_into
+    conn.execute("UPDATE facts SET state='rejected', verification='refuted', "
+                 "verification_note=?, merged_into=NULL WHERE id=?",
+                 (f"дубль — слит в #{a}", b))
+    conn.commit()
+    from ir_storyboard import db as _db
+    _db._backfill_merged_into(conn)
+    row = matrix.get_fact(conn, b)
+    assert row["merged_into"] == a and row["verification"] != "refuted"
 
 
 def test_dedup_per_subsection_available_flags(conn, monkeypatch):
