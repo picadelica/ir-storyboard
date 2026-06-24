@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { modeOf } from "../lib/cellColor";
 import type { CellMode } from "../lib/cellColor";
@@ -79,10 +79,15 @@ function layerCoverage(cells: (CellSummary | undefined)[]): number {
 }
 
 export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCell, present }: Props) {
+  const qc = useQueryClient();
   const layers = useQuery<Layer[]>({ queryKey: ["layers"], queryFn: api.layers });
   const cells = useQuery<CellSummary[]>({
     queryKey: ["matrix", clientId],
     queryFn: () => api.matrixView(clientId),
+  });
+  const genTitles = useMutation({
+    mutationFn: () => api.generateTitles(clientId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["facts", clientId] }); },
   });
 
   if (layers.isLoading || cells.isLoading) {
@@ -100,6 +105,18 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
       <div className="flex items-end justify-between mb-4">
         {present ? <span /> : <h2 className="text-lg font-semibold tracking-tight">Narrative matrix</h2>}
         <div className="flex items-center gap-3">
+          {!present && (
+            <button
+              onClick={() => genTitles.mutate()}
+              disabled={genTitles.isPending}
+              title="Сгенерировать короткие заголовки (2-3 слова) для карточек без заголовка"
+              className="text-xs text-ink-mute border border-ink-line rounded px-2.5 py-1 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {genTitles.isPending ? "Генерирую заголовки…"
+                : genTitles.isSuccess ? `Готово: ${genTitles.data?.titled ?? 0} заголовков`
+                : "Заголовки карточек"}
+            </button>
+          )}
           {!present && totalMust > 0 && (
             <button
               onClick={() => api.downloadMustHaveFacts(clientId, clientId).catch(() => {})}

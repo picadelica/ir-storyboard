@@ -276,7 +276,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                    subsection_id: str, *, include_rejected: bool = False) -> List[sqlite3.Row]:
     state_clause = "" if include_rejected else " AND f.state != 'rejected'"
     return list(conn.execute(
-        """SELECT f.id, f.cell_id, f.text, f.flag, f.source_id, f.confidence,
+        """SELECT f.id, f.cell_id, f.text, f.title, f.flag, f.source_id, f.confidence,
                   f.captured_at, f.valid_until, f.evidence_snippet,
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
@@ -321,7 +321,7 @@ def must_have_facts(conn: sqlite3.Connection, client_id: str) -> List[dict]:
 
 def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
     return conn.execute(
-        """SELECT f.id, f.cell_id, f.text, f.flag, f.source_id, f.confidence,
+        """SELECT f.id, f.cell_id, f.text, f.title, f.flag, f.source_id, f.confidence,
                   f.captured_at, f.valid_until, f.evidence_snippet,
                   f.ingest_audit_id, f.rationale, f.created_by,
                   f.snippet_start_sec,
@@ -359,6 +359,12 @@ def set_fact_verification(conn: sqlite3.Connection, fact_id: int, *,
             WHERE id=?""",
         (verification, note or "", entity or "", _json.dumps(sources or []), fact_id),
     )
+    conn.commit()
+
+
+def set_fact_title(conn: sqlite3.Connection, fact_id: int, title: str) -> None:
+    """Set the short 2-3 word card title (analyst-editable)."""
+    conn.execute("UPDATE facts SET title=? WHERE id=?", ((title or "").strip()[:80], fact_id))
     conn.commit()
 
 

@@ -347,6 +347,51 @@ _GENERIC_SPEAKER_RE = re.compile(
     re.IGNORECASE)
 
 
+_TITLE_SYSTEM = """Ты — редактор IR-карточек. Для каждого факта придумай ЗАГОЛОВОК из 2–3 слов на русском — короткую суть факта (как заголовок карточки). Без точки в конце, с заглавной буквы.
+
+Верни СТРОГО валидный JSON (без markdown): {"titles": [{"id": <id>, "title": "<2-3 слова>"}]}"""
+
+
+def generate_fact_titles(conn, client_id: str, *, model: Optional[str] = None,
+                         overwrite: bool = False) -> Dict[str, Any]:
+    """LLM-generate a short 2-3 word title for each active fact (analyst-editable
+    afterwards). By default only fills empty titles (manual edits are preserved).
+    Batched like dedup so it scales. Stub-safe. Returns {available, titled}."""
+    where = "" if overwrite else " AND (f.title IS NULL OR f.title='')"
+    rows = conn.execute(
+        f"""SELECT f.id AS id, f.text AS text FROM facts f
+             JOIN cells c ON c.id = f.cell_id
+             WHERE c.client_id=? AND f.state='active'{where}
+             ORDER BY f.id""", (client_id,)).fetchall()
+    facts = [dict(r) for r in rows]
+    if not facts:
+        return {"available": True, "titled": 0}
+    by_id = {f["id"] for f in facts}
+    mdl = model or _audit_model()
+    titled = 0
+    ok = 0
+    calls = 0
+    for batch in _chunked(facts, _DEDUP_BATCH):
+        calls += 1
+        lines = [f"[{f['id']}] {(f['text'] or '')[:160]}" for f in batch]
+        data = _generate_json(_TITLE_SYSTEM, "Факты:\n" + "\n".join(lines),
+                              max_tokens=2000, model=mdl)
+        if data is None:
+            continue
+        ok += 1
+        from . import matrix
+        for it in data.get("titles", []) or []:
+            try:
+                fid = int(it.get("id"))
+            except (TypeError, ValueError):
+                continue
+            t = (it.get("title") or "").strip()
+            if fid in by_id and t:
+                matrix.set_fact_title(conn, fid, t)
+                titled += 1
+    return {"available": calls == 0 or ok > 0, "titled": titled}
+
+
 def _founder_candidates(conn, client_id: str) -> List[dict]:
     """Founder names for attribution, from BOTH dedicated kind='founder' entities AND
     the company card's "founder" profile fact (e.g. 'Dave Waiser (ex-Gett CEO)').

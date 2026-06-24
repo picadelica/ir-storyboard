@@ -166,6 +166,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # (purple — flagged important). must_have stays the boolean "is must-have at all".
     _add_column_if_missing(conn, "facts", "must_have_by", "TEXT NOT NULL DEFAULT ''")
     conn.execute("UPDATE facts SET must_have_by='client' WHERE must_have=1 AND must_have_by=''")
+    # short 2-3 word card title (LLM-generated, analyst-editable). '' = no title yet.
+    _add_column_if_missing(conn, "facts", "title", "TEXT NOT NULL DEFAULT ''")
     # merged-away facts: this fact was folded into / renamed as fact #merged_into.
     # state stays 'rejected' (excluded from briefs/cycles/counts) but it's HIDDEN,
     # not 'refuted' — the joint card links back to it. NULL = a normal active/rejected

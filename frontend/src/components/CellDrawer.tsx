@@ -28,6 +28,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
   const [draftText, setDraftText] = useState("");
   const [draftFlag, setDraftFlag] = useState<Flag>("green");
   const [draftRationale, setDraftRationale] = useState("");
+  const [draftTitle, setDraftTitle] = useState("");
 
   // Audio source player: one open panel at a time, keyed by fact id.
   const [audioPanel, setAudioPanel] = useState<{ factId: number; sha: string } | null>(null);
@@ -111,6 +112,10 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
     mutationFn: ({ id, entityId }: { id: number; entityId: number | null }) => api.setFactSpeaker(id, entityId),
     onSuccess: invalidate,
   });
+  const setTitle = useMutation({
+    mutationFn: ({ id, title }: { id: number; title: string }) => api.setFactTitle(id, title),
+    onSuccess: invalidate,
+  });
   const setMustHave = useMutation({
     mutationFn: ({ id, source }: { id: number; source: "" | "client" | "expert" }) => api.setMustHave(id, source),
     onSuccess: invalidate,
@@ -176,6 +181,9 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                 <div key={f.id} id={`fact-${f.id}`} className={`rounded-lg border p-3 transition-shadow ${flagBg(f.flag)} ${flagBorder(f.flag)}`}>
                   {editingId === f.id ? (
                     <div className="space-y-2">
+                      <input value={draftTitle} onChange={e => setDraftTitle(e.target.value)}
+                        placeholder="Заголовок (2-3 слова)"
+                        className="w-full text-sm font-semibold border border-ink-line rounded px-2 py-1.5" />
                       <textarea value={draftText} onChange={e => setDraftText(e.target.value)}
                         className="w-full text-sm border border-ink-line rounded px-2 py-1.5 min-h-[5rem]" />
                       <textarea value={draftRationale} onChange={e => setDraftRationale(e.target.value)}
@@ -184,7 +192,10 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                         className={`w-full text-xs border rounded px-2 py-1.5 min-h-[3rem] resize-none ${draftFlag === "red" && !draftRationale.trim() ? "border-red-400" : "border-ink-line"}`} />
                       <div className="flex items-center gap-2">
                         <FlagPicker value={draftFlag} onChange={setDraftFlag} />
-                        <button onClick={() => patchFact.mutate({ id: f.id, text: draftText, flag: draftFlag, rationale: draftRationale })}
+                        <button onClick={() => {
+                            patchFact.mutate({ id: f.id, text: draftText, flag: draftFlag, rationale: draftRationale });
+                            if ((draftTitle ?? "") !== (f.title ?? "")) setTitle.mutate({ id: f.id, title: draftTitle });
+                          }}
                           disabled={draftFlag === "red" && !draftRationale.trim()}
                           className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">Save</button>
                         <button onClick={() => setEditingId(null)} className="text-xs px-3 py-1 hover:bg-slate-100 rounded text-ink-mute">Cancel</button>
@@ -209,7 +220,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                           <InfoBtn id={f.id} />
                         </div>
                         <div className="flex items-center gap-2 text-ink-mute">
-                          <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); }}
+                          <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); }}
                             aria-label="Редактировать" className="hover:text-ink">
                             <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M4 13.5V16h2.5l7.4-7.4-2.5-2.5L4 13.5zM13.1 4.9l2.5 2.5 1-1a1.4 1.4 0 0 0-2-2l-1.5.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>
                           </button>
@@ -220,8 +231,9 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                         </div>
                       </div>
 
-                      {/* fact text — full width, from the second row */}
-                      <div className="text-sm leading-snug whitespace-pre-wrap text-ink">{f.text}</div>
+                      {/* title (bold, slightly larger) + fact text (justified to fill) */}
+                      {f.title && <div className="text-[15px] font-semibold text-ink leading-tight mb-0.5">{f.title}</div>}
+                      <div className="text-sm leading-snug whitespace-pre-wrap text-ink" style={{ textAlign: "justify" }}>{f.text}</div>
 
                       {/* speaker — kept in the text body */}
                       {founders.length > 0 && (
@@ -266,19 +278,22 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                               ))}
                             </div>
                           )}
-                          {f.evidence_snippet && (
-                            <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{f.evidence_snippet}</blockquote>
-                          )}
-                          <SourceLine client_id={clientId} channel={f.source_channel} source_url={f.source_url}
-                            source_title={f.source_title} source_archive_url={f.source_archive_url}
-                            ingest_audit_id={f.ingest_audit_id} ingest_kind={f.ingest_kind} audio_sha={f.audio_sha}
-                            timestamp_sec={f.snippet_start_sec ?? undefined} captured_at={f.captured_at}
-                            onOpenAudio={(sha, sec) => openAudio(f.id, sha, sec)} />
-                          {audioPanel?.factId === f.id && (
-                            <div className="mt-2 border-t border-ink-line/60 pt-2">
-                              <AudioSourcePanel ref={audioRef} clientId={clientId} sha={audioPanel.sha} />
-                            </div>
-                          )}
+                          {/* собранная карточка несёт ТОЛЬКО ссылки на исходные — цитата/источник живут в исходных */}
+                          {kids.length === 0 && (<>
+                            {f.evidence_snippet && (
+                              <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{f.evidence_snippet}</blockquote>
+                            )}
+                            <SourceLine client_id={clientId} channel={f.source_channel} source_url={f.source_url}
+                              source_title={f.source_title} source_archive_url={f.source_archive_url}
+                              ingest_audit_id={f.ingest_audit_id} ingest_kind={f.ingest_kind} audio_sha={f.audio_sha}
+                              timestamp_sec={f.snippet_start_sec ?? undefined} captured_at={f.captured_at}
+                              onOpenAudio={(sha, sec) => openAudio(f.id, sha, sec)} />
+                            {audioPanel?.factId === f.id && (
+                              <div className="mt-2 border-t border-ink-line/60 pt-2">
+                                <AudioSourcePanel ref={audioRef} clientId={clientId} sha={audioPanel.sha} />
+                              </div>
+                            )}
+                          </>)}
                         </div>
                       )}
                     </>
@@ -303,7 +318,6 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                           <span className="px-1.5 py-0.5 rounded bg-slate-200/70">
                             исходная{h.merged_into ? ` · в #${h.merged_into}` : ""}
                           </span>
-                          <InfoBtn id={h.id} />
                         </span>
                         <span className="flex items-center gap-2 shrink-0">
                           {h.merged_into && (
@@ -312,19 +326,19 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                           <button onClick={() => restoreFact.mutate(h.id)} className="text-[11px] text-ink-mute hover:text-ink">вернуть</button>
                         </span>
                       </div>
-                      <div className="text-xs leading-snug whitespace-pre-wrap text-ink-mute">{h.text}</div>
-                      {infoIds.has(h.id) && (
-                        <div className="mt-1.5 pt-1.5 border-t border-ink-line/60">
-                          {h.evidence_snippet && (
-                            <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{h.evidence_snippet}</blockquote>
-                          )}
-                          <SourceLine client_id={clientId} channel={h.source_channel} source_url={h.source_url}
-                            source_title={h.source_title} source_archive_url={h.source_archive_url}
-                            ingest_audit_id={h.ingest_audit_id} ingest_kind={h.ingest_kind} audio_sha={h.audio_sha}
-                            timestamp_sec={h.snippet_start_sec ?? undefined} captured_at={h.captured_at}
-                            onOpenAudio={(sha, sec) => openAudio(h.id, sha, sec)} />
-                        </div>
-                      )}
+                      {h.title && <div className="text-xs font-semibold text-ink-mute leading-tight">{h.title}</div>}
+                      <div className="text-xs leading-snug whitespace-pre-wrap text-ink-mute" style={{ textAlign: "justify" }}>{h.text}</div>
+                      {/* originals keep their own provenance — always shown here */}
+                      <div className="mt-1.5 pt-1.5 border-t border-ink-line/60">
+                        {h.evidence_snippet && (
+                          <blockquote className="text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug mb-1">{h.evidence_snippet}</blockquote>
+                        )}
+                        <SourceLine client_id={clientId} channel={h.source_channel} source_url={h.source_url}
+                          source_title={h.source_title} source_archive_url={h.source_archive_url}
+                          ingest_audit_id={h.ingest_audit_id} ingest_kind={h.ingest_kind} audio_sha={h.audio_sha}
+                          timestamp_sec={h.snippet_start_sec ?? undefined} captured_at={h.captured_at}
+                          onOpenAudio={(sha, sec) => openAudio(h.id, sha, sec)} />
+                      </div>
                     </div>
                   ))}
                 </div>

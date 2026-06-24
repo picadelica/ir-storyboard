@@ -275,6 +275,7 @@ class FactOut(BaseModel):
     state: str = "active"
     speaker_entity_id: Optional[int] = None   # which founder this fact is from
     speaker_name: Optional[str] = None
+    title: str = ""           # short 2-3 word card title (LLM/analyst)
     must_have: bool = False   # client-provided, must-have → rendered blue
     must_have_by: str = ""    # '' | 'client' (blue) | 'expert' (purple)
     merged_into: Optional[int] = None   # set → this fact is hidden, folded into #merged_into
@@ -436,6 +437,7 @@ def _row_to_fact(row) -> FactOut:
         state=(row["state"] if "state" in keys else "active") or "active",
         speaker_entity_id=row["speaker_entity_id"] if "speaker_entity_id" in keys else None,
         speaker_name=row["speaker_name"] if "speaker_name" in keys else None,
+        title=(row["title"] if "title" in keys and row["title"] else ""),
         must_have=bool(row["must_have"]) if "must_have" in keys and row["must_have"] else False,
         must_have_by=(row["must_have_by"] if "must_have_by" in keys and row["must_have_by"] else ""),
         merged_into=row["merged_into"] if "merged_into" in keys and row["merged_into"] else None,
@@ -1118,6 +1120,19 @@ def set_must_have(fact_id: int, body: MustHaveIn, conn=Depends(get_conn)):
     if source not in ("", "client", "expert"):
         raise HTTPException(400, "source must be '', 'client' or 'expert'")
     matrix.set_fact_must_have(conn, fact_id, source)
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
+class TitleIn(BaseModel):
+    title: str
+
+
+@app.post("/api/facts/{fact_id}/title", response_model=FactOut)
+def set_title(fact_id: int, body: TitleIn, conn=Depends(get_conn)):
+    """Set the short 2-3 word card title (analyst edit)."""
+    if matrix.get_fact(conn, fact_id) is None:
+        raise HTTPException(404, "fact not found")
+    matrix.set_fact_title(conn, fact_id, body.title)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -2553,6 +2568,16 @@ def start_find_duplicates(client_id: str):
 @app.post("/api/clients/{client_id}/find-unattributed/start", response_model=LLMJobOut)
 def start_find_unattributed(client_id: str):
     return LLMJobOut(job_id=_start_llm_job(_compute_unattributed, client_id), status="processing")
+
+
+def _compute_titles(conn, client_id: str) -> dict:
+    return verification.generate_fact_titles(conn, client_id)
+
+
+@app.post("/api/clients/{client_id}/generate-titles/start", response_model=LLMJobOut)
+def start_generate_titles(client_id: str):
+    """Batch-generate 2-3 word titles for untitled active facts (async job)."""
+    return LLMJobOut(job_id=_start_llm_job(_compute_titles, client_id), status="processing")
 
 
 @app.post("/api/clients/{client_id}/interview-guide/start", response_model=LLMJobOut)

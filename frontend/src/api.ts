@@ -385,6 +385,10 @@ export const api = {
   // source: '' (none) | 'client' (blue, mandatory) | 'expert' (purple, important)
   setMustHave: (factId: number, source: "" | "client" | "expert"): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/must-have`, { method: "POST", body: JSON.stringify({ source }) }),
+  setFactTitle: (factId: number, title: string): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/title`, { method: "POST", body: JSON.stringify({ title }) }),
+  generateTitles: (clientId: string): Promise<{ available: boolean; titled: number }> =>
+    runJob<{ available: boolean; titled: number }>(`/clients/${clientId}/generate-titles/start`),
   // Скачать must-have (синие) факты нумерованным списком (для согласования с заказчиком)
   downloadMustHaveFacts: async (clientId: string, clientName: string): Promise<void> => {
     const r = await fetch(`${API_BASE}/clients/${clientId}/facts/must-have/export`);
