@@ -513,6 +513,43 @@ export interface AuditResult {
   applied: number;
 }
 
+// ── Deliver: matrix export (тексты без ссылок) ────────────────────────────────
+
+export interface ExportCard {
+  matrix_no: string;          // номер ячейки в матрице (напр. "1.1")
+  subsection_name: string;
+  layer_id: number;
+  layer_name: string;
+  fact_id: number;
+  title: string;
+  text: string;
+  card_color: Flag;           // цвет карточки (флаг)
+  star: "blue" | "purple" | null;  // цвет звезды (must-have)
+}
+
+export interface MatrixExport {
+  export: {
+    client_id: string;
+    client_name: string;
+    sector: string;
+    one_liner: string;
+    card_count: number;
+    description: string;
+    generated_at?: string;
+    legend: {
+      card_color: Record<string, string>;
+      star_color: Record<string, string>;
+    };
+  };
+  company_card: {
+    name: string;
+    role: string;
+    note: string;
+    facts: { section: string; key: string; value: string }[];
+  } | null;
+  cards: ExportCard[];
+}
+
 export interface Track {
   id: number;
   plan_id: number;

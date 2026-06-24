@@ -23,6 +23,7 @@ import IngestClientFacts from "./components/IngestClientFacts";
 import MethodologyView from "./components/MethodologyView";
 import PlanView from "./components/PlanView";
 import BriefComposer from "./components/BriefComposer";
+import ExportView from "./components/ExportView";
 
 export default function App() {
   return (
@@ -143,6 +144,9 @@ function ClientPage() {
           {activeTab === "brief" && (
             <BriefComposer clientId={clientId!} layers={layers.data} />
           )}
+          {activeTab === "export" && (
+            <ExportView clientId={clientId!} />
+          )}
         </div>
 
         {present && <PresentFooter clientId={clientId!} />}
@@ -226,6 +230,7 @@ const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
   {
     id: "deliver", label: "Deliver", tabs: [
       { id: "brief", label: "Brief" },
+      { id: "export", label: "Выгрузка" },
       { id: "artifacts", label: "Artifacts" },
       { id: "plan", label: "Plan" },
     ],

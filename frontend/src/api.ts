@@ -8,7 +8,7 @@ import type {
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
-  SeedImportResult, SynthesizeResult, Track, WorkItem,
+  SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport,
   YouTubeCommitOut, YouTubeHistoryRow, YouTubeJobOut, YouTubePreviewResult,
 } from "./types";
 
@@ -397,6 +397,20 @@ export const api = {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `must_have_${clientName || clientId}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  },
+  // Deliver: выгрузка содержания матрицы (JSON, тексты без ссылок)
+  matrixExport: (clientId: string): Promise<MatrixExport> =>
+    call<MatrixExport>(`/clients/${clientId}/matrix/export.json`),
+  downloadMatrixExport: async (clientId: string, clientName: string): Promise<void> => {
+    const data = await call<MatrixExport>(`/clients/${clientId}/matrix/export.json`);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `matrix_${clientName || clientId}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();

@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ir_storyboard import backup, brief, db, matrix, outputs, seed, verification, interview, company
+from ir_storyboard import backup, brief, db, deliver, matrix, outputs, seed, verification, interview, company
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
 from ir_storyboard.llm import web_search, classify_facts_batch
@@ -1157,6 +1157,18 @@ def export_must_have_facts(client_id: str, conn=Depends(get_conn)):
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@app.get("/api/clients/{client_id}/matrix/export.json")
+def export_matrix_json(client_id: str, conn=Depends(get_conn)):
+    """Deliver-выгрузка содержания матрицы как JSON: описание + карточка компании +
+    состав карточек (номер в матрице, заголовок, текст, цвет звезды, цвет карточки).
+    Без ссылок на источники — только тексты."""
+    _check_client(client_id, conn)
+    data = deliver.build_matrix_export(conn, client_id)
+    from datetime import datetime, timezone
+    data["export"]["generated_at"] = datetime.now(timezone.utc).isoformat()
+    return data
 
 
 @app.post("/api/facts/{fact_id}/reject", response_model=FactOut)
