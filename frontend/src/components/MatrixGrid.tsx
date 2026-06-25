@@ -193,7 +193,8 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
                           <span className="tabular-nums">
                             {total} fact{total === 1 ? "" : "s"}
                             {cell.n_red ? <span className="text-flag-red"> · {cell.n_red} concern</span> : null}
-                            {cell.n_must ? <span className="text-flag-blue"> · ★{cell.n_must}</span> : null}
+                            {cell.n_must_client ? <span className="text-flag-blue" title="must-have от клиента"> · ★{cell.n_must_client}</span> : null}
+                            {cell.n_must_expert ? <span className="text-purple-600" title="важное от эксперта"> · ★{cell.n_must_expert}</span> : null}
                           </span>
                         )}
                         <span className="flex items-center gap-1.5">
@@ -219,14 +220,14 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
 
 function Legend() {
   const items: { mode: CellMode; label: string }[] = [
-    { mode: "green", label: "covered" },
-    { mode: "red", label: "concern" },
-    { mode: "mixed", label: "mixed" },
-    { mode: "grey", label: "gap" },
-    { mode: "empty", label: "untouched" },
+    { mode: "green", label: "покрыто" },
+    { mode: "red", label: "риск" },
+    { mode: "mixed", label: "смешанно" },
+    { mode: "grey", label: "пробел" },
+    { mode: "empty", label: "пусто" },
   ];
   return (
-    <div className="flex gap-3 text-[11px] text-ink-mute">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-mute">
       {items.map(({ mode, label }) => (
         <div key={mode} className="flex items-center gap-1.5">
           {mode === "empty" ? (
@@ -237,6 +238,9 @@ function Legend() {
           <span>{label}</span>
         </div>
       ))}
+      <span className="w-px h-3 bg-ink-line mx-0.5" />
+      <div className="flex items-center gap-1"><span className="text-flag-blue leading-none">★</span> must-have клиента</div>
+      <div className="flex items-center gap-1"><span className="text-purple-600 leading-none">★</span> важное эксперта</div>
     </div>
   );
 }

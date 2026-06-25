@@ -248,6 +248,8 @@ class CellSummaryOut(BaseModel):
     n_red: int
     n_grey: int
     n_must: int = 0
+    n_must_client: int = 0   # синяя звезда (must-have от клиента / без пометки)
+    n_must_expert: int = 0   # фиолетовая звезда (важное от эксперта)
     last_update: Optional[str] = None
     channels: List[str] = []
 

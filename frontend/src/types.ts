@@ -346,6 +346,8 @@ export interface CellSummary {
   n_red: number;
   n_grey: number;
   n_must?: number;
+  n_must_client?: number;   // синяя звезда (клиент / без пометки)
+  n_must_expert?: number;   // фиолетовая звезда (эксперт)
   last_update?: string | null;
   channels?: Channel[];
 }

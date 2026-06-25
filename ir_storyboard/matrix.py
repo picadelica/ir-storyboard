@@ -743,6 +743,8 @@ def cell_summary(conn: sqlite3.Connection, client_id: str) -> List[Dict[str, Any
                SUM(CASE WHEN f.flag='red'   THEN 1 ELSE 0 END) AS n_red,
                SUM(CASE WHEN f.flag='grey'  THEN 1 ELSE 0 END) AS n_grey,
                SUM(CASE WHEN f.must_have=1  THEN 1 ELSE 0 END) AS n_must,
+               SUM(CASE WHEN f.must_have=1 AND f.must_have_by='expert' THEN 1 ELSE 0 END) AS n_must_expert,
+               SUM(CASE WHEN f.must_have=1 AND f.must_have_by<>'expert' THEN 1 ELSE 0 END) AS n_must_client,
                MAX(f.captured_at) AS last_update,
                GROUP_CONCAT(DISTINCT src.channel) AS channels
         FROM subsections s
