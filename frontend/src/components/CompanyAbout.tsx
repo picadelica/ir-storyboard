@@ -20,27 +20,70 @@ const SECTIONS: { id: string; label: string; hint: string; keyPh: string; valPh:
   { id: "metrics", label: "Метрики", hint: "ключевые числа: ARR, пользователи, рост (с датой)", keyPh: "напр. ARR", valPh: "$2M (Q1 2026)" },
 ];
 
-// Технические ключи из авто-наполнения → человеческие подписи (на случай старых данных).
-const KEY_LABELS: Record<string, string> = {
-  product_category: "Категория", category: "Категория", competitors: "Конкуренты",
-  hq: "Штаб-квартира", headquarters: "Штаб-квартира", founded: "Основана",
-  founded_at: "Основана", founding_year: "Основана", website: "Сайт", site: "Сайт",
-  valuation: "Оценка", arr: "ARR", mrr: "MRR", revenue: "Выручка", employees: "Команда",
-  team_size: "Команда", headcount: "Команда", stage: "Стадия", ceo: "CEO", cto: "CTO",
-  round: "Раунд", investors: "Инвесторы", lead_investor: "Лид-инвестор", market: "Рынок",
-  users: "Пользователи", customers: "Клиенты", growth: "Рост", product: "Продукт",
+// Технические ключи из авто-наполнения → человеческие подписи. Ключи приходят
+// шумные: founded_date_fintech, funding_round_a_crunchbase. Срезаем шумовые/
+// источниковые суффиксы, мапим базу; неизвестный технический ключ скрываем
+// (значение само себя описывает: «Founded 2022», «Miami, Florida»).
+const KEY_BASE: Record<string, string> = {
+  company_name: "Название", name: "Название", legal_name: "Юр. название",
+  founded_date: "Основана", founded: "Основана", founding_year: "Основана", founding_date: "Основана",
+  headquarters: "Штаб-квартира", hq: "Штаб-квартира", location: "Локация",
+  business_description: "Описание", description: "Описание", overview: "Описание",
+  founder: "Фаундер", founders: "Фаундеры", ceo: "CEO", cto: "CTO",
+  website: "Сайт", site: "Сайт", url: "Сайт", domain: "Домен",
+  linkedin: "LinkedIn", twitter: "X", x: "X", github: "GitHub", crunchbase: "Crunchbase",
+  funding_round: "Раунд", funding: "Финансирование", round: "Раунд",
+  valuation: "Оценка", investors: "Инвесторы", lead_investor: "Лид-инвестор",
+  product_category: "Категория", category: "Категория", product: "Продукт",
+  target_market: "Рынок", market: "Рынок", competitors: "Конкуренты",
+  key_feature: "Функция", feature: "Функция",
+  arr: "ARR", mrr: "MRR", revenue: "Выручка", users: "Пользователи", customers: "Клиенты",
+  employees: "Команда", team_size: "Команда", headcount: "Команда", stage: "Стадия", growth: "Рост",
 };
-function humanizeKey(k: string): string {
-  const key = (k || "").trim();
-  if (!key) return "";
-  const low = key.toLowerCase();
-  if (KEY_LABELS[low]) return KEY_LABELS[low];
-  // snake_case / технический вид → «Название словами»
-  if (/^[a-z0-9_]+$/.test(low)) {
-    const words = low.split("_").filter(Boolean);
-    return words.map((w, i) => i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
+// слова-«шум» в хвосте ключа: сектор/источник, не несут смысла как ярлык
+const KEY_NOISE = new Set(["fintech", "crunchbase", "pitchbook", "yahoo", "calcalistech",
+  "startuphub", "linkedin", "source", "src", "official", "inc", "co", "data", "info"]);
+
+// Фаундеры, упомянутые ФАКТАМИ карточки (key=founder / «… founder/CEO …») —
+// чтобы предложить добавить их в блок «Фаундеры» в один клик.
+type FounderHint = { name: string; role: string; source_url: string };
+function founderCandidates(facts: EntityFact[]): FounderHint[] {
+  const out: FounderHint[] = [];
+  const seen = new Set<string>();
+  for (const f of facts) {
+    const k = (f.key || "").toLowerCase();
+    const v = (f.value || "").trim();
+    const keyHit = /founder|cofounder|co_founder|ceo/.test(k);
+    const valHit = /\b(co-?founder|founder|ceo|основател)/i.test(v);
+    if (!keyHit && !valHit) continue;
+    // «Dave Waiser (ex-Gett CEO)» → name=«Dave Waiser», role=«ex-Gett CEO»
+    let body = v.replace(/^(founded by|founder[:\s]+|co-?founder[:\s]+|ceo[:\s]+)/i, "").trim();
+    const m = body.match(/^([^(,]+?)\s*(?:[(,]\s*([^)]*?)\)?\s*)?$/);
+    const name = (m ? m[1] : body).trim();
+    const role = (m && m[2] ? m[2] : "").trim();
+    if (!name || name.length > 60 || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push({ name, role, source_url: f.source_url || "" });
   }
-  return key;
+  return out;
+}
+
+function humanizeKey(k: string): string {
+  const raw = (k || "").trim();
+  if (!raw) return "";
+  // человеческий ключ (пробелы / заглавные / кириллица) — оставляем как есть
+  if (!/^[a-z0-9_]+$/.test(raw.toLowerCase())) return raw;
+  let toks = raw.toLowerCase().split("_").filter(Boolean);
+  while (toks.length > 1 && KEY_NOISE.has(toks[toks.length - 1])) toks.pop();
+  // ищем известную базу, сокращая хвост: funding_round_a → «Раунд» + «A»
+  for (let n = toks.length; n >= 1; n--) {
+    const base = toks.slice(0, n).join("_");
+    if (KEY_BASE[base]) {
+      const rest = toks.slice(n).map(t => (t.length <= 2 ? t.toUpperCase() : t));
+      return rest.length ? `${KEY_BASE[base]} ${rest.join(" ")}` : KEY_BASE[base];
+    }
+  }
+  return "";   // неизвестный технический ключ → скрываем, показываем только значение
 }
 
 export default function CompanyAbout({ clientId }: Props) {
@@ -74,7 +117,10 @@ export default function CompanyAbout({ clientId }: Props) {
   }
 
   const bySection = (sid: string) => (company.facts || []).filter(f => (f.section || "") === sid);
-  const ungrouped = (company.facts || []).filter(f => !SECTIONS.some(s => s.id === (f.section || "")));
+  // ссылки секции «sites» переезжают в шапку как официальные ссылки
+  const siteFacts = (company.facts || []).filter(f => (f.section || "") === "sites");
+  const ungrouped = (company.facts || []).filter(f =>
+    (f.section || "") !== "sites" && !SECTIONS.some(s => s.id === (f.section || "")));
 
   return (
     <div className="p-5 max-w-5xl space-y-4">
@@ -82,8 +128,9 @@ export default function CompanyAbout({ clientId }: Props) {
         <p className="text-xs text-ink-mute">Голые бизнес-факты со ссылками. Без нарратива.</p>
         <Autofill clientId={clientId} onCommitted={inval} />
       </div>
-      <CompanyHeader company={company} onChanged={inval} />
-      <FoundersBlock clientId={clientId} founders={(entities.data ?? []).filter(e => e.kind === "founder")} onChanged={inval} />
+      <CompanyHeader company={company} siteFacts={siteFacts} onChanged={inval} />
+      <FoundersBlock clientId={clientId} founders={(entities.data ?? []).filter(e => e.kind === "founder")}
+        candidates={founderCandidates(company.facts || [])} onChanged={inval} />
       {/* секции в две колонки — используем ширину экрана */}
       <div className="grid md:grid-cols-2 gap-4 items-start">
         {SECTIONS.map(s => (
@@ -100,7 +147,7 @@ export default function CompanyAbout({ clientId }: Props) {
 
 // Founders list — kind='founder' entities of the company. They're who facts get
 // attributed to (the "кто говорит" picker on each fact in the cell drawer).
-function FoundersBlock({ clientId, founders, onChanged }: { clientId: string; founders: Entity[]; onChanged: () => void }) {
+function FoundersBlock({ clientId, founders, candidates = [], onChanged }: { clientId: string; founders: Entity[]; candidates?: FounderHint[]; onChanged: () => void }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
@@ -108,8 +155,14 @@ function FoundersBlock({ clientId, founders, onChanged }: { clientId: string; fo
     mutationFn: () => api.createEntity(clientId, { kind: "founder", name: name.trim(), role: role.trim(), confirmed: true }),
     onSuccess: () => { setAdding(false); setName(""); setRole(""); onChanged(); },
   });
+  const addHint = useMutation({
+    mutationFn: (c: FounderHint) => api.createEntity(clientId, { kind: "founder", name: c.name, role: c.role, confirmed: true }),
+    onSuccess: onChanged,
+  });
   const remove = useMutation({ mutationFn: (id: number) => api.deleteEntity(id), onSuccess: onChanged });
   const inp = "text-xs border border-ink-line rounded px-2 py-1";
+  const have = new Set(founders.map(f => (f.name || "").toLowerCase().trim()));
+  const hints = candidates.filter(c => !have.has(c.name.toLowerCase().trim()));
 
   return (
     <section className="bg-white rounded-lg border border-ink-line p-4">
@@ -120,8 +173,20 @@ function FoundersBlock({ clientId, founders, onChanged }: { clientId: string; fo
         </div>
         <FounderDiscovery clientId={clientId} existing={founders} onChanged={onChanged} />
       </div>
+      {hints.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-ink-mute">упомянуты в фактах:</span>
+          {hints.map((c, i) => (
+            <button key={i} onClick={() => addHint.mutate(c)} disabled={addHint.isPending}
+              title={c.role ? `${c.name} · ${c.role} — добавить фаундером` : `${c.name} — добавить фаундером`}
+              className="text-[11px] px-2 py-0.5 rounded border border-flag-blue/40 text-flag-blue hover:bg-flag-blue/5">
+              + {c.name}{c.role && <span className="text-ink-mute"> · {c.role}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       {founders.length === 0 ? (
-        <div className="text-xs text-ink-mute italic py-1">Пусто. Добавь вручную или нажми «Найти фаундеров» — подберём из веба профили на проверку.</div>
+        <div className="text-xs text-ink-mute italic py-1">Пусто. Добавь вручную, кликни подсказку выше или нажми «Найти фаундеров».</div>
       ) : (
         <ul className="space-y-1 py-1">
           {founders.map(f => (
@@ -395,7 +460,7 @@ function Autofill({ clientId, onCommitted }: { clientId: string; onCommitted: ()
   );
 }
 
-function CompanyHeader({ company: e, onChanged }: { company: Entity; onChanged: () => void }) {
+function CompanyHeader({ company: e, siteFacts = [], onChanged }: { company: Entity; siteFacts?: EntityFact[]; onChanged: () => void }) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(e.name);
@@ -405,6 +470,15 @@ function CompanyHeader({ company: e, onChanged }: { company: Entity; onChanged: 
     mutationFn: (links: Record<string, string>) => api.patchEntity(e.id, { links }),
     onSuccess: () => { setLinkOpen(false); onChanged(); },
   });
+  const delFact = useMutation({ mutationFn: (fid: number) => api.deleteEntityFact(fid), onSuccess: onChanged });
+  // href из факта-ссылки: значение-URL, иначе source_url, иначе домен → https://
+  const factHref = (f: EntityFact) => {
+    const v = (f.value || "").trim();
+    if (/^https?:\/\//i.test(v)) return v;
+    if (f.source_url) return f.source_url;
+    return v ? `https://${v.replace(/^\/+/, "")}` : "#";
+  };
+  const hasAnyLink = Object.keys(e.links || {}).length > 0 || siteFacts.length > 0;
   const saveHead = useMutation({
     mutationFn: () => api.patchEntity(e.id, { name: name.trim() || e.name, role: role.trim(), note: note.trim() }),
     onSuccess: () => { setEditing(false); onChanged(); },
@@ -440,9 +514,17 @@ function CompanyHeader({ company: e, onChanged }: { company: Entity; onChanged: 
       {e.note && <div className="mt-1 text-xs text-ink-mute">{e.note}</div>}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <span className="text-[11px] uppercase tracking-wide text-ink-mute/80 mr-0.5">Официальные ссылки:</span>
-        {Object.entries(e.links || {}).length === 0 && (
+        {!hasAnyLink && (
           <span className="text-[11px] text-ink-mute italic">пока нет — добавь сайт, Wikipedia, соцсети</span>
         )}
+        {/* ссылки-факты (секция sites) */}
+        {siteFacts.map(f => (
+          <span key={`f${f.id}`} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5 py-0.5">
+            <a href={factHref(f)} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{humanizeKey(f.key) || f.value || "ссылка"}</a>
+            <button onClick={() => delFact.mutate(f.id)} className="text-ink-mute hover:text-red-600">×</button>
+          </span>
+        ))}
+        {/* ссылки entity.links */}
         {Object.entries(e.links || {}).map(([k, url]) => (
           <span key={k} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5 py-0.5">
             <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{k}</a>
@@ -482,17 +564,19 @@ function SectionBlock({ section, entityId, facts, onChanged }: {
         <div className="text-xs text-ink-mute italic py-1">Пусто.</div>
       ) : (
         <ul className="space-y-1 py-1">
-          {facts.map(f => (
-            <li key={f.id} className="text-sm flex gap-2 group items-baseline">
-              {f.key && <span className="text-ink-mute shrink-0 min-w-[80px]">{humanizeKey(f.key)}</span>}
-              <span className="flex-1">{f.value}{f.as_of && <span className="text-[11px] text-ink-mute"> · {f.as_of}</span>}</span>
+          {facts.map(f => {
+            const label = humanizeKey(f.key);
+            return (
+            <li key={f.id} className="text-sm flex gap-2.5 group items-start">
+              {label && <span className="shrink-0 w-24 text-[11px] uppercase tracking-wide text-ink-mute pt-[3px] leading-tight">{label}</span>}
+              <span className="flex-1 min-w-0 leading-snug break-words">{f.value}{f.as_of && <span className="text-[11px] text-ink-mute"> · {f.as_of}</span>}</span>
               {f.source_url
-                ? <a href={f.source_url} target="_blank" rel="noreferrer" className="text-blue-600 shrink-0" title={f.source_title || f.source_url}>↗</a>
-                : <span className="text-[10px] text-amber-700 shrink-0" title="нет источника">непроверено</span>}
+                ? <a href={f.source_url} target="_blank" rel="noreferrer" className="text-blue-600 shrink-0 pt-[2px]" title={f.source_title || f.source_url}>↗</a>
+                : <span className="text-[10px] text-amber-700 shrink-0 pt-[2px]" title="нет источника">непроверено</span>}
               <button onClick={() => delFact.mutate(f.id)}
-                className="text-ink-mute hover:text-red-600 opacity-0 group-hover:opacity-100 shrink-0">×</button>
+                className="text-ink-mute hover:text-red-600 opacity-0 group-hover:opacity-100 shrink-0 pt-[2px]">×</button>
             </li>
-          ))}
+          );})}
         </ul>
       )}
       {open ? (
