@@ -24,6 +24,7 @@ import MethodologyView from "./components/MethodologyView";
 import PlanView from "./components/PlanView";
 import BriefComposer from "./components/BriefComposer";
 import ExportView from "./components/ExportView";
+import DossierView from "./components/DossierView";
 
 export default function App() {
   return (
@@ -96,6 +97,7 @@ function ClientPage() {
 
         <div className="flex-1 overflow-y-auto">
           {activeTab === "about" && <CompanyAbout clientId={clientId!} />}
+          {activeTab === "dossier" && <DossierView clientId={clientId!} />}
           {activeTab === "matrix" && (
             <MatrixGrid
               clientId={clientId!}
@@ -207,7 +209,7 @@ function ZoneIcon({ id }: { id: string }) {
 
 type Sub = { id: string; label: string };
 const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
-  { id: "map", label: "Map", tabs: [{ id: "matrix", label: "Matrix" }] },
+  { id: "map", label: "Map", tabs: [{ id: "dossier", label: "Досье" }, { id: "matrix", label: "Matrix" }] },
   { id: "about", label: "About", tabs: [{ id: "about", label: "About" }] },
   {
     id: "build", label: "Build", tabs: [

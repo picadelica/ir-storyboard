@@ -223,6 +223,18 @@ def init_schema(conn: sqlite3.Connection) -> None:
             url       TEXT NOT NULL DEFAULT ''
         )
     """)
+    # client dossier: LLM-сводки осведомлённости. layer_id=0 — общий exec-summary,
+    # 1..8 — синтез по слою. Кэш, пересобирается по кнопке. tone: 'analyst'|'present'.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dossier_summaries (
+            client_id   TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            layer_id    INTEGER NOT NULL,
+            tone        TEXT NOT NULL DEFAULT 'analyst',
+            text        TEXT NOT NULL DEFAULT '',
+            updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (client_id, layer_id, tone)
+        )
+    """)
     conn.commit()
 
 

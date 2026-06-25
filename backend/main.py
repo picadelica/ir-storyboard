@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ir_storyboard import backup, brief, db, deliver, matrix, outputs, seed, verification, interview, company
+from ir_storyboard import backup, brief, db, deliver, dossier, matrix, outputs, seed, verification, interview, company
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
 from ir_storyboard.llm import web_search, classify_facts_batch
@@ -1159,6 +1159,14 @@ def export_must_have_facts(client_id: str, conn=Depends(get_conn)):
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@app.get("/api/clients/{client_id}/dossier")
+def get_dossier(client_id: str, conn=Depends(get_conn)):
+    """Консолидированное досье: exec-summary + синтез и метрики по 8 слоям.
+    Метрики — из данных; тексты — кэш LLM (пусто, пока не сгенерировали)."""
+    _check_client(client_id, conn)
+    return dossier.build_dossier(conn, client_id)
 
 
 @app.get("/api/clients/{client_id}/matrix/export.json")
@@ -2607,6 +2615,16 @@ def _compute_titles(conn, client_id: str) -> dict:
 def start_generate_titles(client_id: str):
     """Batch-generate 2-3 word titles for untitled active facts (async job)."""
     return LLMJobOut(job_id=_start_llm_job(_compute_titles, client_id), status="processing")
+
+
+def _compute_dossier(conn, client_id: str) -> dict:
+    return dossier.generate_dossier(conn, client_id)
+
+
+@app.post("/api/clients/{client_id}/dossier/generate/start", response_model=LLMJobOut)
+def start_dossier_generate(client_id: str):
+    """Пересобрать тексты досье (exec + синтез по слоям) фоновым job-ом; poll /jobs/{id}."""
+    return LLMJobOut(job_id=_start_llm_job(_compute_dossier, client_id), status="processing")
 
 
 @app.post("/api/clients/{client_id}/interview-guide/start", response_model=LLMJobOut)

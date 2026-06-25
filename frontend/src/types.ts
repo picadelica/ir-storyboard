@@ -574,6 +574,44 @@ export interface MatrixExport {
   readme: string;   // markdown-описание формата (самодокументируемость JSON)
 }
 
+// ── Client dossier (консолидированное досье осведомлённости) ──────────────────
+
+export interface DossierLayer {
+  layer_id: number;
+  name: string;
+  intimacy: number;
+  summary: string;
+  n_green: number;
+  n_red: number;
+  n_grey: number;
+  facts: number;
+  cells_total: number;
+  cells_filled: number;
+  channels: Channel[];
+  last_update?: string | null;
+  n_must_client: number;
+  n_must_expert: number;
+  corroborated: number;
+  facts_total: number;
+}
+
+export interface Dossier {
+  client: { id: string; name: string; sector?: string; one_liner?: string };
+  exec_summary: string;
+  generated_at?: string | null;
+  tone: string;
+  overall: {
+    facts: number;
+    coverage_pct: number;
+    red: number;
+    must_client: number;
+    must_expert: number;
+    corroborated_pct: number;
+    last_update?: string | null;
+  };
+  layers: DossierLayer[];
+}
+
 export interface Track {
   id: number;
   plan_id: number;

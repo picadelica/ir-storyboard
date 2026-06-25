@@ -8,7 +8,7 @@ import type {
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
-  SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport,
+  SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport, Dossier,
   YouTubeCommitOut, YouTubeHistoryRow, YouTubeJobOut, YouTubePreviewResult,
 } from "./types";
 
@@ -402,6 +402,11 @@ export const api = {
     a.remove();
     URL.revokeObjectURL(a.href);
   },
+  // Досье клиента (консолидированная осведомлённость)
+  dossier: (clientId: string): Promise<Dossier> =>
+    call<Dossier>(`/clients/${clientId}/dossier`),
+  generateDossier: (clientId: string): Promise<{ available: boolean; written: number }> =>
+    runJob<{ available: boolean; written: number }>(`/clients/${clientId}/dossier/generate/start`),
   // Deliver: выгрузка содержания матрицы (JSON, тексты без ссылок)
   matrixExport: (clientId: string): Promise<MatrixExport> =>
     call<MatrixExport>(`/clients/${clientId}/matrix/export.json`),
