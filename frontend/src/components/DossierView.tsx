@@ -30,29 +30,33 @@ function relTime(ts?: string | null): string {
   const days = Math.floor((Date.now() - d.getTime()) / 86400000);
   if (isNaN(days)) return "—";
   if (days <= 0) return "сегодня";
-  if (days < 7) return `${days} дн`;
-  if (days < 60) return `${Math.floor(days / 7)} нед`;
-  return `${Math.floor(days / 30)} мес`;
+  if (days < 7) return `${days} дн назад`;
+  if (days < 60) return `${Math.floor(days / 7)} нед назад`;
+  return `${Math.floor(days / 30)} мес назад`;
 }
 
-function Rings({ layers }: { layers: DossierLayer[] }) {
-  const cx = 100, cy = 100;
+// Профиль осведомлённости: столбик на слой (1 внутренний → 8 внешний),
+// высота = покрытие, цвет = здоровье. Читается с одного взгляда.
+function LayerBars({ layers }: { layers: DossierLayer[] }) {
   return (
-    <svg viewBox="0 0 200 200" width="172" height="172" role="img" aria-label="Кольца осведомлённости по слоям">
-      {layers.map((l, i) => {
-        const r = 16 + i * 9;
-        const c = 2 * Math.PI * r;
-        const frac = Math.max(0.06, Math.min(1, l.cells_filled / (l.cells_total || 3)));
-        return (
-          <g key={l.layer_id}>
-            <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--ring-bg, #E6E4DC)" strokeWidth={6} />
-            <circle cx={cx} cy={cy} r={r} fill="none" stroke={HEX[health(l)]} strokeWidth={6}
-              strokeLinecap="round" strokeDasharray={`${frac * c} ${c}`}
-              transform={`rotate(-90 ${cx} ${cy})`} />
-          </g>
-        );
-      })}
-    </svg>
+    <div className="shrink-0">
+      <div className="flex items-end gap-1.5 h-24">
+        {layers.map(l => {
+          const cov = Math.round(100 * l.cells_filled / (l.cells_total || 3));
+          const h = health(l);
+          return (
+            <div key={l.layer_id} className="flex flex-col items-center gap-1"
+              title={`Слой ${l.layer_id} · ${l.name}: покрытие ${cov}%, ${l.facts} фактов`}>
+              <div className="w-4 h-20 flex items-end rounded-sm overflow-hidden" style={{ background: "var(--color-track,#ECEAE2)" }}>
+                <div className="w-full rounded-sm" style={{ height: `${Math.max(6, cov)}%`, background: HEX[h] }} />
+              </div>
+              <span className="text-[10px] text-ink-mute tabular-nums">{l.layer_id}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="text-[10px] text-ink-mute mt-1 text-center">покрытие по слоям · 1 ближе к фаундеру → 8 контекст</div>
+    </div>
   );
 }
 
@@ -104,10 +108,10 @@ export default function DossierView({ clientId }: { clientId: string }) {
           </button>
           {d.generated_at && (
             d.staleness.new_facts > 0
-              ? <span className="text-[11px] text-amber-700" title={`собрано ${relTime(d.generated_at)} назад`}>
+              ? <span className="text-[11px] text-amber-700" title={`собрано ${relTime(d.generated_at)}`}>
                   устарело · +{d.staleness.new_facts} {plural(d.staleness.new_facts)} с тех пор
                 </span>
-              : <span className="text-[11px] text-ink-mute">актуально · собрано {relTime(d.generated_at)} назад</span>
+              : <span className="text-[11px] text-ink-mute">актуально · собрано {relTime(d.generated_at)}</span>
           )}
         </div>
       </div>
@@ -115,7 +119,7 @@ export default function DossierView({ clientId }: { clientId: string }) {
       {/* hero: кольца + метрики + exec */}
       <section className="bg-white rounded-lg border border-ink-line p-4">
         <div className="flex gap-5 items-start flex-wrap">
-          <Rings layers={d.layers} />
+          <LayerBars layers={d.layers} />
           <div className="flex-1 min-w-[260px]">
             <div className="text-base font-semibold">{d.client.name}</div>
             {(d.client.sector || d.client.one_liner) && (
