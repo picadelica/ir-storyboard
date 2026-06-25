@@ -498,6 +498,13 @@ export interface FounderDiscoverResult {
   stats: { from_web: number; dropped_ungrounded: number; duplicates: number };
 }
 
+export interface FounderProfilesResult {
+  available: boolean;
+  links: Record<string, string>;   // label → url (LinkedIn / X / Сайт / GitHub …)
+  photo: string;                   // url аватара или ""
+  stats: { from_web: number; dropped_ungrounded: number };
+}
+
 export interface Entity {
   id: number;
   kind: string;                 // company | founder | decoy

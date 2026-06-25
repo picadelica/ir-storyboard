@@ -2648,6 +2648,20 @@ def start_company_autofill(client_id: str, body: Optional[AboutAutofillIn] = Non
     return LLMJobOut(job_id=_start_llm_job(fn, client_id), status="processing")
 
 
+class FounderProfilesIn(BaseModel):
+    name: str
+
+
+@app.post("/api/clients/{client_id}/founders/profiles/start", response_model=LLMJobOut)
+def start_founder_profiles(client_id: str, body: FounderProfilesIn):
+    """Find one founder's public profiles + photo (web + LLM) as a background job;
+    poll /jobs/{id}. Returns {links, photo} — analyst applies to the founder card."""
+    nm = body.name
+    def fn(conn, cid):
+        return company.build_founder_profiles(conn, cid, nm)
+    return LLMJobOut(job_id=_start_llm_job(fn, client_id), status="processing")
+
+
 @app.post("/api/clients/{client_id}/founders/discover/start", response_model=LLMJobOut)
 def start_founder_discovery(client_id: str):
     """Discover founders + their public profiles (web + LLM) as a background job;

@@ -138,6 +138,82 @@ def _founder_web_evidence(name: str) -> List[dict]:
     return hits
 
 
+_PROFILE_SYSTEM = """Ты находишь публичные профили КОНКРЕТНОГО человека (фаундер/руководитель компании). Дан веб-поиск с источниками (заголовок, сниппет, URL).
+
+Извлеки публичные ПРОФЕССИОНАЛЬНЫЕ и СОЦИАЛЬНЫЕ профили именно этого человека: LinkedIn, X/Twitter, личный сайт, GitHub, Crunchbase, страница Wikipedia, а также URL фотографии (аватар/портрет), если он встречается в данных.
+
+ЖЁСТКИЕ ПРАВИЛА:
+- Каждый URL ОБЯЗАН дословно присутствовать в предоставленных данных. Не выдумывай ссылки.
+- Только профили ЭТОГО человека, не однофамильцев и не компании.
+
+Верни СТРОГО валидный JSON, без преамбулы:
+{"profiles": [{"label": "LinkedIn|X|Сайт|GitHub|Crunchbase|Wikipedia", "url": "<URL из данных>"}], "photo": "<URL фото или пусто>"}"""
+
+
+def _person_web_evidence(name: str, company: str) -> List[dict]:
+    if not name:
+        return []
+    queries = [
+        f'"{name}" {company}',
+        f'"{name}" {company} LinkedIn',
+        f'"{name}" {company} Twitter X profile',
+        f'"{name}" founder CEO',
+        f'"{name}" Wikipedia',
+    ]
+    hits: List[dict] = []
+    seen = set()
+    for q in queries:
+        for h in (llm.web_search(q, 6) or []):
+            k = _norm_url(h.url)
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            hits.append({"title": h.title, "url": h.url, "snippet": h.snippet})
+            if len(hits) >= _MAX_HITS:
+                return hits
+    return hits
+
+
+def build_founder_profiles(conn, client_id: str, name: str, *,
+                           model: Optional[str] = None) -> Dict[str, Any]:
+    """Find one founder's public profiles + photo (web + LLM, grounded). Returns
+    {available, links, photo, source_url, stats}; writes nothing."""
+    name = (name or "").strip()
+    if not name:
+        return {"available": True, "links": {}, "photo": "", "stats": {"from_web": 0, "dropped_ungrounded": 0}}
+    company = _client_name(conn, client_id)
+    hits = _person_web_evidence(name, company)
+    stats = {"from_web": len(hits), "dropped_ungrounded": 0}
+    if not hits:
+        return {"available": True, "links": {}, "photo": "", "stats": stats}
+
+    allowed = {_norm_url(h["url"]): h["url"] for h in hits}
+    b_block = "\n".join(f"- {h['title']}: {h['snippet'][:200]}  [src: {h['url']}]" for h in hits)
+    user = f"Человек: {name}\nКомпания: {company}\n\nВЕБ-ПОИСК:\n{b_block}"
+
+    data = llm.generate_json(_PROFILE_SYSTEM, user, max_tokens=1500, model=model)
+    if data is None:
+        return {"available": False, "links": {}, "photo": "", "stats": stats}
+
+    links: Dict[str, str] = {}
+    dropped = 0
+    for pr in (data.get("profiles") or []):
+        if not isinstance(pr, dict):
+            continue
+        url = (pr.get("url") or "").strip()
+        label = (pr.get("label") or "").strip()[:24]
+        if url and label and _norm_url(url) in allowed:
+            links.setdefault(label, url)
+        elif url:
+            dropped += 1
+    photo = (data.get("photo") or "").strip()
+    if photo and _norm_url(photo) not in allowed and not photo.lower().split("?")[0].endswith(
+            (".jpg", ".jpeg", ".png", ".webp")):
+        photo = ""   # фото обоснуем источником или расширением, иначе отбрасываем
+    stats["dropped_ungrounded"] = dropped
+    return {"available": True, "links": links, "photo": photo, "source_url": "", "stats": stats}
+
+
 def build_founder_proposals(conn, client_id: str, *, model: Optional[str] = None,
                             use_web: bool = True) -> Dict[str, Any]:
     """Propose founders + their public profiles for analyst verification.

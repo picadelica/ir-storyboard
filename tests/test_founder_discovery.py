@@ -47,6 +47,27 @@ def test_founder_discovery_grounds_links(conn, monkeypatch):
     assert res["stats"]["dropped_ungrounded"] >= 1
 
 
+def test_founder_profiles_grounds_links_and_photo(conn, monkeypatch):
+    hits = [
+        llm.SearchHit("Jane LinkedIn", "https://linkedin.com/in/janeroe", "CEO Acme"),
+        llm.SearchHit("Jane X", "https://x.com/janeroe", "founder"),
+    ]
+    monkeypatch.setattr(llm, "web_search", lambda q, n=6: hits)
+    monkeypatch.setattr(llm, "generate", lambda s, u, *a, **k: json.dumps({
+        "profiles": [
+            {"label": "LinkedIn", "url": "https://linkedin.com/in/janeroe"},   # grounded
+            {"label": "X", "url": "https://x.com/janeroe"},                    # grounded
+            {"label": "Сайт", "url": "https://made-up.example"},               # ungrounded → dropped
+        ],
+        "photo": "https://cdn.example/jane.jpg",   # image ext → kept best-effort
+    }))
+    res = company.build_founder_profiles(conn, "co", "Jane Roe")
+    assert res["available"]
+    assert res["links"] == {"LinkedIn": "https://linkedin.com/in/janeroe", "X": "https://x.com/janeroe"}
+    assert res["photo"].endswith("jane.jpg")
+    assert res["stats"]["dropped_ungrounded"] >= 1
+
+
 def test_founder_discovery_skips_existing(conn, monkeypatch):
     matrix.add_entity(conn, client_id="co", kind="founder", name="Jane Roe", confirmed=True)
     monkeypatch.setattr(llm, "web_search", lambda q, n=6:

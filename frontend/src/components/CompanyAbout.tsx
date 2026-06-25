@@ -68,6 +68,28 @@ function founderCandidates(facts: EntityFact[]): FounderHint[] {
   return out;
 }
 
+// читаемый домен из URL: https://www.accumulator.co/ → accumulator.co
+function readableDomain(u: string): string {
+  return (u || "").replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
+}
+// Ссылка-факт (секция sites) → {label, href}. Главный сайт показываем доменом
+// (читаемо), href берём из ЗНАЧЕНИЯ (а не из source_url — source это провенанс).
+function linkInfo(f: EntityFact): { label: string; href: string } {
+  const v = (f.value || "").trim();
+  const isUrl = /^https?:\/\//i.test(v);
+  const isDomain = !isUrl && /^[a-z0-9.-]+\.[a-z]{2,}(\/\S*)?$/i.test(v) && !/\s/.test(v);
+  const href = isUrl ? v : isDomain ? `https://${v}` : (f.source_url || "#");
+  const k = (f.key || "").toLowerCase();
+  let label: string;
+  if (/linkedin/.test(k) || /linkedin\.com/i.test(href)) label = "LinkedIn";
+  else if (/twitter|(^|_)x($|_)/.test(k) || /(twitter|x)\.com/i.test(href)) label = "X";
+  else if (/github/.test(k) || /github\.com/i.test(href)) label = "GitHub";
+  else if (/wiki/.test(k) || /wikipedia\.org/i.test(href)) label = "Wikipedia";
+  else if (/news|blog|press/.test(k)) label = "News";
+  else label = readableDomain(href) || "сайт";   // основной сайт → читаемый домен
+  return { label, href };
+}
+
 function humanizeKey(k: string): string {
   const raw = (k || "").trim();
   if (!raw) return "";
@@ -131,16 +153,14 @@ export default function CompanyAbout({ clientId }: Props) {
       <CompanyHeader company={company} siteFacts={siteFacts} onChanged={inval} />
       <FoundersBlock clientId={clientId} founders={(entities.data ?? []).filter(e => e.kind === "founder")}
         candidates={founderCandidates(company.facts || [])} onChanged={inval} />
-      {/* секции в две колонки — используем ширину экрана */}
-      <div className="grid md:grid-cols-2 gap-4 items-start">
-        {SECTIONS.map(s => (
-          <SectionBlock key={s.id} section={s} entityId={company.id} facts={bySection(s.id)} onChanged={inval} />
-        ))}
-        {ungrouped.length > 0 && (
-          <SectionBlock section={{ id: "", label: "Прочее", hint: "факты без секции", keyPh: "ключ", valPh: "значение" }}
-            entityId={company.id} facts={ungrouped} onChanged={inval} />
-        )}
-      </div>
+      {/* одна широкая колонка — секции стопкой во всю ширину */}
+      {SECTIONS.map(s => (
+        <SectionBlock key={s.id} section={s} entityId={company.id} facts={bySection(s.id)} onChanged={inval} />
+      ))}
+      {ungrouped.length > 0 && (
+        <SectionBlock section={{ id: "", label: "Прочее", hint: "факты без секции", keyPh: "ключ", valPh: "значение" }}
+          entityId={company.id} facts={ungrouped} onChanged={inval} />
+      )}
     </div>
   );
 }
@@ -188,17 +208,9 @@ function FoundersBlock({ clientId, founders, candidates = [], onChanged }: { cli
       {founders.length === 0 ? (
         <div className="text-xs text-ink-mute italic py-1">Пусто. Добавь вручную, кликни подсказку выше или нажми «Найти фаундеров».</div>
       ) : (
-        <ul className="space-y-1 py-1">
+        <ul className="space-y-2 py-1">
           {founders.map(f => (
-            <li key={f.id} className="text-sm flex items-baseline gap-2 group">
-              <span className="font-medium">{f.name}</span>
-              {f.role && <span className="text-xs text-ink-mute">· {f.role}</span>}
-              {Object.entries(f.links || {}).map(([k, url]) => (
-                <a key={k} href={url} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:underline">{k}</a>
-              ))}
-              <button onClick={() => remove.mutate(f.id)}
-                className="ml-auto text-ink-mute hover:text-red-600 opacity-0 group-hover:opacity-100 text-xs">удалить</button>
-            </li>
+            <FounderRow key={f.id} clientId={clientId} f={f} onChanged={onChanged} onRemove={() => remove.mutate(f.id)} />
           ))}
         </ul>
       )}
@@ -216,6 +228,53 @@ function FoundersBlock({ clientId, founders, candidates = [], onChanged }: { cli
           className="mt-2 text-[11px] px-2 py-0.5 rounded border border-dashed border-ink-line text-ink-mute hover:bg-slate-50">+ фаундер вручную</button>
       )}
     </section>
+  );
+}
+
+// Строка фаундера: фото-аватар, имя·роль, кликабельные соцсети/проф-профили,
+// кнопка «найти профили» (веб+LLM подбирают ссылки и фото к этому человеку).
+function FounderRow({ clientId, f, onChanged, onRemove }: { clientId: string; f: Entity; onChanged: () => void; onRemove: () => void }) {
+  const patch = useMutation({
+    mutationFn: (links: Record<string, string>) => api.patchEntity(f.id, { links }),
+    onSuccess: onChanged,
+  });
+  const find = useMutation({
+    mutationFn: () => api.findFounderProfiles(clientId, f.name),
+    onSuccess: (r) => {
+      const merged: Record<string, string> = { ...(f.links || {}), ...r.links };
+      if (r.photo) merged.photo = r.photo;
+      if (Object.keys(r.links).length || r.photo) patch.mutate(merged);
+    },
+  });
+  const [imgBad, setImgBad] = useState(false);
+  const links = f.links || {};
+  const photo = links.photo;
+  const chips = Object.entries(links).filter(([k]) => k.toLowerCase() !== "photo");
+  const initials = f.name.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const busy = find.isPending || patch.isPending;
+
+  return (
+    <li className="flex items-start gap-2.5 group">
+      {photo && !imgBad
+        ? <img src={photo} alt="" onError={() => setImgBad(true)} className="w-9 h-9 rounded-full object-cover shrink-0 border border-ink-line" />
+        : <span className="w-9 h-9 rounded-full bg-slate-100 grid place-items-center text-[11px] font-medium text-ink-mute shrink-0">{initials || "—"}</span>}
+      <div className="flex-1 min-w-0">
+        <div className="text-sm leading-tight"><span className="font-medium">{f.name}</span>{f.role && <span className="text-xs text-ink-mute"> · {f.role}</span>}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          {chips.length === 0 && <span className="text-[11px] text-ink-mute italic">профили не заданы</span>}
+          {chips.map(([k, url]) => (
+            <a key={k} href={url} target="_blank" rel="noreferrer"
+              className="text-[11px] text-blue-600 hover:underline border border-ink-line rounded px-1.5 py-0.5">{k} ↗</a>
+          ))}
+          <button onClick={() => find.mutate()} disabled={busy}
+            className="text-[11px] text-ink-mute hover:text-ink border border-dashed border-ink-line rounded px-1.5 py-0.5 disabled:opacity-50">
+            {busy ? "ищу профили…" : "найти профили"}
+          </button>
+        </div>
+      </div>
+      <button onClick={onRemove}
+        className="text-ink-mute hover:text-red-600 opacity-0 group-hover:opacity-100 text-xs shrink-0">удалить</button>
+    </li>
   );
 }
 
@@ -471,13 +530,6 @@ function CompanyHeader({ company: e, siteFacts = [], onChanged }: { company: Ent
     onSuccess: () => { setLinkOpen(false); onChanged(); },
   });
   const delFact = useMutation({ mutationFn: (fid: number) => api.deleteEntityFact(fid), onSuccess: onChanged });
-  // href из факта-ссылки: значение-URL, иначе source_url, иначе домен → https://
-  const factHref = (f: EntityFact) => {
-    const v = (f.value || "").trim();
-    if (/^https?:\/\//i.test(v)) return v;
-    if (f.source_url) return f.source_url;
-    return v ? `https://${v.replace(/^\/+/, "")}` : "#";
-  };
   const hasAnyLink = Object.keys(e.links || {}).length > 0 || siteFacts.length > 0;
   const saveHead = useMutation({
     mutationFn: () => api.patchEntity(e.id, { name: name.trim() || e.name, role: role.trim(), note: note.trim() }),
@@ -517,13 +569,16 @@ function CompanyHeader({ company: e, siteFacts = [], onChanged }: { company: Ent
         {!hasAnyLink && (
           <span className="text-[11px] text-ink-mute italic">пока нет — добавь сайт, Wikipedia, соцсети</span>
         )}
-        {/* ссылки-факты (секция sites) */}
-        {siteFacts.map(f => (
-          <span key={`f${f.id}`} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5 py-0.5">
-            <a href={factHref(f)} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{humanizeKey(f.key) || f.value || "ссылка"}</a>
-            <button onClick={() => delFact.mutate(f.id)} className="text-ink-mute hover:text-red-600">×</button>
-          </span>
-        ))}
+        {/* ссылки-факты (секция sites) — читаемый домен, href из значения */}
+        {siteFacts.map(f => {
+          const { label, href } = linkInfo(f);
+          return (
+            <span key={`f${f.id}`} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5 py-0.5">
+              <a href={href} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline" title={href}>{label}</a>
+              <button onClick={() => delFact.mutate(f.id)} className="text-ink-mute hover:text-red-600">×</button>
+            </span>
+          );
+        })}
         {/* ссылки entity.links */}
         {Object.entries(e.links || {}).map(([k, url]) => (
           <span key={k} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5 py-0.5">
@@ -638,7 +693,7 @@ function LinkForm({ onSubmit, onCancel, busy }: {
   const inp = "text-xs border border-ink-line rounded px-2 py-1";
   return (
     <div className="mt-1.5 flex gap-1.5 items-center">
-      <input className={`${inp} w-24`} placeholder="Wiki / X / …" value={label} onChange={e => setLabel(e.target.value)} autoFocus />
+      <input className={`${inp} w-24`} placeholder="Wiki / News / X" value={label} onChange={e => setLabel(e.target.value)} autoFocus />
       <input className={`${inp} flex-1`} placeholder="https://…" value={url} onChange={e => setUrl(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter") submit(); }} />
       <button onClick={submit} disabled={busy || !label.trim() || !url.trim()}

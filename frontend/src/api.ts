@@ -3,7 +3,7 @@ import type {
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
   AuditResult, Entity, EntityFact, ReviewFact, DuplicatesResult, UnattributedResult, InterviewGuide,
-  AboutProposal, AboutAutofillResult, FounderDiscoverResult,
+  AboutProposal, AboutAutofillResult, FounderDiscoverResult, FounderProfilesResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
@@ -479,4 +479,7 @@ export const api = {
   // авто-поиск фаундеров + их профилей (background job → проверка аналитиком)
   discoverFounders: (clientId: string): Promise<FounderDiscoverResult> =>
     runJob<FounderDiscoverResult>(`/clients/${clientId}/founders/discover/start`),
+  // поиск профилей + фото по конкретному фаундеру
+  findFounderProfiles: (clientId: string, name: string): Promise<FounderProfilesResult> =>
+    runJob<FounderProfilesResult>(`/clients/${clientId}/founders/profiles/start`, { name }),
 };
