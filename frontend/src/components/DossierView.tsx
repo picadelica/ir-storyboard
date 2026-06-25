@@ -2,13 +2,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { Dossier, DossierLayer } from "../types";
 
-const HEX = { green: "#639922", amber: "#BA7517", thin: "#B4B2A9" };
+type Health = "green" | "amber" | "thin";
 const CHAN: Record<string, string> = {
   offline_interview: "интервью", online_interview: "интервью",
   online_research: "веб", archival: "архив",
 };
+// подписанный health-pill: цвет + слово (читается сразу, без абстрактных баров)
+const PILL: Record<Health, { bg: string; fg: string; label: string }> = {
+  green: { bg: "#EAF3DE", fg: "#3B6D11", label: "покрыто" },
+  amber: { bg: "#FAEEDA", fg: "#854F0B", label: "частично" },
+  thin: { bg: "#F1EFE8", fg: "#5F5E5A", label: "пробел" },
+};
 
-function health(l: DossierLayer): "green" | "amber" | "thin" {
+function health(l: DossierLayer): Health {
   if (l.facts === 0) return "thin";
   const cov = l.cells_filled / (l.cells_total || 3);
   if (cov >= 0.66 && l.n_green > 0) return "green";
@@ -35,47 +41,11 @@ function relTime(ts?: string | null): string {
   return `${Math.floor(days / 30)} мес назад`;
 }
 
-// Профиль осведомлённости: столбик на слой (1 внутренний → 8 внешний),
-// высота = покрытие, цвет = здоровье. Читается с одного взгляда.
-function LayerBars({ layers }: { layers: DossierLayer[] }) {
-  return (
-    <div className="shrink-0">
-      <div className="flex items-end gap-1.5 h-24">
-        {layers.map(l => {
-          const cov = Math.round(100 * l.cells_filled / (l.cells_total || 3));
-          const h = health(l);
-          return (
-            <div key={l.layer_id} className="flex flex-col items-center gap-1"
-              title={`Слой ${l.layer_id} · ${l.name}: покрытие ${cov}%, ${l.facts} фактов`}>
-              <div className="w-4 h-20 flex items-end rounded-sm overflow-hidden" style={{ background: "var(--color-track,#ECEAE2)" }}>
-                <div className="w-full rounded-sm" style={{ height: `${Math.max(6, cov)}%`, background: HEX[h] }} />
-              </div>
-              <span className="text-[10px] text-ink-mute tabular-nums">{l.layer_id}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="text-[10px] text-ink-mute mt-1 text-center">покрытие по слоям · 1 ближе к фаундеру → 8 контекст</div>
-    </div>
-  );
-}
-
-function FactsBar({ l }: { l: DossierLayer }) {
-  const tot = l.facts || 1;
-  const seg = (v: number, color: string) =>
-    v ? <span style={{ width: `${(v / tot) * 56}px`, background: color }} className="rounded-sm" /> : null;
-  return (
-    <span className="inline-flex gap-px h-1.5 w-14 align-middle">
-      {seg(l.n_green, HEX.green)}{seg(l.n_red, "#E24B4A")}{seg(l.n_grey, HEX.thin)}
-    </span>
-  );
-}
-
 function Metric({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
-    <div className="bg-slate-50 rounded-lg px-3 py-2">
-      <div className="text-[11px] text-ink-mute">{label}</div>
-      <div className="text-[22px] leading-tight font-semibold" style={accent ? { color: accent } : undefined}>{value}</div>
+    <div className="bg-slate-50 rounded-lg px-3 py-2 flex flex-col">
+      <div className="text-[11px] text-ink-mute leading-tight min-h-[2.2em]">{label}</div>
+      <div className="text-[22px] leading-tight font-semibold mt-auto" style={accent ? { color: accent } : undefined}>{value}</div>
     </div>
   );
 }
@@ -94,7 +64,7 @@ export default function DossierView({ clientId }: { clientId: string }) {
   const o = d.overall;
 
   return (
-    <div className="p-5 max-w-5xl space-y-4">
+    <div className="p-5 max-w-4xl space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Досье клиента</h2>
@@ -116,24 +86,17 @@ export default function DossierView({ clientId }: { clientId: string }) {
         </div>
       </div>
 
-      {/* hero: кольца + метрики + exec */}
+      {/* hero: метрики (числа — читаемо) + exec */}
       <section className="bg-white rounded-lg border border-ink-line p-4">
-        <div className="flex gap-5 items-start flex-wrap">
-          <LayerBars layers={d.layers} />
-          <div className="flex-1 min-w-[260px]">
-            <div className="text-base font-semibold">{d.client.name}</div>
-            {(d.client.sector || d.client.one_liner) && (
-              <div className="text-[13px] text-ink-mute mb-2.5">
-                {[d.client.sector, d.client.one_liner].filter(Boolean).join(" · ")}
-              </div>
-            )}
-            <div className="grid grid-cols-4 gap-2.5">
-              <Metric label="Фактов" value={String(o.facts)} />
-              <Metric label="Покрытие" value={`${o.coverage_pct}%`} />
-              <Metric label="Подтв." value={`${o.corroborated_pct}%`} />
-              <Metric label="Риски" value={String(o.red)} accent={o.red ? "#A32D2D" : undefined} />
-            </div>
-          </div>
+        <div className="text-base font-semibold">{d.client.name}</div>
+        {(d.client.sector || d.client.one_liner) && (
+          <div className="text-[13px] text-ink-mute mb-3">{[d.client.sector, d.client.one_liner].filter(Boolean).join(" · ")}</div>
+        )}
+        <div className="grid grid-cols-4 gap-2.5">
+          <Metric label="Фактов" value={String(o.facts)} />
+          <Metric label="Покрытие" value={`${o.coverage_pct}%`} />
+          <Metric label="2+ источника" value={`${o.corroborated_pct}%`} />
+          <Metric label="Риски" value={String(o.red)} accent={o.red ? "#A32D2D" : undefined} />
         </div>
         <div className="mt-4 pt-3 border-t border-ink-line/60">
           {d.exec_summary
@@ -142,33 +105,33 @@ export default function DossierView({ clientId }: { clientId: string }) {
         </div>
       </section>
 
-      {/* слои */}
+      {/* слои: подписанный health-pill (скан сверху вниз) + синтез + чистая строка */}
       <div className="space-y-2">
         {d.layers.map(l => {
-          const h = health(l);
+          const p = PILL[health(l)];
           return (
             <div key={l.layer_id} className="bg-white rounded-lg border border-ink-line p-3.5">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="w-[7px] h-[7px] rounded-full shrink-0" style={{ background: HEX[h] }} />
-                <span className="text-[11px] text-ink-mute tabular-nums">{l.layer_id}</span>
-                <span className="text-sm font-medium">{l.name}</span>
+              <div className="flex items-center justify-between gap-3 mb-1.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: p.bg, color: p.fg }}>{p.label}</span>
+                  <span className="text-[11px] text-ink-mute tabular-nums shrink-0">{l.layer_id}</span>
+                  <span className="text-sm font-medium truncate">{l.name}</span>
+                </div>
+                <div className="flex items-center gap-2.5 text-[12px] shrink-0">
+                  <span className="text-ink-mute">{l.facts} {plural(l.facts)}</span>
+                  {l.n_red > 0 && <span className="text-flag-red">{l.n_red} риск</span>}
+                  {l.n_must_client > 0 && <span className="text-flag-blue" title="must-have клиента">★{l.n_must_client}</span>}
+                  {l.n_must_expert > 0 && <span className="text-purple-600" title="важное эксперта">★{l.n_must_expert}</span>}
+                </div>
               </div>
               <div className="text-[13px] text-ink-mute leading-snug mb-2" style={{ textAlign: "justify" }}>
                 {l.summary || <span className="italic">синтез появится после генерации досье</span>}
               </div>
-              <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12px] text-ink-mute">
-                <span className="inline-flex items-center gap-1.5"><FactsBar l={l} />{l.facts} фактов</span>
-                <span>{l.cells_filled}/{l.cells_total} ячеек</span>
-                {l.channels.length > 0 && (
-                  <span>{[...new Set(l.channels.map(c => CHAN[c] || c))].join(" · ")}</span>
-                )}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-mute/90">
+                <span>{l.cells_filled}/{l.cells_total} раздела</span>
                 {l.corroborated > 0 && <span>подтв. {l.corroborated}</span>}
-                <span>{relTime(l.last_update)}</span>
-                <span className="inline-flex items-center gap-2 ml-auto">
-                  {l.n_red > 0 && <span className="text-flag-red">{l.n_red} риск</span>}
-                  {l.n_must_client > 0 && <span className="text-flag-blue">★{l.n_must_client}</span>}
-                  {l.n_must_expert > 0 && <span className="text-purple-600">★{l.n_must_expert}</span>}
-                </span>
+                {l.channels.length > 0 && <span>{[...new Set(l.channels.map(c => CHAN[c] || c))].join(", ")}</span>}
+                <span>обновлено {relTime(l.last_update)}</span>
               </div>
             </div>
           );
