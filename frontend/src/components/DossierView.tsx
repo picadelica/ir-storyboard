@@ -16,6 +16,14 @@ function health(l: DossierLayer): "green" | "amber" | "thin" {
   return "amber";
 }
 
+function plural(n: number): string {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return "фактов";
+  if (b === 1) return "факт";
+  if (b >= 2 && b <= 4) return "факта";
+  return "фактов";
+}
+
 function relTime(ts?: string | null): string {
   if (!ts) return "—";
   const d = new Date(ts.replace(" ", "T") + (ts.includes("Z") ? "" : "Z"));
@@ -88,11 +96,20 @@ export default function DossierView({ clientId }: { clientId: string }) {
           <h2 className="text-lg font-semibold tracking-tight">Досье клиента</h2>
           <p className="text-[13px] text-ink-mute mt-0.5">Целостная картина осведомлённости — без погружения в ячейки.</p>
         </div>
-        <button onClick={() => gen.mutate()} disabled={gen.isPending}
-          title="Пересобрать тексты (exec + синтез по слоям) по текущим фактам"
-          className="text-xs text-white bg-ink rounded px-3 py-1.5 hover:bg-black disabled:opacity-50 shrink-0">
-          {gen.isPending ? "Собираю тексты…" : d.exec_summary ? "Пересобрать досье" : "Сгенерировать досье"}
-        </button>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <button onClick={() => gen.mutate()} disabled={gen.isPending}
+            title="Пересобрать тексты (exec + синтез по слоям) по текущим фактам"
+            className="text-xs text-white bg-ink rounded px-3 py-1.5 hover:bg-black disabled:opacity-50">
+            {gen.isPending ? "Собираю тексты…" : d.exec_summary ? "Пересобрать досье" : "Сгенерировать досье"}
+          </button>
+          {d.generated_at && (
+            d.staleness.new_facts > 0
+              ? <span className="text-[11px] text-amber-700" title={`собрано ${relTime(d.generated_at)} назад`}>
+                  устарело · +{d.staleness.new_facts} {plural(d.staleness.new_facts)} с тех пор
+                </span>
+              : <span className="text-[11px] text-ink-mute">актуально · собрано {relTime(d.generated_at)} назад</span>
+          )}
+        </div>
       </div>
 
       {/* hero: кольца + метрики + exec */}

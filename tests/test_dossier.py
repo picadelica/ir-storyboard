@@ -53,3 +53,17 @@ def test_generate_caches_summaries(conn, monkeypatch):
     d = dossier.build_dossier(conn, "co")
     assert d["exec_summary"].startswith("Co — финтех")
     assert next(l for l in d["layers"] if l["layer_id"] == 6)["summary"] == "Синтез слоя 6."
+    assert d["staleness"]["new_facts"] == 0   # сразу после генерации — актуально
+
+
+def test_staleness_counts_new_facts(conn, monkeypatch):
+    matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="старый факт", flag="green")
+    monkeypatch.setattr(llm, "generate", lambda s, u, *a, **k: json.dumps(
+        {"exec": "Сводка.", "layers": [{"layer_id": i, "text": "x"} for i in range(1, 9)]}))
+    dossier.generate_dossier(conn, "co")
+    # факт, добавленный ПОСЛЕ генерации (явно поздняя метка)
+    conn.execute("UPDATE dossier_summaries SET updated_at='2000-01-01 00:00:00' WHERE client_id='co' AND layer_id=0")
+    conn.commit()
+    matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="новый факт", flag="green")
+    d = dossier.build_dossier(conn, "co")
+    assert d["staleness"]["new_facts"] >= 1

@@ -114,13 +114,23 @@ def build_dossier(conn, client_id: str, *, tone: str = "analyst") -> dict:
         "last_update": last_update,
     }
     exec_row = summ.get(0, {})
+    generated_at = exec_row.get("updated_at")
+    # актуальность: сколько активных фактов добавлено ПОСЛЕ генерации досье
+    new_facts = 0
+    if generated_at:
+        new_facts = conn.execute(
+            """SELECT COUNT(*) FROM facts f JOIN cells c ON c.id = f.cell_id
+               WHERE c.client_id=? AND f.state='active' AND f.captured_at > ?""",
+            (client_id, generated_at),
+        ).fetchone()[0]
     return {
         "client": client,
         "exec_summary": exec_row.get("text", ""),
-        "generated_at": exec_row.get("updated_at"),
+        "generated_at": generated_at,
         "tone": tone,
         "overall": overall,
         "layers": layers,
+        "staleness": {"generated_at": generated_at, "new_facts": new_facts},
     }
 
 

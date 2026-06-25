@@ -192,8 +192,10 @@ interface TabsProps {
 function ZoneIcon({ id }: { id: string }) {
   const p = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (id) {
+    case "dossier":
+      return <svg {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5.5" /><circle cx="12" cy="12" r="1.8" /></svg>;
     case "map":
-      return <svg {...p}><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="8.5" /></svg>;
+      return <svg {...p}><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M9 4v16M4 9h16" /></svg>;
     case "about":
       return <svg {...p}><path d="M3 21h18M5 21V8l7-4 7 4v13M9 21v-5h6v5M9 11h.01M15 11h.01" /></svg>;
     case "build":
@@ -209,7 +211,8 @@ function ZoneIcon({ id }: { id: string }) {
 
 type Sub = { id: string; label: string };
 const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
-  { id: "map", label: "Map", tabs: [{ id: "dossier", label: "Досье" }, { id: "matrix", label: "Matrix" }] },
+  { id: "dossier", label: "Досье", tabs: [{ id: "dossier", label: "Досье" }] },
+  { id: "map", label: "Map", tabs: [{ id: "matrix", label: "Matrix" }] },
   { id: "about", label: "About", tabs: [{ id: "about", label: "About" }] },
   {
     id: "build", label: "Build", tabs: [

@@ -610,6 +610,7 @@ export interface Dossier {
     last_update?: string | null;
   };
   layers: DossierLayer[];
+  staleness: { generated_at?: string | null; new_facts: number };
 }
 
 export interface Track {
