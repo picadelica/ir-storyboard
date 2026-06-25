@@ -9,7 +9,7 @@ type Picked = { flag: Flag; sids: string[]; title: string };
 const FLAG_WORD: Record<Flag, string> = { green: "зелёные", red: "красные", grey: "серые (пробелы)" };
 const FLAG_TXT: Record<Flag, string> = { green: "text-flag-green", red: "text-flag-red", grey: "text-flag-grey" };
 
-export default function ScorecardView({ clientId }: { clientId: string }) {
+export default function ScorecardView({ clientId, onSelectCell }: { clientId: string; onSelectCell?: (sid: string) => void }) {
   const [picked, setPicked] = useState<Picked | null>(null);
   const sc = useQuery<Scorecard>({
     queryKey: ["scorecard", clientId],
@@ -31,11 +31,11 @@ export default function ScorecardView({ clientId }: { clientId: string }) {
     .filter(r => (flag === "green" ? r.n_green : flag === "red" ? r.n_red : r.n_grey) > 0)
     .map(r => r.subsection_id);
 
-  // кликабельная цифра в строке ячейки
+  // клик по цифре ячейки → открыть полноценный drawer ячейки справа (как в матрице)
   const Num = ({ r, flag, n }: { r: typeof rows[number]; flag: Flag; n: number }) =>
     n > 0 ? (
-      <button onClick={() => setPicked({ flag, sids: [r.subsection_id], title: `${r.subsection_id} · ${r.subsection_name} — ${FLAG_WORD[flag]}` })}
-        className={`font-mono ${FLAG_TXT[flag]} hover:underline`} title={`Открыть ${FLAG_WORD[flag]} карточки ячейки`}>{n}</button>
+      <button onClick={() => onSelectCell?.(r.subsection_id)}
+        className={`font-mono ${FLAG_TXT[flag]} hover:underline`} title={`Открыть карточки ячейки ${r.subsection_id} (${FLAG_WORD[flag]})`}>{n}</button>
     ) : <span className="font-mono text-ink-mute/40">0</span>;
 
   return (

@@ -81,7 +81,7 @@ function ClientPage() {
       {!present && <Sidebar clientId={clientId} />}
 
       <main className="flex-1 flex flex-col overflow-hidden"
-        style={{ transition: "margin-right 200ms", marginRight: selectedSid && activeTab === "matrix" ? "28rem" : 0 }}>
+        style={{ transition: "margin-right 200ms", marginRight: selectedSid && (activeTab === "matrix" || activeTab === "scorecard") ? "28rem" : 0 }}>
         {present ? (
           <PresentBar clientId={clientId!} quarter={quarter} onExit={() => setPresent(false)} />
         ) : (
@@ -115,7 +115,7 @@ function ClientPage() {
           {activeTab === "audit" && (
             <FactAuditView clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
-          {activeTab === "scorecard" && <ScorecardView clientId={clientId!} />}
+          {activeTab === "scorecard" && <ScorecardView clientId={clientId!} onSelectCell={setSelectedSid} />}
           {activeTab === "artifacts" && (
             <ArtifactsView clientId={clientId!} pickedArtifactId={pickedArtifactId} />
           )}
@@ -154,7 +154,7 @@ function ClientPage() {
         {present && <PresentFooter clientId={clientId!} />}
       </main>
 
-      {selectedSid && activeTab === "matrix" && (
+      {selectedSid && (activeTab === "matrix" || activeTab === "scorecard") && (
         <CellDrawer
           clientId={clientId!}
           subsectionId={selectedSid}
