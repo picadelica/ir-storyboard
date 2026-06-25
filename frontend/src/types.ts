@@ -484,6 +484,20 @@ export interface AboutAutofillResult {
   stats: { from_matrix: number; from_web: number; dropped_ungrounded: number; duplicates: number };
 }
 
+export interface FounderProposal {
+  name: string;
+  role: string;
+  source_url: string;
+  links: Record<string, string>;   // label → url (LinkedIn / X / Wikipedia / Сайт)
+  origin: string;                  // web
+}
+
+export interface FounderDiscoverResult {
+  available: boolean;
+  founders: FounderProposal[];
+  stats: { from_web: number; dropped_ungrounded: number; duplicates: number };
+}
+
 export interface Entity {
   id: number;
   kind: string;                 // company | founder | decoy

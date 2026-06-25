@@ -3,7 +3,7 @@ import type {
   Artifact, ArtifactSummary, BackupMeta, CellSummary, Client, CycleKind,
   Fact, FactCandidateOut, IngestConfirmOut, IngestPreviewOut,
   AuditResult, Entity, EntityFact, ReviewFact, DuplicatesResult, UnattributedResult, InterviewGuide,
-  AboutProposal, AboutAutofillResult,
+  AboutProposal, AboutAutofillResult, FounderDiscoverResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
@@ -476,4 +476,7 @@ export const api = {
     runJob<AboutAutofillResult>(`/clients/${clientId}/company/autofill/start`, opts ?? {}),
   commitCompanyFacts: (clientId: string, proposals: AboutProposal[]): Promise<{ committed: number }> =>
     call(`/clients/${clientId}/company/autofill/commit`, { method: "POST", body: JSON.stringify({ proposals }) }),
+  // авто-поиск фаундеров + их профилей (background job → проверка аналитиком)
+  discoverFounders: (clientId: string): Promise<FounderDiscoverResult> =>
+    runJob<FounderDiscoverResult>(`/clients/${clientId}/founders/discover/start`),
 };

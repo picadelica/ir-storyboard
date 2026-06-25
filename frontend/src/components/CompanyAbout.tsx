@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { RunProgress, useElapsed } from "./RunProgress";
-import type { Entity, EntityFact, Client, AboutProposal, AboutAutofillResult } from "../types";
+import type { Entity, EntityFact, Client, AboutProposal, AboutAutofillResult, FounderProposal, FounderDiscoverResult } from "../types";
 
 interface Props {
   clientId: string;
@@ -11,14 +11,37 @@ interface Props {
 // The company "About" — a structured business profile (no narrative), kept as a
 // distinct entity and filled by hand (and, later, by ingest). Facts are grouped
 // into fixed business sections; every fact is source-linked.
+// Официальные ссылки (сайт / wiki / соцсети) живут в шапке (entity.links), не в секциях.
 const SECTIONS: { id: string; label: string; hint: string; keyPh: string; valPh: string }[] = [
   { id: "profile", label: "Профиль", hint: "юр. название, основана, стадия, команда, чем занимается", keyPh: "напр. Основана", valPh: "2021, Сан-Франциско" },
-  { id: "sites", label: "Сайты и каналы", hint: "сайт, домены, X / LinkedIn / GitHub", keyPh: "напр. Сайт", valPh: "https://…" },
   { id: "funding", label: "Финансирование", hint: "раунд: стадия, сумма, дата, лид/инвесторы, оценка", keyPh: "напр. Seed", valPh: "$18M, 2024, лид Coatue" },
   { id: "history", label: "История / майлстоны", hint: "датированные бизнес-события: запуски, релизы, сделки", keyPh: "напр. Запуск", valPh: "что и когда произошло" },
   { id: "product", label: "Продукт и рынок", hint: "продукт, категория/рынок, конкуренты", keyPh: "напр. Продукт", valPh: "что это и для кого" },
   { id: "metrics", label: "Метрики", hint: "ключевые числа: ARR, пользователи, рост (с датой)", keyPh: "напр. ARR", valPh: "$2M (Q1 2026)" },
 ];
+
+// Технические ключи из авто-наполнения → человеческие подписи (на случай старых данных).
+const KEY_LABELS: Record<string, string> = {
+  product_category: "Категория", category: "Категория", competitors: "Конкуренты",
+  hq: "Штаб-квартира", headquarters: "Штаб-квартира", founded: "Основана",
+  founded_at: "Основана", founding_year: "Основана", website: "Сайт", site: "Сайт",
+  valuation: "Оценка", arr: "ARR", mrr: "MRR", revenue: "Выручка", employees: "Команда",
+  team_size: "Команда", headcount: "Команда", stage: "Стадия", ceo: "CEO", cto: "CTO",
+  round: "Раунд", investors: "Инвесторы", lead_investor: "Лид-инвестор", market: "Рынок",
+  users: "Пользователи", customers: "Клиенты", growth: "Рост", product: "Продукт",
+};
+function humanizeKey(k: string): string {
+  const key = (k || "").trim();
+  if (!key) return "";
+  const low = key.toLowerCase();
+  if (KEY_LABELS[low]) return KEY_LABELS[low];
+  // snake_case / технический вид → «Название словами»
+  if (/^[a-z0-9_]+$/.test(low)) {
+    const words = low.split("_").filter(Boolean);
+    return words.map((w, i) => i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
+  }
+  return key;
+}
 
 export default function CompanyAbout({ clientId }: Props) {
   const qc = useQueryClient();
@@ -54,20 +77,23 @@ export default function CompanyAbout({ clientId }: Props) {
   const ungrouped = (company.facts || []).filter(f => !SECTIONS.some(s => s.id === (f.section || "")));
 
   return (
-    <div className="p-5 max-w-3xl space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="p-5 max-w-5xl space-y-4">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-ink-mute">Голые бизнес-факты со ссылками. Без нарратива.</p>
         <Autofill clientId={clientId} onCommitted={inval} />
       </div>
       <CompanyHeader company={company} onChanged={inval} />
-      {SECTIONS.map(s => (
-        <SectionBlock key={s.id} section={s} entityId={company.id} facts={bySection(s.id)} onChanged={inval} />
-      ))}
-      {ungrouped.length > 0 && (
-        <SectionBlock section={{ id: "", label: "Прочее", hint: "факты без секции", keyPh: "ключ", valPh: "значение" }}
-          entityId={company.id} facts={ungrouped} onChanged={inval} />
-      )}
       <FoundersBlock clientId={clientId} founders={(entities.data ?? []).filter(e => e.kind === "founder")} onChanged={inval} />
+      {/* секции в две колонки — используем ширину экрана */}
+      <div className="grid md:grid-cols-2 gap-4 items-start">
+        {SECTIONS.map(s => (
+          <SectionBlock key={s.id} section={s} entityId={company.id} facts={bySection(s.id)} onChanged={inval} />
+        ))}
+        {ungrouped.length > 0 && (
+          <SectionBlock section={{ id: "", label: "Прочее", hint: "факты без секции", keyPh: "ключ", valPh: "значение" }}
+            entityId={company.id} facts={ungrouped} onChanged={inval} />
+        )}
+      </div>
     </div>
   );
 }
@@ -88,11 +114,14 @@ function FoundersBlock({ clientId, founders, onChanged }: { clientId: string; fo
   return (
     <section className="bg-white rounded-lg border border-ink-line p-4">
       <div className="flex items-baseline justify-between gap-3 mb-1">
-        <h3 className="text-sm font-semibold">Фаундеры</h3>
-        <span className="text-[11px] text-ink-mute text-right">к ним привязываются факты — кто именно говорит</span>
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-sm font-semibold">Фаундеры</h3>
+          <span className="text-[11px] text-ink-mute">к ним привязываются факты — кто именно говорит</span>
+        </div>
+        <FounderDiscovery clientId={clientId} existing={founders} onChanged={onChanged} />
       </div>
       {founders.length === 0 ? (
-        <div className="text-xs text-ink-mute italic py-1">Пусто. Добавь фаундеров — тогда на фактах можно будет указывать, кто говорит.</div>
+        <div className="text-xs text-ink-mute italic py-1">Пусто. Добавь вручную или нажми «Найти фаундеров» — подберём из веба профили на проверку.</div>
       ) : (
         <ul className="space-y-1 py-1">
           {founders.map(f => (
@@ -119,9 +148,112 @@ function FoundersBlock({ clientId, founders, onChanged }: { clientId: string; fo
         </div>
       ) : (
         <button onClick={() => setAdding(true)}
-          className="mt-2 text-[11px] px-2 py-0.5 rounded border border-dashed border-ink-line text-ink-mute hover:bg-slate-50">+ фаундер</button>
+          className="mt-2 text-[11px] px-2 py-0.5 rounded border border-dashed border-ink-line text-ink-mute hover:bg-slate-50">+ фаундер вручную</button>
       )}
     </section>
+  );
+}
+
+// Авто-поиск фаундеров: веб + LLM предлагают имена и профили; аналитик отмечает,
+// кого внести. Каждый профиль-ссылка обоснован веб-источником (см. company.py).
+function FounderDiscovery({ clientId, existing, onChanged }: { clientId: string; existing: Entity[]; onChanged: () => void }) {
+  const [result, setResult] = useState<FounderDiscoverResult | null>(null);
+  const [accepted, setAccepted] = useState<Set<number>>(new Set());
+  const have = new Set(existing.map(e => (e.name || "").toLowerCase().trim()));
+  const run = useMutation({
+    mutationFn: () => api.discoverFounders(clientId),
+    onSuccess: (r) => {
+      setResult(r);
+      // по умолчанию отмечаем тех, кого ещё нет на карточке
+      setAccepted(new Set(r.founders.map((f, i) => have.has(f.name.toLowerCase().trim()) ? -1 : i).filter(i => i >= 0)));
+    },
+  });
+  const elapsed = useElapsed(run.isPending);
+  const commit = useMutation({
+    mutationFn: async (picked: FounderProposal[]) => {
+      for (const f of picked) {
+        await api.createEntity(clientId, { kind: "founder", name: f.name, role: f.role, links: f.links, confirmed: true });
+      }
+      return picked.length;
+    },
+    onSuccess: () => { setResult(null); setAccepted(new Set()); onChanged(); },
+  });
+  const founders = result?.founders ?? [];
+  const toggle = (i: number) => setAccepted(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
+
+  return (
+    <>
+      <button onClick={() => run.mutate()} disabled={run.isPending}
+        className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50 shrink-0">
+        {run.isPending ? "Ищу…" : "Найти фаундеров"}
+      </button>
+
+      {(run.isPending || result || run.isError) && (
+        <div className="fixed inset-0 z-30 bg-black/30 flex items-start justify-center overflow-y-auto py-10"
+          onClick={() => { if (!run.isPending && !commit.isPending) { setResult(null); run.reset(); } }}>
+          <div className="bg-white rounded-lg border border-ink-line w-full max-w-2xl mx-4 p-4 space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-baseline justify-between">
+              <h3 className="text-sm font-semibold">Найденные фаундеры — на проверку</h3>
+              <button onClick={() => { setResult(null); run.reset(); }} className="text-ink-mute hover:text-ink text-sm">✕</button>
+            </div>
+
+            <RunProgress active={run.isPending} elapsed={elapsed} expected={60}
+              label="Ищу фаундеров и профили в вебе…" />
+            {run.isError && <div className="text-sm text-flag-red">Не удалось: {(run.error as Error)?.message}. Попробуй ещё раз.</div>}
+
+            {result && !result.available && (
+              <div className="text-sm text-ink-mute">Поиск не дал результата (перегруз или нет ключа). Попробуй ещё раз.</div>
+            )}
+            {result?.available && founders.length === 0 && (
+              <div className="text-sm text-ink-mute">Не нашли фаундеров с источниками в вебе. Добавь вручную.</div>
+            )}
+
+            {result?.available && founders.length > 0 && (
+              <>
+                <p className="text-[11px] text-ink-mute">
+                  Веб-хитов: {result.stats.from_web}{result.stats.dropped_ungrounded > 0 && ` · отброшено без источника: ${result.stats.dropped_ungrounded}`}.
+                  Каждая ссылка-профиль — из реального источника, проверь перед добавлением.
+                </p>
+                <div className="max-h-[55vh] overflow-y-auto space-y-2">
+                  {founders.map((f, i) => {
+                    const dup = have.has(f.name.toLowerCase().trim());
+                    return (
+                      <label key={i} className={`flex gap-2 items-start p-2 rounded border cursor-pointer ${accepted.has(i) ? "border-ink/30 bg-slate-50" : "border-ink-line"}`}>
+                        <input type="checkbox" checked={accepted.has(i)} onChange={() => toggle(i)} className="mt-1" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm flex items-baseline gap-2 flex-wrap">
+                            <span className="font-medium">{f.name}</span>
+                            {f.role && <span className="text-xs text-ink-mute">· {f.role}</span>}
+                            {dup && <span className="text-[10px] px-1 rounded bg-amber-50 text-amber-700">уже на карточке</span>}
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap gap-2 items-center">
+                            {Object.entries(f.links || {}).length === 0
+                              ? <span className="text-[11px] text-ink-mute italic">профили не найдены — добавишь вручную</span>
+                              : Object.entries(f.links).map(([k, url]) => (
+                                  <a key={k} href={url} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:underline">{k} ↗</a>
+                                ))}
+                          </div>
+                        </div>
+                        {f.source_url && <a href={f.source_url} target="_blank" rel="noreferrer" className="text-blue-600 shrink-0 text-sm" title="источник">↗</a>}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2 items-center pt-1">
+                  <button
+                    onClick={() => commit.mutate(founders.filter((_, i) => accepted.has(i)))}
+                    disabled={commit.isPending || accepted.size === 0}
+                    className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">
+                    {commit.isPending ? "Добавляю…" : `Добавить отмеченных (${accepted.size})`}
+                  </button>
+                  <button onClick={() => { setResult(null); run.reset(); }} className="text-xs text-ink-mute hover:text-ink">отмена</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -235,7 +367,7 @@ function Autofill({ clientId, onCommitted }: { clientId: string; onCommitted: ()
                         {items.map(({ p, i }) => (
                           <li key={i} className="flex gap-2 text-sm items-baseline">
                             <input type="checkbox" checked={accepted.has(i)} onChange={() => toggle(i)} className="mt-1" />
-                            {p.key && <span className="text-ink-mute shrink-0 min-w-[80px]">{p.key}</span>}
+                            {p.key && <span className="text-ink-mute shrink-0 min-w-[80px]">{humanizeKey(p.key)}</span>}
                             <span className="flex-1">{p.value}{p.as_of && <span className="text-[11px] text-ink-mute"> · {p.as_of}</span>}</span>
                             <span className={`text-[10px] px-1 rounded shrink-0 ${p.origin === "matrix" ? "bg-slate-100 text-ink-mute" : "bg-blue-50 text-blue-700"}`}>{p.origin === "web" ? "веб" : p.origin === "doc" ? "документ" : "матрица"}</span>
                             <a href={p.source_url} target="_blank" rel="noreferrer" className="text-blue-600 shrink-0" title={p.source_title || p.source_url}>↗</a>
@@ -306,15 +438,19 @@ function CompanyHeader({ company: e, onChanged }: { company: Entity; onChanged: 
         <span className="ml-auto text-[11px] text-ink-mute">бизнес-профиль · без нарратива</span>
       </div>
       {e.note && <div className="mt-1 text-xs text-ink-mute">{e.note}</div>}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <span className="text-[11px] uppercase tracking-wide text-ink-mute/80 mr-0.5">Официальные ссылки:</span>
+        {Object.entries(e.links || {}).length === 0 && (
+          <span className="text-[11px] text-ink-mute italic">пока нет — добавь сайт, Wikipedia, соцсети</span>
+        )}
         {Object.entries(e.links || {}).map(([k, url]) => (
-          <span key={k} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5">
+          <span key={k} className="inline-flex items-center gap-1 text-[11px] border border-ink-line rounded px-1.5 py-0.5">
             <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{k}</a>
             <button onClick={() => { const { [k]: _d, ...rest } = e.links || {}; setLinks.mutate(rest); }}
               className="text-ink-mute hover:text-red-600">×</button>
           </span>
         ))}
-        <button onClick={() => setLinkOpen(v => !v)} className="text-[11px] text-ink-mute hover:text-ink">+ ссылка</button>
+        <button onClick={() => setLinkOpen(v => !v)} className="text-[11px] text-ink-mute hover:text-ink border border-dashed border-ink-line rounded px-1.5 py-0.5">+ ссылка</button>
       </div>
       {linkOpen && (
         <LinkForm busy={setLinks.isPending}
@@ -348,7 +484,7 @@ function SectionBlock({ section, entityId, facts, onChanged }: {
         <ul className="space-y-1 py-1">
           {facts.map(f => (
             <li key={f.id} className="text-sm flex gap-2 group items-baseline">
-              {f.key && <span className="text-ink-mute shrink-0 min-w-[80px]">{f.key}</span>}
+              {f.key && <span className="text-ink-mute shrink-0 min-w-[80px]">{humanizeKey(f.key)}</span>}
               <span className="flex-1">{f.value}{f.as_of && <span className="text-[11px] text-ink-mute"> · {f.as_of}</span>}</span>
               {f.source_url
                 ? <a href={f.source_url} target="_blank" rel="noreferrer" className="text-blue-600 shrink-0" title={f.source_title || f.source_url}>↗</a>

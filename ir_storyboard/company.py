@@ -93,8 +93,122 @@ _SYSTEM = """Ты строишь СТРУКТУРНЫЙ БИЗНЕС-ПРОФИ�
 - as_of — дата факта, если известна (иначе пусто).
 - Не дублируй факты, уже перечисленные как «УЖЕ В КАРТОЧКЕ».
 
+ЯРЛЫК (key): короткое ЧЕЛОВЕЧЕСКОЕ название по-русски с заглавной буквы — «Основана», «Штаб-квартира», «Категория», «Конкуренты», «Сайт», «Раунд», «Оценка», «ARR». НЕ техническое (никаких product_category, hq, founded_at). Если ярлык не нужен — оставь пустым.
+
 Верни СТРОГО валидный JSON, без преамбулы:
-{"proposals": [{"section": "<одна из секций>", "key": "<короткий ярлык>", "value": "<факт>", "source_url": "<URL из данных>", "source_title": "<название источника>", "as_of": "<дата или пусто>"}]}"""
+{"proposals": [{"section": "<одна из секций>", "key": "<человеческий ярлык по-русски>", "value": "<факт>", "source_url": "<URL из данных>", "source_title": "<название источника>", "as_of": "<дата или пусто>"}]}"""
+
+
+_FOUNDER_SYSTEM = """Ты находишь ОСНОВАТЕЛЕЙ и ключевых руководителей компании и их публичные профили. Дан веб-поиск с источниками (заголовок, сниппет, URL).
+
+Для каждого реального фаундера / со-фаундера (а также CEO, если это ключевая публичная фигура компании) укажи имя, роль и ссылки на ОСНОВНЫЕ ПУБЛИЧНЫЕ ПРОФИЛИ — официальная bio-страница на сайте компании, LinkedIn, X/Twitter, Wikipedia.
+
+ЖЁСТКИЕ ПРАВИЛА (бизнес требует достоверности):
+- Только реальные люди, явно связанные ИМЕННО с этой компанией как фаундеры/руководители. НЕ выдумывай людей.
+- Каждая ссылка-профиль ОБЯЗАНА дословно присутствовать в предоставленных данных. Нет ссылки в данных — не указывай её (профиль можно оставить без ссылки).
+- source_url — URL из данных, где человек упомянут как фаундер/руководитель этой компании.
+- role — кратко по-русски: «сооснователь, CEO», «со-основатель, CTO» и т.п.
+
+Верни СТРОГО валидный JSON, без преамбулы:
+{"founders": [{"name": "<имя>", "role": "<роль>", "source_url": "<URL из данных>", "profiles": [{"label": "Сайт|LinkedIn|X|Wikipedia", "url": "<URL из данных>"}]}]}"""
+
+
+def _founder_web_evidence(name: str) -> List[dict]:
+    """Web hits aimed at surfacing founders and their profile URLs."""
+    if not name:
+        return []
+    queries = [
+        f"{name} founder co-founder CEO",
+        f"{name} founders team leadership",
+        f"{name} founder LinkedIn",
+        f"{name} CEO Twitter X profile",
+        f"{name} founder Wikipedia",
+    ]
+    hits: List[dict] = []
+    seen = set()
+    for q in queries:
+        for h in (llm.web_search(q, 6) or []):
+            k = _norm_url(h.url)
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            hits.append({"title": h.title, "url": h.url, "snippet": h.snippet})
+            if len(hits) >= _MAX_HITS:
+                return hits
+    return hits
+
+
+def build_founder_proposals(conn, client_id: str, *, model: Optional[str] = None,
+                            use_web: bool = True) -> Dict[str, Any]:
+    """Propose founders + their public profiles for analyst verification.
+
+    Web-grounded: a founder's profile link survives only if the URL appears in the
+    web evidence. Already-listed founders (by normalized name) are excluded. Returns
+    {available, founders, stats}; writes nothing."""
+    name = _client_name(conn, client_id)
+    ents = matrix.entities_for_client(conn, client_id)
+    existing = {" ".join((e["name"] or "").lower().split())
+                for e in ents if e["kind"] == "founder"}
+
+    hits = _founder_web_evidence(name) if use_web else []
+    stats = {"from_web": len(hits), "dropped_ungrounded": 0, "duplicates": 0}
+    if not hits:
+        return {"available": True, "founders": [], "stats": stats}
+
+    allowed = {_norm_url(h["url"]) for h in hits}
+    b_block = "\n".join(f"- {h['title']}: {h['snippet'][:200]}  [src: {h['url']}]" for h in hits)
+    card_block = ""
+    if existing:
+        card_block = "УЖЕ НА КАРТОЧКЕ (не повторять):\n" + "\n".join(f"- {n}" for n in existing) + "\n\n"
+    user = f"Компания: {name}\n\n{card_block}ВЕБ-ПОИСК:\n{b_block}"
+
+    data = llm.generate_json(_FOUNDER_SYSTEM, user, max_tokens=3000, model=model)
+    if data is None:
+        return {"available": False, "founders": [], "stats": stats}
+
+    founders: List[dict] = []
+    dropped = dups = 0
+    seen_names = set(existing)
+    for it in (data.get("founders") or []):
+        if not isinstance(it, dict):
+            continue
+        nm = (it.get("name") or "").strip()
+        if not nm:
+            continue
+        norm = " ".join(nm.lower().split())
+        if norm in seen_names:
+            dups += 1
+            continue
+        # source_url must be grounded
+        src = (it.get("source_url") or "").strip()
+        origin = "web" if _norm_url(src) in allowed else None
+        # keep only grounded profile links
+        links: Dict[str, str] = {}
+        for pr in (it.get("profiles") or []):
+            if not isinstance(pr, dict):
+                continue
+            url = (pr.get("url") or "").strip()
+            label = (pr.get("label") or "").strip()[:24]
+            if url and label and _norm_url(url) in allowed:
+                links.setdefault(label, url)
+            elif url:
+                dropped += 1
+        if origin is None and not links:
+            # nothing grounded for this person → skip (avoid hallucinated founders)
+            dropped += 1
+            continue
+        seen_names.add(norm)
+        founders.append({
+            "name": nm[:120],
+            "role": (it.get("role") or "").strip()[:120],
+            "source_url": src if origin else "",
+            "links": links,
+            "origin": "web",
+        })
+
+    stats["dropped_ungrounded"] = dropped
+    stats["duplicates"] = dups
+    return {"available": True, "founders": founders, "stats": stats}
 
 
 def build_about_proposals(conn, client_id: str, *, model: Optional[str] = None,

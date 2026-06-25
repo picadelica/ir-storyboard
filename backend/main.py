@@ -2648,6 +2648,15 @@ def start_company_autofill(client_id: str, body: Optional[AboutAutofillIn] = Non
     return LLMJobOut(job_id=_start_llm_job(fn, client_id), status="processing")
 
 
+@app.post("/api/clients/{client_id}/founders/discover/start", response_model=LLMJobOut)
+def start_founder_discovery(client_id: str):
+    """Discover founders + their public profiles (web + LLM) as a background job;
+    poll /jobs/{id}. Returns proposals only — analyst confirms which to add."""
+    def fn(conn, cid):
+        return company.build_founder_proposals(conn, cid, use_web=True)
+    return LLMJobOut(job_id=_start_llm_job(fn, client_id), status="processing")
+
+
 class AboutProposalIn(BaseModel):
     section: str = ""
     key: str = ""
