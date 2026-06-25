@@ -68,6 +68,31 @@ def _layer_metrics(conn, client_id: str) -> Dict[int, dict]:
     return out
 
 
+def _cells_by_layer(conn, client_id: str) -> Dict[int, list]:
+    """Per-subsection raw для «карты знаний» (тепловая решётка 8×3)."""
+    corr: Dict[str, int] = {}
+    for row in conn.execute(
+        """SELECT c.subsection_id AS sid,
+                  SUM(CASE WHEN (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) > 0
+                           THEN 1 ELSE 0 END) AS corro
+             FROM facts f JOIN cells c ON c.id = f.cell_id
+             WHERE c.client_id=? AND f.state='active' GROUP BY c.subsection_id""",
+        (client_id,),
+    ):
+        corr[row["sid"]] = row["corro"] or 0
+    out: Dict[int, list] = {}
+    for r in matrix.cell_summary(conn, client_id):
+        g, rd, gr = r["n_green"] or 0, r["n_red"] or 0, r["n_grey"] or 0
+        out.setdefault(r["layer_id"], []).append({
+            "subsection_id": r["subsection_id"], "subsection_name": r["subsection_name"],
+            "n_green": g, "n_red": rd, "n_grey": gr, "facts": g + rd + gr,
+            "must_have": (r.get("n_must_client", 0) or 0) + (r.get("n_must_expert", 0) or 0) > 0,
+            "corroborated": corr.get(r["subsection_id"], 0) > 0,
+            "last_update": r["last_update"],
+        })
+    return out
+
+
 def _summaries(conn, client_id: str, tone: str = "analyst") -> Dict[int, dict]:
     rows = conn.execute(
         "SELECT layer_id, text, updated_at FROM dossier_summaries WHERE client_id=? AND tone=?",
@@ -84,6 +109,7 @@ def build_dossier(conn, client_id: str, *, tone: str = "analyst") -> dict:
 
     met = _layer_metrics(conn, client_id)
     summ = _summaries(conn, client_id, tone)
+    cells = _cells_by_layer(conn, client_id)
 
     layers = []
     tot_f = tot_cells = filled = red = mustc = muste = corro = corro_tot = 0
@@ -99,6 +125,7 @@ def build_dossier(conn, client_id: str, *, tone: str = "analyst") -> dict:
             "channels": m["channels"], "last_update": m["last_update"],
             "n_must_client": m["n_must_client"], "n_must_expert": m["n_must_expert"],
             "corroborated": m["corroborated"], "facts_total": m["facts_total"],
+            "cells": cells.get(layer.id, []),
         })
         tot_f += facts; tot_cells += m["cells_total"]; filled += m["cells_filled"]
         red += m["n_red"]; mustc += m["n_must_client"]; muste += m["n_must_expert"]

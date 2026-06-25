@@ -593,6 +593,19 @@ export interface DossierLayer {
   n_must_expert: number;
   corroborated: number;
   facts_total: number;
+  cells: DossierCell[];
+}
+
+export interface DossierCell {
+  subsection_id: string;
+  subsection_name: string;
+  n_green: number;
+  n_red: number;
+  n_grey: number;
+  facts: number;
+  must_have: boolean;
+  corroborated: boolean;
+  last_update?: string | null;
 }
 
 export interface Dossier {
