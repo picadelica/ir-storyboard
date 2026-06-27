@@ -50,11 +50,13 @@ def build_matrix_export(conn, client_id: str) -> dict:
     cards = []
     for layer in LAYERS:
         for sub in layer.subsections:
+            sublayer = int(sub.id.split(".")[1])        # 2-я цифра координаты ячейки (1–3)
             for r in matrix.facts_for_cell(conn, client_id, sub.id):
                 cards.append({
-                    "matrix_no": sub.id,                # номер в матрице (координата ячейки)
+                    "matrix_no": sub.id,                # координата ячейки, напр. "1.1"
                     "subsection_name": sub.name,
-                    "layer_id": layer.id,
+                    "layer_id": layer.id,               # слой 1–8
+                    "sublayer": sublayer,               # подсекция внутри слоя 1–3
                     "layer_name": layer.name,
                     "fact_id": r["id"],
                     "title": (r["title"] if "title" in r.keys() else "") or "",
@@ -89,7 +91,8 @@ def build_matrix_export(conn, client_id: str) -> dict:
             "description": (
                 "Выгрузка содержания нарративной матрицы: тексты карточек без ссылок на источники. "
                 "card_color — цвет карточки (флаг факта); star — цвет звёздочки (приоритет must-have, "
-                "null если обычная карточка); matrix_no — номер ячейки в матрице."
+                "null если обычная карточка); matrix_no — номер ячейки в матрице (layer_id — слой "
+                "числом, sublayer — подсекция внутри слоя числом)."
             ),
             "legend": {"card_color": CARD_COLORS, "star_color": STAR_COLORS},
         },
@@ -135,6 +138,7 @@ def describe_json_format(data: dict) -> str:
     L.append('- `matrix_no` (строка) — номер ячейки в матрице, напр. `"1.1"`')
     L.append("- `subsection_name` (строка) — название подсекции (ячейки)")
     L.append("- `layer_id` (число) — номер слоя (1–8)")
+    L.append("- `sublayer` (число) — номер подсекции внутри слоя (1–3); вторая цифра `matrix_no` числом")
     L.append("- `layer_name` (строка) — название слоя")
     L.append("- `fact_id` (число) — внутренний id факта")
     L.append("- `title` (строка) — короткий заголовок карточки (может быть пустым)")
@@ -153,5 +157,5 @@ def describe_json_format(data: dict) -> str:
     L.append("")
     L.append("> В выгрузку попадают только активные карточки; объединённые и отклонённые "
              "исходники исключены. Карточки сгруппированы по слою (`layer_id`), внутри "
-             "слоя — по ячейке (`matrix_no`).")
+             "слоя — по ячейке (`matrix_no` / `sublayer`).")
     return "\n".join(L)

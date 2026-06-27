@@ -541,7 +541,8 @@ export interface AuditResult {
 export interface ExportCard {
   matrix_no: string;          // номер ячейки в матрице (напр. "1.1")
   subsection_name: string;
-  layer_id: number;
+  layer_id: number;           // слой 1–8
+  sublayer: number;           // подсекция внутри слоя 1–3 (вторая цифра matrix_no числом)
   layer_name: string;
   fact_id: number;
   title: string;

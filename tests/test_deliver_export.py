@@ -38,6 +38,8 @@ def test_export_shape_and_colors(conn):
     assert by_text["Раунд A $46M"]["star"] == "blue"
     assert by_text["Раунд A $46M"]["card_color"] == "green"
     assert by_text["Раунд A $46M"]["matrix_no"] == "2.1"
+    assert by_text["Раунд A $46M"]["layer_id"] == 2
+    assert by_text["Раунд A $46M"]["sublayer"] == 1
     assert by_text["Риск оттока"]["star"] == "purple"
     assert by_text["Обычный факт"]["star"] is None
 
@@ -52,7 +54,7 @@ def test_readme_describes_json_format(conn):
     assert md == deliver.describe_json_format(out)
     # markdown headings + key fields documented + enum values explained
     assert md.startswith("# Формат JSON-выгрузки матрицы")
-    for token in ("`cards`", "`card_color`", "`star`", "`matrix_no`", "`company_card`",
+    for token in ("`cards`", "`card_color`", "`star`", "`matrix_no`", "`sublayer`", "`company_card`",
                   "`green`", "`blue`", "`null`"):
         assert token in md
 
