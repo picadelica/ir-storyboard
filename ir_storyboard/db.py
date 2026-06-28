@@ -235,6 +235,27 @@ def init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (client_id, layer_id, tone)
         )
     """)
+    # app-wide one-time migration flags (key/value). Keeps one-shot data fixes from
+    # re-running on every startup (which would clobber later manual edits).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    conn.commit()
+    _migrate_red_to_grey_once(conn)
+
+
+def _migrate_red_to_grey_once(conn: sqlite3.Connection) -> None:
+    """One-time: retire the (too crude) auto red-flag — fold existing red facts into
+    grey. Guarded so it runs exactly once: manual red flags set afterwards survive.
+    The `red` value stays valid in the schema CHECK (flags may be set by hand later)."""
+    done = conn.execute("SELECT value FROM app_meta WHERE key='reflag_red_to_grey_v1'").fetchone()
+    if done:
+        return
+    conn.execute("UPDATE facts SET flag='grey' WHERE flag='red'")
+    conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('reflag_red_to_grey_v1', '1')")
     conn.commit()
 
 

@@ -118,12 +118,10 @@ def stub_classify(text: str) -> FactCandidate:
         if score > best_score:
             best_sid, best_score = sid, score
 
-    if any(h in norm for h in GREY_HINTS):
+    # авто-красный флаг убран как слишком грубый: риск/проблема/пробел → grey,
+    # иначе green. Красный остаётся как РУЧНОЙ флаг (выставляется аналитиком).
+    if any(h in norm for h in GREY_HINTS) or any(h in norm for h in NEGATIVE_HINTS):
         flag = "grey"
-    elif any(h in norm for h in NEGATIVE_HINTS):
-        flag = "red"
-    elif any(h in norm for h in POSITIVE_HINTS):
-        flag = "green"
     else:
         flag = "green"
 
@@ -194,13 +192,12 @@ You are an IR narrative analyst. Classify each fact into the IR Storyboard matri
 Subsections (id — name — parent layer):
 {_MATRIX_LINES}
 
-Flag rules:
-- green  confirmed positive signal, strength, achievement
-- red    risk, controversy, concern, weakness, regulatory issue
-- grey   unverified, ambiguous, information gap, unknown
+Flag rules (only two — do NOT use red, it is a manual analyst flag):
+- green  a substantive signal we have on file (strength, achievement, fact, even a risk we know about)
+- grey   unverified, ambiguous, information gap, unknown, or an explicit "we don't know yet"
 
 Return ONLY valid JSON — no markdown fences, no explanation:
-{{"results":[{{"sid":"X.Y","flag":"green|red|grey","conf":0.0,"rationale":"one short phrase"}}]}}
+{{"results":[{{"sid":"X.Y","flag":"green|grey","conf":0.0,"rationale":"one short phrase"}}]}}
 
 One object per input fact, same order. Set sid to null if no subsection fits.\
 """
@@ -262,7 +259,8 @@ def _try_init_anthropic() -> None:
         for i, item in enumerate(items):
             # LLM may return more items than input texts (multiple facts per paragraph)
             text = texts[i] if i < len(texts) else texts[-1] if texts else ""
-            flag = item.flag if item.flag in ("green", "red", "grey") else "grey"
+            # авто-красный убран: модель не должна выдавать red; любой не-green → grey
+            flag = "green" if item.flag == "green" else "grey"
             out.append(FactCandidate(
                 text=text,
                 suggested_subsection_id=item.sid,

@@ -14,28 +14,18 @@ _GREY_TRIGGERS = [
     "not mentioned", "не указан", "не задокументирован",
 ]
 
-_RED_TRIGGERS = [
-    "отозван", "провал", "убыток", "scandal", "lawsuit", "fraud",
-    "sanction", "losing", "down", "failed", "failure",
-    "bankruptcy", "bankrupt", "collapsed", "collapse",
-    "criminal", "arrested", "indicted", "accused",
-    "controversy", "controversial", "риск провала", "скандал",
-    "иск", "претензии", "регуляторное давление", "enforcement",
-]
-
-
 def classify_with_reason(text: str, llm_flag: str) -> tuple[str, str]:
-    """Return (final_flag, reason), applying safety-net heuristics.
+    """Return (final_flag, reason), applying the safety-net gap heuristic.
 
-    If grey triggers found → grey (overrides green or red).
-    If red triggers found and llm says green → red.
-    Otherwise → keep llm_flag.
+    If grey triggers found → grey (overrides anything — it's an explicit gap).
+    Otherwise → keep llm_flag unchanged.
 
-    ``reason`` is non-empty ONLY when the heuristic CHANGED the flag — it
-    carries the first matched trigger keyword so a red/grey fact promoted by
-    the keyword classifier never lands without an explanation. When the flag is
-    unchanged (LLM already produced it), ``reason`` is "" and the caller keeps
-    the LLM-supplied rationale.
+    Авто-красный убран как слишком грубый: негатив-но-известный факт остаётся тем,
+    чем его назвал LLM (обычно green). Красный остаётся РУЧНЫМ флагом аналитика.
+
+    ``reason`` is non-empty ONLY when the heuristic CHANGED the flag (a grey
+    promotion), carrying the matched keyword. Unchanged flag → "" (caller keeps
+    the LLM rationale).
     """
     norm = text.lower()
 
@@ -44,11 +34,6 @@ def classify_with_reason(text: str, llm_flag: str) -> tuple[str, str]:
         if llm_flag != "grey":
             return "grey", f"авто-классификатор: ключевое слово «{grey_kw}» (пробел/неизвестно)"
         return "grey", ""
-
-    if llm_flag == "green":
-        red_kw = next((t for t in _RED_TRIGGERS if t in norm), None)
-        if red_kw is not None:
-            return "red", f"авто-классификатор: ключевое слово «{red_kw}» (риск/споры/негатив)"
 
     return llm_flag, ""
 

@@ -21,12 +21,11 @@ from ir_storyboard.llm import _normalize_rationale, _stub_extract
 
 # ── classify_with_reason ────────────────────────────────────────────────────
 
-def test_red_trigger_on_green_returns_reason():
-    """green + red keyword → red with a non-empty reason carrying the keyword."""
+def test_auto_red_retired_negative_known_stays_green():
+    """Авто-красный убран: негатив-но-известный факт остаётся green (не red)."""
     flag, reason = classify_with_reason("The company faced a major lawsuit", "green")
-    assert flag == "red"
-    assert reason
-    assert "lawsuit" in reason
+    assert flag == "green"
+    assert reason == ""
 
 
 def test_grey_trigger_returns_reason():
@@ -43,14 +42,15 @@ def test_unchanged_flag_returns_empty_reason():
     assert flag == "green"
     assert reason == ""
 
-    # LLM already said red → heuristic does not re-author the reason
+    # Ручной red передаётся как есть (эвристика не трогает не-grey)
     flag, reason = classify_with_reason("There was a lawsuit", "red")
     assert flag == "red"
     assert reason == ""
 
 
 def test_apply_heuristics_wrapper_matches_flag():
-    assert apply_heuristics("The company faced a major lawsuit", "green") == "red"
+    # авто-красный убран: негатив-но-известное → green; пробел → grey
+    assert apply_heuristics("The company faced a major lawsuit", "green") == "green"
     assert apply_heuristics("No information available", "green") == "grey"
     assert apply_heuristics("A neutral statement.", "green") == "green"
 
@@ -73,15 +73,12 @@ def test_normalize_rationale_green_drops():
 
 # ── end-to-end through the stub extractor (no LLM key needed) ────────────────
 
-def test_stub_extract_red_fact_carries_rationale():
-    """A paragraph with a red trigger, classified green by the (stub) LLM,
-    must emerge red WITH a non-empty rationale — never an empty concern."""
+def test_stub_extract_no_auto_red():
+    """Авто-красный убран: негатив-но-известный абзац НЕ становится red
+    (остаётся green). Красный — только ручной флаг аналитика."""
     paragraphs = [
         "The founder was named in a lawsuit by former investors over the round.",
     ]
     facts = _stub_extract("Founder background", paragraphs, ["1.1"])
     assert facts, "expected at least one extracted fact"
-    red = [f for f in facts if f.flag == "red"]
-    assert red, "red trigger should have promoted the fact to red"
-    for f in red:
-        assert f.rationale.strip(), "red fact must carry a non-empty rationale"
+    assert not [f for f in facts if f.flag == "red"], "не должно быть авто-красных фактов"

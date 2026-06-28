@@ -1,25 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { cellFill, recordAvg } from "../lib/cellFill";
 import type { Dossier, DossierLayer, DossierCell, Fact, Flag } from "../types";
 import FlagDot from "./FlagDot";
 
 type Health = "green" | "amber" | "thin";
-type DomFlag = "green" | "red" | "grey" | "empty";
-
-const CELLC: Record<DomFlag, { bg: string; fg: string }> = {
-  green: { bg: "#EAF3DE", fg: "#3B6D11" },
-  red: { bg: "#FCEBEB", fg: "#A32D2D" },
-  grey: { bg: "#F1EFE8", fg: "#5F5E5A" },
-  empty: { bg: "transparent", fg: "#B4B2A9" },
-};
-function dominant(c: DossierCell): DomFlag {
-  if (c.facts === 0) return "empty";
-  const m = Math.max(c.n_green, c.n_red, c.n_grey);
-  if (c.n_red === m) return "red";
-  if (c.n_green === m) return "green";
-  return "grey";
-}
 function staleDays(ts?: string | null): number {
   if (!ts) return 9999;
   const d = new Date(ts.replace(" ", "T") + (ts.includes("Z") ? "" : "Z"));
@@ -64,17 +50,21 @@ function relTime(ts?: string | null): string {
   return `${Math.floor(days / 30)} мес назад`;
 }
 
-// Карта знаний: 8 строк (слои) × 3 клетки (подсекции). Цвет = доминирующий флаг,
-// число = факты, ✓ = корроборация, ★ = must-have, тусклая рамка = устарело.
+// Карта знаний: 8 строк (слои) × 3 клетки (подсекции), на всю ширину. Заливка = объём
+// записей (светлее/темнее зелёным), серый угол = доля пробелов; цифра по центру.
 function KnowledgeMap({ layers, onPick }: { layers: DossierLayer[]; onPick: (sid: string, name: string) => void }) {
+  const avg = recordAvg(layers.flatMap(l => l.cells.map(c => c.facts)));
   return (
     <section className="bg-white rounded-lg border border-ink-line p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold">Карта знаний</h3>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-mute">
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: CELLC.green.bg }} /> факты</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: CELLC.red.bg }} /> риск</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm border border-dashed border-ink-line" /> пробел</span>
+          <span className="flex items-center gap-1">
+            <span className="inline-flex h-2.5 w-10 rounded-sm overflow-hidden border border-black/5"
+              style={{ background: "linear-gradient(to right, hsl(96,45%,88%), hsl(96,45%,58%))" }} /> объём
+          </span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm border border-black/5" style={{ background: "hsl(45,10%,85%)" }} /> пробел</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm border border-dashed border-ink-line" /> пусто</span>
           <span>✓ 2+ источника</span>
           <span>★ must-have</span>
         </div>
@@ -86,22 +76,20 @@ function KnowledgeMap({ layers, onPick }: { layers: DossierLayer[]; onPick: (sid
               <span className="text-[11px] text-ink-mute tabular-nums">{l.layer_id}</span>
               <span className="text-[12px] truncate" title={l.name}>{l.name}</span>
             </div>
-            <div className="flex gap-1.5">
+            <div className="flex-1 grid grid-cols-3 gap-1.5">
               {l.cells.map(c => {
-                const dom = dominant(c);
-                const col = CELLC[dom];
+                const fill = cellFill(c.n_green, c.n_grey + c.n_red, avg);
                 const stale = c.facts > 0 && staleDays(c.last_update) > 45;
                 return (
                   <button key={c.subsection_id} onClick={() => onPick(c.subsection_id, c.subsection_name)}
-                    title={`${c.subsection_id} ${c.subsection_name}: ${c.facts} фактов${c.n_red ? `, ${c.n_red} риск` : ""}${c.corroborated ? ", есть 2+ источника" : ""}${c.must_have ? ", must-have" : ""}`}
-                    className={`relative w-16 h-11 rounded flex items-center justify-center transition hover:ring-2 hover:ring-ink/20 ${dom === "empty" ? "border border-dashed border-ink-line" : ""} ${stale ? "opacity-60" : ""}`}
-                    style={dom === "empty" ? undefined : { background: col.bg }}>
-                    <span className="text-[13px] font-semibold tabular-nums" style={{ color: col.fg }}>
+                    title={`${c.subsection_id} ${c.subsection_name}: ${c.facts} фактов${c.n_grey ? `, ${c.n_grey} пробел` : ""}${c.corroborated ? ", есть 2+ источника" : ""}${c.must_have ? ", must-have" : ""}`}
+                    style={fill.empty ? undefined : { background: fill.background }}
+                    className={`relative h-11 rounded flex items-center justify-center transition hover:ring-2 hover:ring-ink/20 ${fill.empty ? "border border-dashed border-ink-line" : ""} ${stale ? "opacity-60" : ""}`}>
+                    <span className="text-[13px] font-semibold tabular-nums" style={{ color: fill.fg }}>
                       {c.facts || ""}
                     </span>
-                    {c.n_red > 0 && dom !== "red" && <span className="absolute top-1 left-1 w-1.5 h-1.5 rounded-full bg-flag-red" />}
                     {c.must_have && <span className="absolute top-0.5 right-1 text-[10px] leading-none text-flag-blue">★</span>}
-                    {c.corroborated && <span className="absolute bottom-0.5 right-1 text-[9px] leading-none" style={{ color: col.fg }}>✓</span>}
+                    {c.corroborated && <span className="absolute bottom-0.5 right-1 text-[9px] leading-none" style={{ color: fill.fg }}>✓</span>}
                   </button>
                 );
               })}
@@ -172,7 +160,7 @@ export default function DossierView({ clientId }: { clientId: string }) {
   const o = d.overall;
 
   return (
-    <div className="p-5 max-w-4xl space-y-4">
+    <div className="p-5 space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Досье клиента</h2>

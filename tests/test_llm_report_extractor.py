@@ -63,9 +63,10 @@ def test_grey_heuristic_overrides_red():
     assert apply_heuristics(text, "red") == "grey"
 
 
-def test_red_heuristic_upgrades_green():
+def test_auto_red_retired_negative_stays_green():
+    # авто-красный убран: негатив-но-известное остаётся green (red — ручной флаг)
     text = "The CEO was arrested and faces fraud charges in three jurisdictions."
-    assert apply_heuristics(text, "green") == "red"
+    assert apply_heuristics(text, "green") == "green"
 
 
 def test_no_override_when_neutral():
