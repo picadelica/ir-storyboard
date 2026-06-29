@@ -81,13 +81,13 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
           const cov = layerCoverage(layerCells);
           return (
             <div key={L.id} className="flex items-stretch gap-2">
-              {/* Layer label: big number + name + mini coverage */}
-              <div className="w-44 shrink-0 flex items-center gap-3 px-3.5 py-2.5 rounded-xl border border-ink-line bg-white">
-                <span className="text-4xl font-semibold leading-none tabular-nums select-none text-ink/15">{L.id}</span>
+              {/* Layer label — стержень матрицы: крупное имя слоя + номер + покрытие */}
+              <div className="w-52 shrink-0 flex items-center gap-3 px-4 py-3 rounded-3xl border border-ink-line bg-white">
+                <span className="text-[2.5rem] font-bold leading-none tabular-nums select-none text-ink/25">{L.id}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium leading-tight text-ink">{L.name}</div>
+                  <div className="text-[15px] font-bold leading-snug text-ink">{L.name}</div>
                   <div className="flex items-center gap-2 mt-2">
-                    <div className="h-1 flex-1 rounded-full bg-ink/5 overflow-hidden">
+                    <div className="h-1.5 flex-1 rounded-full bg-ink/10 overflow-hidden">
                       <div className="h-full rounded-full bg-flag-green" style={{ width: `${cov}%` }} />
                     </div>
                     <span className="text-[10px] text-ink-mute tabular-nums">{cov}%</span>
