@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { cellFill, recordAvg } from "../lib/cellFill";
-import type { CellSummary, Channel, Layer } from "../types";
+import type { CellSummary, Layer } from "../types";
 
 const cellTotal = (c: CellSummary) => (c.n_green || 0) + (c.n_red || 0) + (c.n_grey || 0);
 
@@ -10,41 +10,6 @@ interface Props {
   selectedSubsectionId?: string;
   onSelectCell: (sid: string) => void;
   present?: boolean;
-}
-
-const CHANNEL_LABEL: Record<Channel, string> = {
-  offline_interview: "Offline interview",
-  online_interview: "Online interview",
-  archival: "Archival",
-  online_research: "Web research",
-};
-
-/** Tiny inline stroke icon per source channel — no icon-lib dependency. */
-function ChannelIcon({ ch }: { ch: Channel }) {
-  const p = { width: 13, height: 13, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-  const title = CHANNEL_LABEL[ch];
-  switch (ch) {
-    case "offline_interview":
-      return <svg {...p}><title>{title}</title><rect x="9" y="2" width="6" height="11" rx="3" /><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4" /></svg>;
-    case "online_interview":
-      return <svg {...p}><title>{title}</title><circle cx="12" cy="12" r="9" /><path d="M10 8.5l6 3.5-6 3.5z" /></svg>;
-    case "archival":
-      return <svg {...p}><title>{title}</title><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11h14V8M10 12h4" /></svg>;
-    case "online_research":
-      return <svg {...p}><title>{title}</title><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z" /></svg>;
-  }
-}
-
-function relTime(iso?: string | null): string {
-  if (!iso) return "";
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const days = Math.floor((Date.now() - then) / 86_400_000);
-  if (days <= 0) return "today";
-  if (days < 7) return `${days}d`;
-  if (days < 30) return `${Math.floor(days / 7)}w`;
-  if (days < 365) return `${Math.floor(days / 30)}mo`;
-  return `${Math.floor(days / 365)}y`;
 }
 
 /** Per-layer coverage: fraction of cells that carry any green signal. */
@@ -142,46 +107,33 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
                   // красный свёрнут в серый: считаем серые = grey + (legacy) red
                   const fill = cellFill(cell.n_green || 0, (cell.n_grey || 0) + (cell.n_red || 0), avgRecords);
                   const selected = selectedSubsectionId === s.id;
-                  const rel = relTime(cell.last_update);
                   return (
                     <button
                       key={s.id}
                       onClick={() => onSelectCell(s.id)}
+                      title={s.name}
                       style={fill.empty ? undefined : { background: fill.background }}
-                      className={`group text-left rounded-xl border px-3 py-2.5 transition
+                      className={`group relative text-left rounded-3xl border px-5 py-4 min-h-[5.25rem] flex items-center transition
                         ${fill.empty ? "bg-white" : ""}
                         ${selected
                           ? "border-blue-500 ring-1 ring-blue-500"
                           : fill.empty
                             ? "border-dashed border-slate-300 hover:border-ink/30"
-                            : "border-black/5 hover:border-black/15 hover:shadow-sm"}`}
+                            : "border-black/5 hover:border-black/20 hover:shadow-sm"}`}
                     >
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-[11px] font-mono text-ink-mute tabular-nums">{s.id}</span>
-                        <span className="text-[13px] font-medium leading-tight text-ink truncate">{s.name}</span>
-                      </div>
+                      {/* must-have — деликатно в углу */}
+                      {(cell.n_must_client || cell.n_must_expert) ? (
+                        <div className="absolute top-3 right-4 flex items-center gap-2 text-[12px] font-semibold leading-none">
+                          {cell.n_must_client ? <span className="text-flag-blue" title="must-have от клиента">★{cell.n_must_client}</span> : null}
+                          {cell.n_must_expert ? <span className="text-purple-600" title="важное от эксперта">★{cell.n_must_expert}</span> : null}
+                        </div>
+                      ) : null}
 
-                      <div className="flex items-center justify-between mt-1 text-[11px] text-ink-mute">
-                        {total === 0 ? (
-                          <span className="inline-flex items-center gap-1 text-ink-mute/70">
-                            <span className="text-sm leading-none">+</span> open gap
-                          </span>
-                        ) : (
-                          <span className="tabular-nums text-ink/70">
-                            {total} fact{total === 1 ? "" : "s"}
-                            {cell.n_grey ? <span className="text-ink-mute"> · {cell.n_grey} пробел</span> : null}
-                            {cell.n_must_client ? <span className="text-flag-blue" title="must-have от клиента"> · ★{cell.n_must_client}</span> : null}
-                            {cell.n_must_expert ? <span className="text-purple-600" title="важное от эксперта"> · ★{cell.n_must_expert}</span> : null}
-                          </span>
-                        )}
-                        <span className="flex items-center gap-1.5">
-                          {(cell.channels ?? []).map(ch => (
-                            <span key={ch} className="text-ink-mute/70">
-                              <ChannelIcon ch={ch} />
-                            </span>
-                          ))}
-                          {rel && <span className="tabular-nums text-ink-mute/60 ml-0.5">{rel}</span>}
-                        </span>
+                      <div className="flex-1 flex items-center justify-between gap-3">
+                        <span className={`font-bold leading-tight text-[15px] md:text-[17px] ${fill.empty ? "text-ink-mute" : "text-ink"}`}>{s.name}</span>
+                        {total > 0
+                          ? <span className="shrink-0 text-3xl md:text-4xl font-bold tabular-nums leading-none text-ink/90">{total}</span>
+                          : <span className="shrink-0 text-2xl leading-none text-ink-line">+</span>}
                       </div>
                     </button>
                   );
