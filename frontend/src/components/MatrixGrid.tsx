@@ -12,14 +12,6 @@ interface Props {
   present?: boolean;
 }
 
-/** Per-layer coverage: fraction of cells that carry any green signal. */
-function layerCoverage(cells: (CellSummary | undefined)[]): number {
-  const present = cells.filter(Boolean) as CellSummary[];
-  if (present.length === 0) return 0;
-  const covered = present.filter(c => (c.n_green || 0) > 0).length;
-  return Math.round((covered / present.length) * 100);
-}
-
 export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCell, present }: Props) {
   const qc = useQueryClient();
   const layers = useQuery<Layer[]>({ queryKey: ["layers"], queryFn: api.layers });
@@ -43,6 +35,13 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
   const totalMust = cells.data.reduce((n, c) => n + (c.n_must || 0), 0);
   // среднее число записей на непустую ячейку — база для интенсивности заливки
   const avgRecords = recordAvg(cells.data.map(cellTotal));
+  // агрегат по слою (сумма трёх подсекций) — для заливки колонки названий той же логикой
+  const layerAgg = new Map(layers.data.map(L => {
+    let g = 0, gr = 0;
+    for (const s of L.subsections) { const c = cellBySid.get(s.id); if (c) { g += c.n_green || 0; gr += (c.n_grey || 0) + (c.n_red || 0); } }
+    return [L.id, { g, gr, total: g + gr }];
+  }));
+  const avgLayer = recordAvg([...layerAgg.values()].map(a => a.total));
 
   return (
     <div className={`p-5 ${present ? "px-6" : ""}`}>
@@ -77,29 +76,27 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
 
       <div className="space-y-2">
         {layers.data.map(L => {
-          const layerCells = L.subsections.map(s => cellBySid.get(s.id));
-          const cov = layerCoverage(layerCells);
+          const la = layerAgg.get(L.id)!;
+          const lfill = cellFill(la.g, la.gr, avgLayer);   // заливка по сумме слоя, та же логика
           return (
-            <div key={L.id} className="flex items-stretch gap-2">
-              {/* Layer label — стержень матрицы: крупное имя слоя + номер + покрытие */}
-              <div className="w-52 shrink-0 flex items-center gap-3 px-4 py-3 rounded-3xl border border-ink-line bg-white">
-                <span className="text-[2.5rem] font-bold leading-none tabular-nums select-none text-ink/25">{L.id}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[15px] font-bold leading-snug text-ink">{L.name}</div>
-                  <div className="flex items-center gap-2 mt-2">
-                    <div className="h-1.5 flex-1 rounded-full bg-ink/10 overflow-hidden">
-                      <div className="h-full rounded-full bg-flag-green" style={{ width: `${cov}%` }} />
-                    </div>
-                    <span className="text-[10px] text-ink-mute tabular-nums">{cov}%</span>
-                  </div>
-                </div>
+            <div
+              key={L.id}
+              className="grid gap-2 items-stretch"
+              style={{ gridTemplateColumns: `repeat(${L.subsections.length + 1}, minmax(0, 1fr))` }}
+            >
+              {/* Колонка названий секций — та же ширина и заливка (по сумме слоя), без процентов */}
+              <div
+                title={L.name}
+                style={lfill.empty ? undefined : { background: lfill.background }}
+                className={`relative rounded-3xl border px-5 py-4 min-h-[5.25rem] flex items-center gap-3
+                  ${lfill.empty ? "bg-white border-dashed border-slate-300" : "border-black/10"}`}
+              >
+                <span className="text-2xl font-bold leading-none tabular-nums select-none text-ink/30">{L.id}</span>
+                <span className="font-bold leading-tight text-[15px] md:text-[17px] text-ink">{L.name}</span>
               </div>
 
               {/* Cells in this layer */}
-              <div
-                className="flex-1 grid gap-2"
-                style={{ gridTemplateColumns: `repeat(${L.subsections.length}, minmax(0, 1fr))` }}
-              >
+              <>
                 {L.subsections.map(s => {
                   const cell = cellBySid.get(s.id);
                   if (!cell) return null;
@@ -138,7 +135,7 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
                     </button>
                   );
                 })}
-              </div>
+              </>
             </div>
           );
         })}
