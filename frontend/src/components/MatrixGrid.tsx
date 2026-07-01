@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { cellFill, recordAvg } from "../lib/cellFill";
 import type { CellSummary, Layer } from "../types";
@@ -14,16 +13,10 @@ interface Props {
 }
 
 export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCell, present }: Props) {
-  const qc = useQueryClient();
-  const [menuOpen, setMenuOpen] = useState(false);
   const layers = useQuery<Layer[]>({ queryKey: ["layers"], queryFn: api.layers });
   const cells = useQuery<CellSummary[]>({
     queryKey: ["matrix", clientId],
     queryFn: () => api.matrixView(clientId),
-  });
-  const genTitles = useMutation({
-    mutationFn: () => api.generateTitles(clientId),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["facts", clientId] }); },
   });
 
   if (layers.isLoading || cells.isLoading) {
@@ -34,60 +27,11 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
   }
 
   const cellBySid = new Map(cells.data.map(c => [c.subsection_id, c]));
-  const totalMust = cells.data.reduce((n, c) => n + (c.n_must || 0), 0);
   // среднее число записей на непустую ячейку — база для интенсивности заливки
   const avgRecords = recordAvg(cells.data.map(cellTotal));
 
   return (
     <div className={`p-5 ${present ? "px-6" : ""}`}>
-      <div className="flex items-center justify-end gap-3 mb-2 min-h-[2rem]">
-        {!present && genTitles.isPending && <span className="text-xs text-ink-mute">Генерирую заголовки…</span>}
-        {!present && genTitles.isSuccess && !genTitles.isPending && (
-          <span className="text-xs text-ink-mute">Готово: {genTitles.data?.titled ?? 0} заголовков</span>
-        )}
-
-        {/* Действия свёрнуты в компактное меню — экран не захламляется */}
-        {!present && (
-          <div className="relative">
-            <button
-              onClick={() => setMenuOpen(o => !o)}
-              title="Действия"
-              aria-label="Действия"
-              className="flex items-center justify-center w-8 h-8 rounded-lg border border-ink-line text-ink-mute hover:text-ink hover:bg-slate-50"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-                <circle cx="8" cy="3" r="1.4" /><circle cx="8" cy="8" r="1.4" /><circle cx="8" cy="13" r="1.4" />
-              </svg>
-            </button>
-            {menuOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 mt-1 z-20 w-64 bg-white border border-ink-line rounded-lg shadow-lg py-1 text-sm">
-                  <button
-                    onClick={() => { genTitles.mutate(); setMenuOpen(false); }}
-                    disabled={genTitles.isPending}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-50 disabled:opacity-50"
-                    title="Сгенерировать короткие заголовки (2-3 слова) для карточек без заголовка"
-                  >
-                    Заголовки карточек
-                  </button>
-                  {totalMust > 0 && (
-                    <button
-                      onClick={() => { api.downloadMustHaveFacts(clientId, clientId).catch(() => {}); setMenuOpen(false); }}
-                      className="w-full flex items-center gap-2 text-left px-3 py-2 hover:bg-slate-50 text-flag-blue"
-                      title="Скачать must-have факты нумерованным списком для согласования с заказчиком"
-                    >
-                      <span className="inline-block w-2 h-2 rounded-full bg-flag-blue shrink-0" />
-                      Выгрузить must-have (★{totalMust})
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
       <div className="space-y-2">
         {layers.data.map(L => (
           <div

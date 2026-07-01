@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { api } from "./api";
 import type { CellSummary, Layer } from "./types";
@@ -307,6 +307,8 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
             </NavLink>
           ))}
 
+          {activeZone.id === "build" && <BuildActions clientId={clientId} />}
+
           {activeZone.id === "deliver" && (
             <div className="ml-auto flex items-center gap-1.5 py-1.5">
               <input
@@ -323,6 +325,41 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Действия уровня матрицы вынесены сюда (в зону Build), чтобы шапка матрицы была пустой
+function BuildActions({ clientId }: { clientId: string }) {
+  const qc = useQueryClient();
+  const cells = useQuery<CellSummary[]>({ queryKey: ["matrix", clientId], queryFn: () => api.matrixView(clientId) });
+  const totalMust = (cells.data ?? []).reduce((n, c) => n + (c.n_must || 0), 0);
+  const genTitles = useMutation({
+    mutationFn: () => api.generateTitles(clientId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["facts", clientId] }); },
+  });
+  return (
+    <div className="ml-auto flex items-center gap-1.5 py-1.5">
+      <button
+        onClick={() => genTitles.mutate()}
+        disabled={genTitles.isPending}
+        title="Сгенерировать короткие заголовки (2-3 слова) для карточек без заголовка"
+        className="text-xs px-2.5 py-1 rounded-lg border border-ink-line text-ink hover:bg-ink/[0.04] disabled:opacity-50 whitespace-nowrap"
+      >
+        {genTitles.isPending ? "Генерирую заголовки…"
+          : genTitles.isSuccess ? `Готово: ${genTitles.data?.titled ?? 0} заголовков`
+          : "Заголовки карточек"}
+      </button>
+      {totalMust > 0 && (
+        <button
+          onClick={() => api.downloadMustHaveFacts(clientId, clientId).catch(() => {})}
+          title="Скачать must-have факты нумерованным списком для согласования с заказчиком"
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-flag-blue/40 text-flag-blue hover:bg-flag-blue/5 whitespace-nowrap"
+        >
+          <span className="inline-block w-2 h-2 rounded-full bg-flag-blue" />
+          Выгрузить must-have (★{totalMust})
+        </button>
       )}
     </div>
   );
