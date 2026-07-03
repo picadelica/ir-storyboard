@@ -61,9 +61,9 @@ function KnowledgeMap({ layers, onPick }: { layers: DossierLayer[]; onPick: (sid
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-mute">
           <span className="flex items-center gap-1">
             <span className="inline-flex h-2.5 w-10 rounded-sm overflow-hidden border border-black/5"
-              style={{ background: "linear-gradient(to right, hsl(96,45%,88%), hsl(96,45%,58%))" }} /> объём
+              style={{ background: "linear-gradient(to right, hsl(152,26%,90%), hsl(152,26%,38%))" }} /> объём
           </span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm border border-black/5" style={{ background: "hsl(45,10%,85%)" }} /> пробел</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm border border-black/5" style={{ background: "hsl(42,16%,87%)" }} /> пробел</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm border border-dashed border-ink-line" /> пусто</span>
           <span>✓ 2+ источника</span>
           <span>★ must-have</span>

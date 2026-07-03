@@ -39,13 +39,13 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
             className="grid gap-2 items-stretch"
             style={{ gridTemplateColumns: `repeat(${L.subsections.length + 1}, minmax(0, 1fr))` }}
           >
-            {/* Колонка названий секций — простой белый фон, тонкая чёрная рамка (не сливается с матрицей) */}
+            {/* Колонка названий слоёв — белая, типографская: номер серифом + название капителью */}
             <div
               title={L.name}
-              className="relative rounded-3xl border border-ink bg-white px-5 py-4 min-h-[5.25rem] flex items-center gap-3"
+              className="relative rounded-2xl border border-ink/20 bg-white px-5 py-4 min-h-[5.75rem] flex flex-col justify-between"
             >
-              <span className="text-2xl font-bold leading-none tabular-nums select-none text-ink/30">{L.id}</span>
-              <span className="font-bold leading-tight text-[15px] md:text-[17px] text-ink">{L.name}</span>
+              <span className="font-display text-3xl leading-none select-none text-ink/20">{L.id}</span>
+              <span className="font-semibold leading-snug text-[11px] uppercase tracking-[0.08em] text-ink/80">{L.name}</span>
             </div>
 
             {/* Cells in this layer */}
@@ -64,24 +64,29 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
                     onClick={() => onSelectCell(s.id)}
                     title={s.name}
                     style={fill.empty ? undefined : { background: fill.background }}
-                    className={`group relative text-left rounded-3xl border px-5 py-4 min-h-[5.25rem] flex items-center transition
-                      ${fill.empty ? "bg-white" : ""}
-                      ${hasMust ? "border-flag-blue" : "border-ink"}
-                      ${selected ? "ring-2 ring-flag-blue" : "hover:shadow-sm"}`}
+                    className={`group relative text-left rounded-2xl border px-5 py-4 min-h-[5.75rem] flex flex-col justify-between transition
+                      ${fill.empty ? "bg-white/50 border-dashed border-ink/25" : hasMust ? "border-flag-blue" : "border-ink/20"}
+                      ${selected ? "ring-2 ring-flag-blue" : "hover:shadow-md hover:-translate-y-px"}`}
                   >
-                    {/* must-have — деликатно в углу */}
-                    {(cell.n_must_client || cell.n_must_expert) ? (
-                      <div className="absolute top-3 right-4 flex items-center gap-2 text-[12px] font-semibold leading-none">
-                        {cell.n_must_client ? <span className="text-flag-blue" title="must-have от клиента">★{cell.n_must_client}</span> : null}
-                        {cell.n_must_expert ? <span className="text-purple-600" title="важное от эксперта">★{cell.n_must_expert}</span> : null}
-                      </div>
-                    ) : null}
+                    {/* верх: название мелким лейблом + must-have в углу */}
+                    <div className="flex items-start justify-between gap-2">
+                      <span
+                        className="font-medium leading-snug text-[12px] tracking-[0.01em]"
+                        style={{ color: fill.labelFg }}
+                      >{s.name}</span>
+                      {hasMust ? (
+                        <span className="flex items-center gap-1.5 text-[11px] font-semibold leading-none rounded-full bg-white/80 px-1.5 py-0.5 shrink-0">
+                          {cell.n_must_client ? <span className="text-flag-blue" title="must-have от клиента">★{cell.n_must_client}</span> : null}
+                          {cell.n_must_expert ? <span className="text-purple-600" title="важное от эксперта">★{cell.n_must_expert}</span> : null}
+                        </span>
+                      ) : null}
+                    </div>
 
-                    <div className="flex-1 flex items-center justify-between gap-3">
-                      <span className={`font-bold leading-tight text-[15px] md:text-[17px] ${fill.empty ? "text-ink-mute" : "text-ink"}`}>{s.name}</span>
+                    {/* низ: крупная цифра серифом, прижата вправо */}
+                    <div className="flex justify-end">
                       {total > 0
-                        ? <span className="shrink-0 text-3xl md:text-4xl font-bold tabular-nums leading-none text-ink/90">{total}</span>
-                        : <span className="shrink-0 text-2xl leading-none text-ink-line">+</span>}
+                        ? <span className="font-display text-[2.4rem] md:text-[2.75rem] leading-[0.9] select-none" style={{ color: fill.fg }}>{total}</span>
+                        : <span className="text-2xl leading-none text-ink/20">+</span>}
                     </div>
                   </button>
                 );

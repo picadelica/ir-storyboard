@@ -30,6 +30,7 @@ export default {
       fontFamily: {
         sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "system-ui", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        display: ["Fraunces", "Georgia", "serif"], // editorial-сериф для крупных цифр матрицы
       },
     },
   },
