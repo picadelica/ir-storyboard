@@ -279,6 +279,10 @@ class FactOut(BaseModel):
     ingest_audit_id: Optional[str] = None
     rationale: str = ""
     created_by: Optional[str] = None
+    created_by_tid: Optional[int] = None
+    approved_by: str = ""
+    approved_at: Optional[str] = None
+    merged_by: str = ""
     snippet_start_sec: Optional[float] = None
     ingest_kind: Optional[str] = None
     audio_sha: Optional[str] = None
@@ -441,6 +445,10 @@ def _row_to_fact(row) -> FactOut:
         ingest_audit_id=row["ingest_audit_id"] if "ingest_audit_id" in keys else None,
         rationale=(row["rationale"] if "rationale" in keys else "") or "",
         created_by=row["created_by"] if "created_by" in keys else None,
+        created_by_tid=row["created_by_tid"] if "created_by_tid" in keys else None,
+        approved_by=(row["approved_by"] if "approved_by" in keys else "") or "",
+        approved_at=row["approved_at"] if "approved_at" in keys else None,
+        merged_by=(row["merged_by"] if "merged_by" in keys else "") or "",
         snippet_start_sec=snippet_start_sec,
         ingest_kind=ingest_kind,
         audio_sha=audio_sha,
@@ -494,6 +502,17 @@ def current_tid(request: Request) -> Optional[int]:
     """Telegram id of the logged-in user, or None when auth is disabled."""
     u = current_user(request)
     return u.get("tid") if u else None
+
+
+def _is_owner_or_admin(conn, client_id: str, user: Optional[dict]) -> bool:
+    """Правки идут «как владелец» (сразу active) при: локальном dev (auth off),
+    супер-админе или владельце данных этой компании. Иначе контрибьютор → черновик."""
+    if not auth.enabled():
+        return True
+    if not user:
+        return False
+    tid = user.get("tid")
+    return bool(auth.is_admin(tid) or matrix.client_owner_tid(conn, client_id) == tid)
 
 
 # NB: must precede /api/clients/{client_id} so "portfolio" isn't read as an id.
@@ -1031,6 +1050,9 @@ def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
                                title=f.source_title or "",
                                url=f.source_url or "",
                                archive_url=archive_url or "")
+    # роль: владелец/админ → факт сразу active; контрибьютор → черновик (review),
+    # скрыт из матрицы и встаёт в очередь на approve владельцу.
+    is_owner = _is_owner_or_admin(conn, client_id, user)
     try:
         fid = matrix.add_fact(
             conn, client_id=client_id, subsection_id=subsection_id,
@@ -1038,6 +1060,8 @@ def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
             evidence_snippet=f.evidence_snippet,
             rationale=f.rationale,
             created_by=(user.get("name") if user else None),
+            created_by_tid=(user.get("tid") if user else None),
+            state=("active" if is_owner else "review"),
         )
     except ValueError as e:
         raise HTTPException(422, str(e))
@@ -1289,12 +1313,18 @@ def review_queue(client_id: str, conn=Depends(get_conn)):
 
 
 @app.post("/api/facts/{fact_id}/promote", response_model=FactOut)
-def promote_fact(fact_id: int, conn=Depends(get_conn)):
-    """Promote a quarantined fact into the matrix (review → active, verified)."""
+def promote_fact(fact_id: int, conn=Depends(get_conn),
+                 user: Optional[dict] = Depends(current_user)):
+    """Одобрить черновик (владелец данных/админ): review → active + кто/когда подтвердил.
+    Верификацию (фактчекинг) НЕ трогаем — это отдельная ось (approve ≠ verified)."""
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
-    matrix.set_fact_verification(conn, fact_id, verification="verified")
-    matrix.set_fact_state(conn, fact_id, "active")
+    cid = matrix.fact_client_id(conn, fact_id)
+    if not _is_owner_or_admin(conn, cid, user):
+        raise HTTPException(403, "одобрять черновики может только владелец данных или админ")
+    matrix.approve_fact(conn, fact_id,
+                        approved_by=(user.get("name") if user else "dev"),
+                        approved_by_tid=(user.get("tid") if user else None))
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -1408,14 +1438,16 @@ def find_duplicates(client_id: str, conn=Depends(get_conn)):
 
 
 @app.post("/api/facts/merge", response_model=FactOut)
-def merge_facts_ep(body: MergeIn, conn=Depends(get_conn)):
+def merge_facts_ep(body: MergeIn, conn=Depends(get_conn),
+                   user: Optional[dict] = Depends(current_user)):
     """Merge duplicates. Without merged_text: fold sources into keep, soft-reject the
     rest. With merged_text: create a NEW fact carrying the analyst's wording, fold all
     sources onto it, reject every original (immutability — no in-place text edit).
-    Returns the resulting canonical fact."""
+    Returns the resulting canonical fact. Автор слияния фиксируется в merged_by."""
     if matrix.get_fact(conn, body.keep_id) is None:
         raise HTTPException(404, "keep fact not found")
-    result_id = matrix.merge_facts(conn, body.keep_id, body.merge_ids, body.merged_text)
+    result_id = matrix.merge_facts(conn, body.keep_id, body.merge_ids, body.merged_text,
+                                   merged_by=(user.get("name") if user else "dev"))
     return _row_to_fact(matrix.get_fact(conn, result_id))
 
 

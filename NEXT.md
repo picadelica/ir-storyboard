@@ -7,7 +7,7 @@
 **Последнее обновление:** 2026-07-08
 **Ветка:** `feat/v2`
 **Прод:** 216.57.108.107 (Caddy :80, Basic Auth; health открыт), deploy_ir_storyboard зелёный.
-Тесты: `pytest -m "not network"` → **290 passed** (сетевой `test_youtube_e2e` deselected).
+Тесты: `pytest -m "not network"` → **293 passed** (сетевой `test_youtube_e2e` deselected).
 
 ## Права экспертов (multi-user) — В РАБОТЕ (начато 2026-07-08)
 
@@ -34,12 +34,25 @@
   (владелец/админ; локально без auth открыто). `GET /api/clients` и portfolio скрывают
   hidden (есть `?include_hidden=true`). ClientOut отдаёт `owner_tid`+`hidden`.
 
-**Дальше:** фаза 2 — гейт создания факта по роли (владелец→active, контрибьютор→
-review), promote-approve только владелец/админ с `approved_by/at`, `created_by` из
-сессии, merge пишет `merged_by`. Потом фаза 3 (фронт: юзер/бейджи/провенанс/скрытие)
-и фаза 4 (канбан-ассайн + «мои задачи»). НЕ задеплоено (копим до фронта фазы 3).
-ГРАБЛЯ на фазу 2: факты иммутабельны (инвариант #5) — approve меняет метаданные/state,
-не текст. Супер-админ tid: узнать свой в `/api/auth/me`, вписать в `IR_ADMIN_TIDS` на прод.
+**Фаза 2 — воркфлоу approve (СДЕЛАНО, бэкенд, +3 теста):**
+- `add_cell_fact` по роли: владелец/админ/dev → факт `state='active'`; контрибьютор →
+  `state='review'` (черновик). `created_by`+`created_by_tid` из сессии. Черновик вне
+  матрицы (фильтр `state='active'`), в очереди `review-queue`; green-черновик work-item
+  НЕ закрывает (auto_close только для active).
+- `promote` = **одобрение владельцем/админом**: review→active + `approved_by/at/tid`
+  (`matrix.approve_fact`). ВАЖНО: убрал авто-`verified` из promote — approve ≠ фактчекинг
+  (verification осталась отдельной осью). Обновлён `test_review_queue_and_promote`.
+- Merge пишет автора: `merge_facts(..., merged_by=)` → `facts.merged_by` (и на keep, и
+  на новый факт при curated-тексте). Эндпоинт `/api/facts/merge` берёт имя из сессии.
+- FactOut отдаёт `created_by/created_by_tid/approved_by/approved_at/merged_by/state`
+  (get_fact + facts_for_cell селектят новые колонки). Хелпер `_is_owner_or_admin`.
+
+**Дальше:** фаза 3 (фронт: текущий юзер в шапке, бейдж владельца, бейдж черновика +
+кнопка approve у владельца, «кто внёс/подтвердил/когда» в карточке факта, скрытие
+компании) и фаза 4 (канбан: assignee=реальный юзер + «мои задачи»). НЕ задеплоено —
+копим до фронта фазы 3. ХВОСТ: ingest-пути (LLM report / YouTube / audio) пока НЕ
+гейтят по роли (факт от контрибьютора через ingest едет active) — довесить в фазе 3/4.
+Супер-админ tid: узнать свой в `/api/auth/me` на проде, вписать в `IR_ADMIN_TIDS` (env).
 
 ## Сделано 2026-07-01 — разгрузка матрицы
 

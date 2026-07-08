@@ -178,8 +178,11 @@ def test_review_queue_and_promote(ctx, tmp_path):
     mx = client.get("/api/clients/co/matrix").json()
     assert next(c["n_green"] for c in mx if c["subsection_id"] == "2.1") == 1  # only `clean`
 
-    # promote → enters the matrix as verified
-    assert client.post(f"/api/facts/{fid}/promote").json()["verification"] == "verified"
+    # promote = одобрение владельцем: черновик → active + approved_by; верификацию
+    # НЕ трогаем (approve ≠ фактчекинг — отдельная ось, осталась suspect).
+    promoted = client.post(f"/api/facts/{fid}/promote").json()
+    assert promoted["state"] == "active" and promoted["approved_by"]
+    assert promoted["verification"] == "suspect"
     mx = client.get("/api/clients/co/matrix").json()
     assert next(c["n_green"] for c in mx if c["subsection_id"] == "2.1") == 2
     assert client.get("/api/clients/co/review-queue").json() == []

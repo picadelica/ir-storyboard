@@ -282,7 +282,8 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
              text: str, flag: str, source_id: Optional[int] = None,
              confidence: float = 1.0, valid_until: Optional[str] = None,
              evidence_snippet: str = "", rationale: Optional[str] = None,
-             created_by: Optional[str] = None, must_have: bool = False) -> int:
+             created_by: Optional[str] = None, must_have: bool = False,
+             created_by_tid: Optional[int] = None, state: str = "active") -> int:
     if flag not in (FLAG_GREEN, FLAG_RED, FLAG_GREY):
         raise ValueError(f"bad flag {flag}")
     rationale = validate_rationale(flag, rationale)
@@ -299,16 +300,19 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
     cell_id = get_or_create_cell(conn, client_id, subsection_id)
     cur = conn.execute(
         """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until,
-                              evidence_snippet, rationale, created_by, must_have, must_have_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                              evidence_snippet, rationale, created_by, must_have, must_have_by,
+                              created_by_tid, state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (cell_id, text, flag, source_id, confidence, valid_until,
          evidence_snippet, rationale, created_by, 1 if must_have else 0,
-         "client" if must_have else ""),
+         "client" if must_have else "", created_by_tid, state),
     )
     conn.commit()
     fact_id = cur.lastrowid
 
-    if flag == FLAG_GREEN:
+    # авто-закрытие work-item только для реально попавшего в матрицу факта (active),
+    # не для черновика (review) — черновик работу ещё не закрывает.
+    if flag == FLAG_GREEN and state == "active":
         from .workitems import auto_close_on_green_fact
         auto_close_on_green_fact(conn, client_id, subsection_id, fact_id)
 
@@ -321,7 +325,8 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
     return list(conn.execute(
         """SELECT f.id, f.cell_id, f.text, f.title, f.flag, f.source_id, f.confidence,
                   f.captured_at, f.valid_until, f.evidence_snippet,
-                  f.ingest_audit_id, f.rationale, f.created_by,
+                  f.ingest_audit_id, f.rationale, f.created_by, f.created_by_tid,
+                  f.approved_by, f.approved_by_tid, f.approved_at, f.merged_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
                   f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.must_have_by, f.merged_into,
@@ -366,7 +371,8 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
     return conn.execute(
         """SELECT f.id, f.cell_id, f.text, f.title, f.flag, f.source_id, f.confidence,
                   f.captured_at, f.valid_until, f.evidence_snippet,
-                  f.ingest_audit_id, f.rationale, f.created_by,
+                  f.ingest_audit_id, f.rationale, f.created_by, f.created_by_tid,
+                  f.approved_by, f.approved_by_tid, f.approved_at, f.merged_by,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
                   f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.must_have_by, f.merged_into,
@@ -459,6 +465,25 @@ def attribute_fact(conn: sqlite3.Connection, fact_id: int, entity_id: Optional[i
         (new_id, f"переименован спикер → #{new_id}", fact_id))
     conn.commit()
     return new_id
+
+
+def fact_client_id(conn: sqlite3.Connection, fact_id: int) -> Optional[str]:
+    """Компания, которой принадлежит факт (через ячейку) — для проверки прав."""
+    r = conn.execute(
+        "SELECT c.client_id FROM facts f JOIN cells c ON c.id = f.cell_id WHERE f.id=?",
+        (fact_id,)).fetchone()
+    return r["client_id"] if r else None
+
+
+def approve_fact(conn: sqlite3.Connection, fact_id: int, *, approved_by: str = "",
+                 approved_by_tid: Optional[int] = None) -> None:
+    """Одобрение владельцем: черновик (review) → активен, фиксируем кто/когда.
+    Верификацию (фактчекинг) НЕ трогаем — это отдельная ось."""
+    conn.execute(
+        """UPDATE facts SET state='active', approved_by=?, approved_by_tid=?,
+                            approved_at=CURRENT_TIMESTAMP WHERE id=?""",
+        (approved_by or "", approved_by_tid, fact_id))
+    conn.commit()
 
 
 def set_fact_state(conn: sqlite3.Connection, fact_id: int, state: str) -> None:
@@ -601,7 +626,7 @@ def _fold_source(conn: sqlite3.Connection, into_id: int, from_fact_id: int) -> N
 
 
 def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int],
-                merged_text: Optional[str] = None) -> int:
+                merged_text: Optional[str] = None, merged_by: Optional[str] = None) -> int:
     """Merge duplicate facts. Two modes:
 
     - Default (merged_text=None): fold each duplicate's source into `keep_id`'s
@@ -628,6 +653,8 @@ def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int],
                 """UPDATE facts SET state='rejected', merged_into=?,
                                     verification_note=? WHERE id=?""",
                 (keep_id, f"дубль — слит в #{keep_id}", mid))
+        if merged_by:
+            conn.execute("UPDATE facts SET merged_by=? WHERE id=?", (merged_by, keep_id))
         conn.commit()
         return keep_id
 
@@ -638,11 +665,12 @@ def merge_facts(conn: sqlite3.Connection, keep_id: int, merge_ids: List[int],
                     if get_fact(conn, i)["speaker_entity_id"] is not None), None)
     cur = conn.execute(
         """INSERT INTO facts (cell_id, text, flag, source_id, confidence, valid_until,
-                              evidence_snippet, rationale, created_by, must_have, speaker_entity_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                              evidence_snippet, rationale, created_by, must_have, speaker_entity_id,
+                              merged_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (keep["cell_id"], text, keep["flag"], keep["source_id"], keep["confidence"],
          keep["valid_until"], keep["evidence_snippet"], keep["rationale"],
-         "merge", 1 if must else 0, speaker),
+         "merge", 1 if must else 0, speaker, merged_by or ""),
     )
     new_id = cur.lastrowid
     # don't fold sources — the joint references the hidden originals; sources live there
