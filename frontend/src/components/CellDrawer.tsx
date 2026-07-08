@@ -20,6 +20,12 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
     queryFn: () => api.cellFacts(clientId, subsectionId),
   });
 
+  // роль: одобрять черновики может владелец данных / супер-админ (локально без auth — все)
+  const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
+  const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.getClient(clientId) });
+  const canApprove = !me.data?.auth || !!me.data?.is_admin
+    || (client.data?.owner_tid != null && me.data?.tid === client.data.owner_tid);
+
   const subsection = layers
     ?.flatMap(L => L.subsections.map(s => ({ ...s, layer: L })))
     .find(s => s.id === subsectionId);
@@ -102,6 +108,12 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
 
   const restoreFact = useMutation({
     mutationFn: (id: number) => api.restoreFact(id),
+    onSuccess: invalidate,
+  });
+
+  // одобрить черновик контрибьютора → active (владелец/админ)
+  const approveFact = useMutation({
+    mutationFn: (id: number) => api.promoteFact(id),
     onSuccess: invalidate,
   });
 
@@ -218,8 +230,17 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                               title={title} className={`text-[15px] leading-none ${color}`}>★</button>;
                           })()}
                           <InfoBtn id={f.id} />
+                          {f.state === "review" && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide bg-amber-100 text-amber-800"
+                              title="черновик — ждёт одобрения владельца данных">черновик</span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 text-ink-mute">
+                          {f.state === "review" && canApprove && (
+                            <button onClick={() => approveFact.mutate(f.id)} disabled={approveFact.isPending}
+                              className="text-[11px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-300"
+                              title="одобрить черновик — попадёт в матрицу">одобрить</button>
+                          )}
                           <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); }}
                             aria-label="Редактировать" className="hover:text-ink">
                             <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M4 13.5V16h2.5l7.4-7.4-2.5-2.5L4 13.5zM13.1 4.9l2.5 2.5 1-1a1.4 1.4 0 0 0-2-2l-1.5.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>
@@ -263,6 +284,17 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide ${f.verification === "verified" ? "bg-emerald-50 text-emerald-700" : f.verification === "refuted" ? "bg-flag-red-bg text-flag-red" : "bg-amber-50 text-amber-700"}`}>
                             {f.verification === "verified" ? "проверено" : f.verification === "refuted" ? "опровергнуто" : "под вопросом"}</span>
                           {f.entity && <span className="text-[11px] font-mono text-ink-mute border border-ink-line rounded px-1.5">≠ {f.entity}</span>}
+                        </div>
+                      )}
+
+                      {/* провенанс: кто внёс · кто подтвердил · когда */}
+                      {(f.created_by || f.approved_by || f.merged_by) && (
+                        <div className="mt-1.5 text-[10px] text-ink-mute/70 flex flex-wrap gap-x-2 gap-y-0.5">
+                          {f.merged_by
+                            ? <span>слил {f.merged_by}</span>
+                            : f.created_by && <span>внёс {f.created_by}</span>}
+                          {f.approved_by && <span>· подтвердил {f.approved_by}</span>}
+                          {f.captured_at && <span>· {f.captured_at.slice(0, 10)}</span>}
                         </div>
                       )}
 

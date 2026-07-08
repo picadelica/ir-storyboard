@@ -37,7 +37,7 @@ export default function App() {
 }
 
 function RootRedirect() {
-  const clients = useQuery({ queryKey: ["clients"], queryFn: api.listClients });
+  const clients = useQuery({ queryKey: ["clients"], queryFn: () => api.listClients() });
   if (clients.isLoading) return <div className="p-8 text-sm text-ink-mute">Loading…</div>;
   if (clients.data && clients.data.length > 0)
     return <Navigate to={`/clients/${clients.data[0].id}/matrix`} replace />;

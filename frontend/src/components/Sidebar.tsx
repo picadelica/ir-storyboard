@@ -73,6 +73,17 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
     onError: (e: Error) => setError(e.message),
   });
 
+  // Скрытие компании вместо удаления (данные сохраняются).
+  const hideMut = useMutation({
+    mutationFn: (hidden: boolean) => api.setClientHidden(initial!.id, hidden),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["clients"] });
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
+      onSaved(initial!.id);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
   // Backups: list + restore (danger-zone recovery).
   const backupsQ = useQuery({
     queryKey: ["backups", initial?.id],
@@ -231,6 +242,20 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
           )}
 
           {error && <div className="text-xs text-red-600 bg-red-50 rounded px-3 py-2">{error}</div>}
+
+          {isEdit && initial && (
+            <div className="mt-4 border border-ink-line rounded-lg p-3 space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-ink-mute">Видимость</div>
+              <p className="text-xs text-ink-mute leading-snug">
+                Скрытая компания уходит из списков и портфеля, но все данные сохраняются —
+                мягкая альтернатива удалению.
+              </p>
+              <button type="button" onClick={() => hideMut.mutate(!initial.hidden)} disabled={hideMut.isPending}
+                className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-ink/[0.04]">
+                {initial.hidden ? "Вернуть из скрытых" : "Скрыть компанию"}
+              </button>
+            </div>
+          )}
 
           {isEdit && initial && (
             <div className="mt-4 border border-red-200 rounded-lg bg-red-50/40 p-3 space-y-2">
@@ -415,10 +440,17 @@ export default function Sidebar({ clientId }: Props) {
     if (clientId) setCollapsed(true);
   }, [clientId]);
 
-  const clients = useQuery({ queryKey: ["clients"], queryFn: api.listClients });
+  const [showHidden, setShowHidden] = useState(false);   // админ: показать скрытые компании
+  const clients = useQuery({ queryKey: ["clients", showHidden], queryFn: () => api.listClients(showHidden) });
   const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: api.clientsPortfolio });
   const covMap = new Map((portfolio.data ?? []).map(p => [p.id, p]));
   const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
+  const isAdmin = !me.data?.auth || !!me.data?.is_admin;
+  const canManage = (c: Client) => isAdmin || (c.owner_tid != null && me.data?.tid === c.owner_tid);
+  const hideMut = useMutation({
+    mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) => api.setClientHidden(id, hidden),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["clients"] }); qc.invalidateQueries({ queryKey: ["portfolio"] }); },
+  });
   const [scope, setScope] = useState<"mine" | "all">(() => {
     try { return localStorage.getItem(SCOPE_KEY) === "mine" ? "mine" : "all"; } catch { return "all"; }
   });
@@ -521,7 +553,12 @@ export default function Sidebar({ clientId }: Props) {
                           {monogram(c.name)}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className={`text-[13px] truncate text-ink ${active ? "font-medium" : ""}`}>{c.name}</div>
+                          <div className={`text-[13px] truncate flex items-center gap-1 ${c.hidden ? "text-ink-mute line-through" : "text-ink"} ${active ? "font-medium" : ""}`}>
+                            <span className="truncate">{c.name}</span>
+                            {c.owner_tid != null && me.data?.tid === c.owner_tid && (
+                              <span title="вы — владелец данных" className="shrink-0 text-[10px]">👑</span>)}
+                            {c.hidden && <span className="shrink-0 text-[9px] uppercase tracking-wide text-ink-mute/70">скрыта</span>}
+                          </div>
                           <div className="flex items-center gap-1.5 mt-1">
                             <div className="h-1 flex-1 rounded-full bg-ink/[0.07] overflow-hidden">
                               <div className="h-full rounded-full bg-flag-green" style={{ width: `${pct}%` }} />
@@ -551,6 +588,12 @@ export default function Sidebar({ clientId }: Props) {
               </ul>
             );
           })()}
+          {isAdmin && (
+            <button onClick={() => setShowHidden(v => !v)}
+              className="mt-2 w-full text-left px-2 py-1 text-[11px] text-ink-mute hover:text-ink transition">
+              {showHidden ? "спрятать скрытые" : "показать скрытые"}
+            </button>
+          )}
         </div>
       </aside>
 

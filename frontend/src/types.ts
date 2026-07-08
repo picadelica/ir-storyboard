@@ -30,6 +30,8 @@ export interface Client {
   tone_preset?: string;
   created_at?: string;
   created_by?: string | null;
+  owner_tid?: number | null;    // владелец данных компании
+  hidden?: boolean;
 }
 
 export interface MethodologyCell {
@@ -380,6 +382,10 @@ export interface Fact {
   must_have_by?: string;        // '' | 'client' (blue) | 'expert' (purple)
   merged_into?: number | null;  // set → hidden, folded into fact #merged_into
   n_sources?: number;           // corroboration count
+  created_by_tid?: number | null;
+  approved_by?: string;         // кто одобрил черновик (владелец)
+  approved_at?: string | null;
+  merged_by?: string;           // автор слияния
 }
 
 export interface DupFact {

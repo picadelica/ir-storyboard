@@ -64,19 +64,25 @@ export const api = {
   layers: () => call<Layer[]>("/layers"),
   channels: () => call<string[]>("/channels"),
 
-  authMe: () => call<{ name: string; tid: number; auth: boolean }>("/auth/me"),
+  authMe: () => call<{ name: string; tid: number; auth: boolean; is_admin?: boolean }>("/auth/me"),
   authStart: () => call<{ token: string; bot_username: string; deep_link: string }>(
     "/auth/start", { method: "POST" }),
   authStatus: (token: string) => call<{ status: string; user?: { name: string; tid: number } }>(
     `/auth/status?token=${encodeURIComponent(token)}`),
   authLogout: () => call<{ ok: boolean }>("/auth/logout", { method: "POST" }),
 
-  listClients: () => call<Client[]>("/clients"),
+  listClients: (includeHidden = false) =>
+    call<Client[]>("/clients" + (includeHidden ? "?include_hidden=true" : "")),
   clientsPortfolio: () => call<PortfolioRow[]>("/clients/portfolio"),
   setClientMine: (id: string, on: boolean) =>
     call<{ ok: boolean; mine: boolean }>(`/clients/${id}/mine`, {
       method: "PUT", body: JSON.stringify({ on }),
     }),
+  users: () => call<{ tid: number; name: string; username: string }[]>("/users"),
+  setClientOwner: (id: string, tid: number | null) =>
+    call<Client>(`/clients/${id}/owner`, { method: "PUT", body: JSON.stringify({ tid }) }),
+  setClientHidden: (id: string, hidden: boolean) =>
+    call<Client>(`/clients/${id}/hidden`, { method: "PUT", body: JSON.stringify({ hidden }) }),
 
   briefTemplates: () => call<BriefTemplate[]>("/brief-templates"),
   createBriefTemplate: (b: { name: string; material_type: string; body: string }) =>

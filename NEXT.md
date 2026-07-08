@@ -47,12 +47,26 @@
 - FactOut отдаёт `created_by/created_by_tid/approved_by/approved_at/merged_by/state`
   (get_fact + facts_for_cell селектят новые колонки). Хелпер `_is_owner_or_admin`.
 
-**Дальше:** фаза 3 (фронт: текущий юзер в шапке, бейдж владельца, бейдж черновика +
-кнопка approve у владельца, «кто внёс/подтвердил/когда» в карточке факта, скрытие
-компании) и фаза 4 (канбан: assignee=реальный юзер + «мои задачи»). НЕ задеплоено —
-копим до фронта фазы 3. ХВОСТ: ingest-пути (LLM report / YouTube / audio) пока НЕ
-гейтят по роли (факт от контрибьютора через ingest едет active) — довесить в фазе 3/4.
-Супер-админ tid: узнать свой в `/api/auth/me` на проде, вписать в `IR_ADMIN_TIDS` (env).
+**Фаза 3 — фронт (СДЕЛАНО, проверено в превью):**
+- `CellDrawer` (карточка факта): бейдж **ЧЕРНОВИК** у `state='review'`, кнопка
+  **одобрить** (только владелец/админ → `promoteFact`), строка провенанса
+  «внёс X · подтвердил Y · дата» (для merge — «слил Z»). `canApprove` из `me`
+  (is_admin/owner_tid) + `getClient`.
+- `Sidebar`: 👑 у компаний, где я владелец; скрытые — line-through + «скрыта»;
+  админ-тоггл «показать скрытые» (`listClients(include_hidden)`).
+- `ClientDrawer`: блок «Видимость» — **Скрыть/Вернуть компанию** (мягко, вместо
+  удаления). Типы: Fact.approved_by/created_by_tid/merged_by, Client.owner_tid/hidden,
+  authMe.is_admin; api.users/setClientOwner/setClientHidden.
+- Проверено в превью на реальных данных: черновик вне матрицы (счёт 1), approve →
+  active (счёт 2, оба «подтвердил»), скрытие исключает из списка. Консоль чистая,
+  `npm run build` ок, tsc чист. Превью-лаунчер: `ir-storyboard-api` (:8080) добавлен
+  в `~/Projects/.claude/launch.json`.
+
+**Дальше:** фаза 4 (канбан WorkView: assignee=реальный юзер из списка + фильтр «мои
+задачи» по tid). ХВОСТ: ingest-пути (LLM report / YouTube / audio) НЕ гейтят по роли —
+факт контрибьютора через ingest едет active (довесить); owner-reassign UI (бэкенд
+готов, `PUT /clients/{id}/owner`, фронта нет — админ пока меняет через API/БД).
+ДЕПЛОЙ фаз 1–3: узнать свой tid в `/api/auth/me` на проде, вписать в `IR_ADMIN_TIDS` (env).
 
 ## Сделано 2026-07-01 — разгрузка матрицы
 
