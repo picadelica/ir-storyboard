@@ -191,6 +191,7 @@ class WorkItemOut(BaseModel):
     source_signal: str
     status: str
     assignee: str = ""
+    assignee_tid: Optional[int] = None
     priority: int = 3
     title: str
     rationale: str = ""
@@ -224,6 +225,7 @@ class WorkItemUpdate(BaseModel):
     status: Optional[Literal["queued", "in_progress", "needs_review",
                              "done", "blocked", "cancelled"]] = None
     assignee: Optional[str] = None
+    assignee_tid: Optional[int] = None   # >0 назначить юзера (имя из users), 0 снять
     priority: Optional[int] = None
     due_date: Optional[str] = None
     notes: Optional[str] = None
@@ -1702,6 +1704,7 @@ def _row_to_work_item(row) -> WorkItemOut:
         subsection_id=d.get("subsection_id"),
         source_signal=d["source_signal"], status=d["status"],
         assignee=d.get("assignee") or "",
+        assignee_tid=d.get("assignee_tid"),
         priority=d.get("priority") or 3,
         title=d["title"],
         rationale=d.get("rationale") or "",
@@ -1722,6 +1725,7 @@ def _row_to_work_item(row) -> WorkItemOut:
 def list_work_items(client_id: str,
                     status: Optional[List[str]] = Query(default=None),
                     assignee: Optional[str] = None,
+                    assignee_tid: Optional[int] = None,
                     type: Optional[List[str]] = Query(default=None),
                     subsection_id: Optional[str] = None,
                     conn=Depends(get_conn)):
@@ -1733,6 +1737,9 @@ def list_work_items(client_id: str,
     if assignee:
         q += " AND assignee=?"
         params.append(assignee)
+    if assignee_tid is not None:                 # «мои задачи» — по tid исполнителя
+        q += " AND assignee_tid=?"
+        params.append(assignee_tid)
     if type:
         q += f" AND type IN ({','.join('?'*len(type))})"
         params.extend(type)
@@ -1777,7 +1784,16 @@ def update_work_item(wid: int, body: WorkItemUpdate, conn=Depends(get_conn)):
         sets.append("status=?"); params.append(body.status)
         if body.status == "done":
             sets.append("completed_at=CURRENT_TIMESTAMP")
-    if body.assignee is not None:
+    if body.assignee_tid is not None:
+        # назначить реального юзера: tid>0 → берём имя из users; tid==0 → снять
+        if body.assignee_tid:
+            u = matrix.get_user(conn, body.assignee_tid)
+            sets.append("assignee_tid=?"); params.append(body.assignee_tid)
+            sets.append("assignee=?"); params.append((u or {}).get("name") or "")
+        else:
+            sets.append("assignee_tid=NULL")
+            sets.append("assignee=?"); params.append("")
+    elif body.assignee is not None:
         sets.append("assignee=?"); params.append(body.assignee)
     if body.priority is not None:
         sets.append("priority=?"); params.append(body.priority)

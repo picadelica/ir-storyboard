@@ -77,10 +77,11 @@ function WorkItemDrawer({
 }: { item: WorkItem; onClose: () => void; onJumpToCell: (sid: string) => void; clientId: string }) {
   const qc = useQueryClient();
   const [notes, setNotes] = useState(item.notes || "");
-  const [assignee, setAssignee] = useState(item.assignee || "");
   const [relatedFactId, setRelatedFactId] = useState<string>(
     item.related_fact_id ? String(item.related_fact_id) : ""
   );
+  const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
+  const users = useQuery({ queryKey: ["users"], queryFn: api.users });
 
   const patch = useMutation({
     mutationFn: (body: Partial<WorkItem>) => api.patchWorkItem(item.id, body),
@@ -136,8 +137,10 @@ function WorkItemDrawer({
               <div className="text-[10px] font-semibold uppercase text-ink-mute tracking-wide">Actions</div>
               <div className="flex flex-wrap gap-1.5">
                 {item.status === "queued" && (
-                  <ActionBtn label="Claim (assign me)" onClick={() => {
-                    patch.mutate({ status: "in_progress", assignee: assignee || "me" });
+                  <ActionBtn label="Взять себе" onClick={() => {
+                    patch.mutate(me.data?.tid
+                      ? { status: "in_progress", assignee_tid: me.data.tid }
+                      : { status: "in_progress", assignee: "me" });
                   }} />
                 )}
                 {item.status !== "in_progress" && (
@@ -158,21 +161,22 @@ function WorkItemDrawer({
             </div>
           )}
 
-          {/* Assign */}
+          {/* Assign — реальный юзер из списка (наполняется при входе в телеге) */}
           <div>
-            <label className="block text-[10px] font-semibold uppercase text-ink-mute tracking-wide mb-1">Assignee</label>
-            <div className="flex gap-2">
-              <input
-                value={assignee}
-                onChange={e => setAssignee(e.target.value)}
-                className="flex-1 text-xs border border-ink-line rounded px-2 py-1"
-                placeholder="Name or handle"
-              />
-              <button
-                onClick={() => patch.mutate({ assignee })}
-                className="text-xs px-2 py-1 border border-ink-line rounded hover:bg-slate-50"
-              >Save</button>
-            </div>
+            <label className="block text-[10px] font-semibold uppercase text-ink-mute tracking-wide mb-1">Исполнитель</label>
+            <select
+              value={item.assignee_tid ?? ""}
+              onChange={e => patch.mutate({ assignee_tid: e.target.value ? Number(e.target.value) : 0 })}
+              className="w-full text-xs border border-ink-line rounded px-2 py-1 bg-white"
+            >
+              <option value="">— не назначен —</option>
+              {(users.data ?? []).map(u => (
+                <option key={u.tid} value={u.tid}>{u.name}{u.username ? ` (@${u.username})` : ""}</option>
+              ))}
+            </select>
+            {item.assignee && item.assignee_tid == null && (
+              <div className="mt-1 text-[10px] text-ink-mute">текущий: {item.assignee}</div>
+            )}
           </div>
 
           {/* Close with fact */}
@@ -230,7 +234,9 @@ function ActionBtn({
 
 export default function WorkView({ clientId, onJumpToCell }: Props) {
   const qc = useQueryClient();
-  const [selected, setSelected] = useState<WorkItem | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [mineOnly, setMineOnly] = useState(false);
+  const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
 
   const items = useQuery<WorkItem[]>({
     queryKey: ["work-items", clientId],
@@ -254,10 +260,12 @@ export default function WorkView({ clientId, onJumpToCell }: Props) {
         now - new Date(i.updated_at).getTime() < 14 * 86400000
       );
     }
-    return items.data.filter(i => i.status === colKey);
+    const base = items.data.filter(i => i.status === colKey);
+    return mineOnly && me.data?.tid ? base.filter(i => i.assignee_tid === me.data!.tid) : base;
   };
 
   const total = items.data?.filter(i => ACTIVE_STATUSES.includes(i.status)).length ?? 0;
+  const selected = items.data?.find(i => i.id === selectedId) ?? null;   // всегда живой (после патча обновляется)
 
   return (
     <div className="p-5 space-y-4 h-full flex flex-col">
@@ -265,6 +273,13 @@ export default function WorkView({ clientId, onJumpToCell }: Props) {
         <div className="flex items-baseline gap-3">
           <h2 className="text-lg font-semibold">Work</h2>
           <span className="text-xs text-ink-mute">{total} active</span>
+          {me.data?.auth && (
+            <button onClick={() => setMineOnly(v => !v)}
+              className={`text-xs px-2.5 py-1 rounded border transition ${mineOnly ? "bg-ink text-white border-ink" : "border-ink-line text-ink-mute hover:text-ink"}`}
+              title="показать только назначенные мне">
+              мои задачи
+            </button>
+          )}
         </div>
         <button
           onClick={() => synthesize.mutate()}
@@ -293,7 +308,7 @@ export default function WorkView({ clientId, onJumpToCell }: Props) {
             </div>
             <div className="flex-1 overflow-y-auto space-y-2 pr-1">
               {colItems(col.key).map(item => (
-                <WorkItemCard key={item.id} item={item} onClick={() => setSelected(item)} />
+                <WorkItemCard key={item.id} item={item} onClick={() => setSelectedId(item.id)} />
               ))}
             </div>
           </div>
@@ -303,7 +318,7 @@ export default function WorkView({ clientId, onJumpToCell }: Props) {
       {selected && (
         <WorkItemDrawer
           item={selected}
-          onClose={() => setSelected(null)}
+          onClose={() => setSelectedId(null)}
           onJumpToCell={onJumpToCell}
           clientId={clientId}
         />

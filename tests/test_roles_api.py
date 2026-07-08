@@ -31,6 +31,7 @@ def client(tmp_path):
     matrix.seed_layers(init)
     init.close()
     c = TestClient(app)
+    c.db_path = db_path                    # доступ к той же БД для прямого посева
     yield c
     app.dependency_overrides.clear()
 
@@ -132,3 +133,26 @@ def test_api_add_fact_active_for_dev(client):
         "channel": "offline_interview", "source_title": "Интервью 2026-05-12"})
     assert r.status_code == 200, r.text
     assert r.json()["state"] == "active"
+
+
+def test_work_item_assign_real_user(client):
+    """Канбан: назначить реального юзера (assignee_tid → имя из users),
+    фильтр «мои задачи» по tid, снятие (tid=0)."""
+    from ir_storyboard import db as _db, matrix as _m
+    client.post("/api/clients", json={"id": "co", "name": "Co"})
+    wi = client.post("/api/clients/co/work-items", json={
+        "type": "fill_gap", "source_signal": "manual", "title": "Собрать интервью"}).json()
+
+    # зарегистрировать юзера в ТОЙ ЖЕ БД (в проде — при входе), затем назначить по tid
+    conn = _db.connect(client.db_path); _m.upsert_user(conn, 77, "Мария"); conn.close()
+    upd = client.patch(f"/api/work-items/{wi['id']}", json={"assignee_tid": 77}).json()
+    assert upd["assignee_tid"] == 77 and upd["assignee"] == "Мария"
+
+    # «мои задачи» — фильтр по tid
+    mine = client.get("/api/clients/co/work-items?assignee_tid=77").json()
+    assert [w["id"] for w in mine] == [wi["id"]]
+    assert client.get("/api/clients/co/work-items?assignee_tid=999").json() == []
+
+    # снять исполнителя
+    cleared = client.patch(f"/api/work-items/{wi['id']}", json={"assignee_tid": 0}).json()
+    assert cleared["assignee_tid"] is None and cleared["assignee"] == ""

@@ -107,6 +107,7 @@ export interface WorkItem {
   source_signal: string;
   status: WorkItemStatus;
   assignee: string;
+  assignee_tid?: number | null;
   priority: number;
   title: string;
   rationale: string;
