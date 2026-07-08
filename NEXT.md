@@ -74,10 +74,14 @@
   живого списка по `selectedId` (`items.data.find`). Проверено: назначил Петра →
   assignee_tid=102 + имя, карточка показывает исполнителя, дропдаун держит выбор.
 
-**ВСЕ 4 ФАЗЫ ГОТОВЫ (бэкенд+фронт, 294 теста, build ок). НЕ ЗАДЕПЛОЕНО.**
-ДЕПЛОЙ (по «да» пользователя): меняет процесс всей команды на проде (факты
-контрибьюторов → черновики). Перед/после: узнать свой tid в `/api/auth/me` на проде,
-вписать в `IR_ADMIN_TIDS` (env `/opt/ir-storyboard`), иначе супер-админа нет.
+**ВСЕ 4 ФАЗЫ ЗАДЕПЛОЕНЫ НА ПРОД (2026-07-08, feat/v2 947c0f7).** 294 теста, build ок.
+Прод на 947c0f7, миграции применились (users/owner_tid/hidden/approved_by/created_by_tid),
+health 200. `IR_ADMIN_TIDS=103638135` (Дмитрий) выставлен в `/opt/ir-storyboard/.env`.
+ГРАБЛЯ деплоя: воркфлоу `deploy_ir_storyboard` требует вход **`health_url`** (я не
+передал → health_check упал 4×, статус FAILED, ХОТЯ build+up прошли и app здоров).
+В след. раз передавать `health_url` (напр. `http://216.57.108.107/api/health`). Прод
+= `docker-compose.public.yml` (frontend :80, БЕЗ Caddy — упоминание Caddy в старых
+доках устарело). Паспорт обновлён (health up, все вехи прав done).
 ХВОСТЫ: ingest-пути (LLM report / YouTube / audio) НЕ гейтят по роли — факт
 контрибьютора через ingest едет active (довесить); owner-reassign UI (бэкенд
 `PUT /clients/{id}/owner` готов, фронта нет — админ пока через API/БД).
