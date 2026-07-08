@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "../api";
 import { cellFill, recordAvg } from "../lib/cellFill";
-import type { CellSummary, Layer } from "../types";
+import type { CellSummary, Layer, ReviewFact } from "../types";
 
 const cellTotal = (c: CellSummary) => (c.n_green || 0) + (c.n_red || 0) + (c.n_grey || 0);
 
@@ -19,6 +20,29 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
     queryFn: () => api.matrixView(clientId),
   });
 
+  // очередь черновиков (state='review') — делает механизм «черновик → одобрение»
+  // видимым: контрибьютор добавил факт → он тут; владелец одобряет или открывает ячейку.
+  const qc = useQueryClient();
+  const review = useQuery<ReviewFact[]>({
+    queryKey: ["review-queue", clientId],
+    queryFn: () => api.reviewQueue(clientId),
+    enabled: !present,
+  });
+  const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
+  const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.getClient(clientId) });
+  const canApprove = !me.data?.auth || !!me.data?.is_admin
+    || (client.data?.owner_tid != null && me.data?.tid === client.data.owner_tid);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const approve = useMutation({
+    mutationFn: (id: number) => api.promoteFact(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["review-queue", clientId] });
+      qc.invalidateQueries({ queryKey: ["matrix", clientId] });
+      qc.invalidateQueries({ queryKey: ["facts", clientId] });
+      qc.invalidateQueries({ queryKey: ["scorecard", clientId] });
+    },
+  });
+
   if (layers.isLoading || cells.isLoading) {
     return <div className="p-6 text-sm text-ink-mute">Loading matrix…</div>;
   }
@@ -30,8 +54,43 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
   // среднее число записей на непустую ячейку — база для интенсивности заливки
   const avgRecords = recordAvg(cells.data.map(cellTotal));
 
+  const queue = review.data ?? [];
+
   return (
     <div className={`p-5 ${present ? "px-6" : ""}`}>
+      {/* полоса очереди одобрения: черновики контрибьюторов вне матрицы, пока владелец не одобрит */}
+      {!present && queue.length > 0 && (
+        <div className="mb-3 border border-amber-300 bg-amber-50 rounded-xl">
+          <button onClick={() => setQueueOpen(o => !o)}
+            className="w-full flex items-center gap-2 px-4 py-2.5 text-left">
+            <span className="text-[13px] font-medium text-amber-900">
+              ⏳ Черновики ждут одобрения владельца: {queue.length}
+            </span>
+            <span className="text-[11px] text-amber-700/80 hidden sm:inline">
+              — в матрице не считаются, пока не одобрены</span>
+            <span className="ml-auto text-amber-700">{queueOpen ? "▴" : "▾"}</span>
+          </button>
+          {queueOpen && (
+            <ul className="border-t border-amber-200 divide-y divide-amber-100">
+              {queue.map(f => (
+                <li key={f.id} className="flex items-start gap-3 px-4 py-2">
+                  <span className="shrink-0 font-mono text-[11px] text-amber-700 pt-0.5">{f.subsection_id}</span>
+                  <span className="flex-1 text-[13px] text-ink leading-snug">{f.text}</span>
+                  <div className="shrink-0 flex items-center gap-2">
+                    {canApprove && (
+                      <button onClick={() => approve.mutate(f.id)} disabled={approve.isPending}
+                        className="text-[11px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-300">
+                        одобрить</button>
+                    )}
+                    <button onClick={() => onSelectCell(f.subsection_id)}
+                      className="text-[11px] text-blue-700 hover:underline">ячейка →</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <div className="space-y-2">
         {layers.data.map(L => (
           <div

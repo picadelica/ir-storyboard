@@ -73,6 +73,18 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
     onError: (e: Error) => setError(e.message),
   });
 
+  // Владелец данных: селект из известных юзеров (наполняется при входе из телеги).
+  const usersQ = useQuery({ queryKey: ["users"], queryFn: api.users, enabled: isEdit });
+  const ownerMut = useMutation({
+    mutationFn: (tid: number | null) => api.setClientOwner(initial!.id, tid),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["clients"] });
+      qc.invalidateQueries({ queryKey: ["client", initial!.id] });
+      onSaved(initial!.id);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
   // Скрытие компании вместо удаления (данные сохраняются).
   const hideMut = useMutation({
     mutationFn: (hidden: boolean) => api.setClientHidden(initial!.id, hidden),
@@ -228,6 +240,29 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
                   placeholder="Internal notes" rows={4}
                   className={`${input} resize-none`} />
               </Field>
+              {isEdit && initial && (
+                <Field label="Владелец данных (финализирует правки)">
+                  <select
+                    value={initial.owner_tid ?? ""}
+                    onChange={e => ownerMut.mutate(e.target.value ? Number(e.target.value) : null)}
+                    disabled={ownerMut.isPending}
+                    className={input}
+                  >
+                    <option value="">— не назначен —</option>
+                    {/* владелец, ещё не заходивший после релиза, отсутствует в users — показываем tid */}
+                    {initial.owner_tid != null && !(usersQ.data ?? []).some(u => u.tid === initial.owner_tid) && (
+                      <option value={initial.owner_tid}>tid {initial.owner_tid} (ещё не заходил)</option>
+                    )}
+                    {(usersQ.data ?? []).map(u => (
+                      <option key={u.tid} value={u.tid}>{u.name}{u.username ? ` (@${u.username})` : ""}</option>
+                    ))}
+                  </select>
+                  <div className="mt-1 text-[11px] text-ink-mute leading-snug">
+                    Список наполняется автоматически: эксперт появляется здесь после первого
+                    захода в тул. Менять владельца может текущий владелец или админ.
+                  </div>
+                </Field>
+              )}
             </>
           ) : (
             <Field label="Paste seed YAML">
