@@ -141,8 +141,51 @@ def count_client_facts(conn: sqlite3.Connection, client_id: str) -> int:
     return row[0] if row else 0
 
 
-def list_clients(conn: sqlite3.Connection) -> List[sqlite3.Row]:
-    return list(conn.execute("SELECT * FROM clients ORDER BY name"))
+def list_clients(conn: sqlite3.Connection, include_hidden: bool = False) -> List[sqlite3.Row]:
+    where = "" if include_hidden else "WHERE COALESCE(hidden, 0) = 0"
+    return list(conn.execute(f"SELECT * FROM clients {where} ORDER BY name"))
+
+
+# ---------- users + roles (multi-user) ----------
+
+def upsert_user(conn: sqlite3.Connection, tid: int, name: str, username: str = "") -> None:
+    """Запомнить Telegram-юзера (наполняется при входе). Имя обновляем, username —
+    только если непустой (не затираем сохранённый)."""
+    if not tid:
+        return
+    conn.execute(
+        """INSERT INTO users (tid, name, username) VALUES (?, ?, ?)
+           ON CONFLICT(tid) DO UPDATE SET
+             name = excluded.name,
+             username = CASE WHEN excluded.username <> '' THEN excluded.username ELSE users.username END,
+             last_seen = CURRENT_TIMESTAMP""",
+        (tid, name or "", username or ""))
+    conn.commit()
+
+
+def list_users(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+    return [dict(r) for r in conn.execute(
+        "SELECT tid, name, username, last_seen FROM users ORDER BY name COLLATE NOCASE")]
+
+
+def get_user(conn: sqlite3.Connection, tid: int) -> Optional[Dict[str, Any]]:
+    r = conn.execute("SELECT tid, name, username FROM users WHERE tid=?", (tid,)).fetchone()
+    return dict(r) if r else None
+
+
+def client_owner_tid(conn: sqlite3.Connection, client_id: str) -> Optional[int]:
+    r = conn.execute("SELECT owner_tid FROM clients WHERE id=?", (client_id,)).fetchone()
+    return r["owner_tid"] if r and r["owner_tid"] is not None else None
+
+
+def set_client_owner(conn: sqlite3.Connection, client_id: str, tid: Optional[int]) -> None:
+    conn.execute("UPDATE clients SET owner_tid=? WHERE id=?", (tid, client_id))
+    conn.commit()
+
+
+def set_client_hidden(conn: sqlite3.Connection, client_id: str, hidden: bool) -> None:
+    conn.execute("UPDATE clients SET hidden=? WHERE id=?", (1 if hidden else 0, client_id))
+    conn.commit()
 
 
 # ---------- cells ----------
@@ -774,6 +817,7 @@ def portfolio_summary(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
         FROM clients cl
         LEFT JOIN cells c ON c.client_id = cl.id
         LEFT JOIN facts f ON f.cell_id = c.id AND f.state = 'active'
+        WHERE COALESCE(cl.hidden, 0) = 0
         GROUP BY cl.id
         ORDER BY cl.name
     """).fetchall()

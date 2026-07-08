@@ -96,12 +96,21 @@ def auth_logout(response: Response):
 
 @app.get("/api/auth/me")
 def auth_me(request: Request):
+    # локально/без auth — «dev» с правами админа, чтобы разработка не упиралась в роли
     if not auth.enabled():
-        return {"name": "dev", "tid": 0, "auth": False}
+        return {"name": "dev", "tid": 0, "auth": False, "is_admin": True}
     data = auth.verify_session(request.cookies.get(auth.COOKIE, ""))
     if not data:
         raise HTTPException(401, "not authenticated")
-    return {**data, "auth": True}
+    tid = data.get("tid")
+    if tid:                                    # запомнить юзера (источник имён для пикеров)
+        conn = db.connect()
+        try:
+            db.init_schema(conn)
+            matrix.upsert_user(conn, tid, data.get("name", ""))
+        finally:
+            conn.close()
+    return {**data, "auth": True, "is_admin": auth.is_admin(tid)}
 
 
 # ---------- DB dependency ----------
@@ -130,6 +139,8 @@ class ClientOut(BaseModel):
     tone_preset: Optional[str] = None
     created_at: Optional[str] = None
     created_by: Optional[str] = None
+    owner_tid: Optional[int] = None
+    hidden: bool = False
 
 
 class SeedFactIn(BaseModel):
@@ -459,8 +470,8 @@ def _row_to_client(row) -> ClientOut:
 
 
 @app.get("/api/clients", response_model=List[ClientOut])
-def list_clients(conn=Depends(get_conn)):
-    return [_row_to_client(r) for r in matrix.list_clients(conn)]
+def list_clients(include_hidden: bool = False, conn=Depends(get_conn)):
+    return [_row_to_client(r) for r in matrix.list_clients(conn, include_hidden=include_hidden)]
 
 
 class PortfolioRow(BaseModel):
@@ -503,6 +514,50 @@ def set_client_mine(client_id: str, body: MineIn, conn=Depends(get_conn),
         raise HTTPException(400, "personal lists require Telegram login")
     matrix.set_client_member(conn, client_id, tid, body.on)
     return {"ok": True, "mine": body.on}
+
+
+# ---------- users + roles (multi-user) ----------
+
+@app.get("/api/users")
+def list_users_ep(conn=Depends(get_conn)):
+    """Известные Telegram-юзеры (наполняются при входе) — для выбора владельца/исполнителя."""
+    return matrix.list_users(conn)
+
+
+def _require_owner_or_admin(client_id: str, request: Request, conn) -> sqlite3.Row:
+    """Проверка «текущий владелец ИЛИ супер-админ». Локально без auth — пропускаем."""
+    row = conn.execute("SELECT owner_tid FROM clients WHERE id=?", (client_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "client not found")
+    if auth.enabled():
+        tid = current_tid(request)
+        if tid is None:
+            raise HTTPException(401, "not authenticated")
+        if not (auth.is_admin(tid) or row["owner_tid"] == tid):
+            raise HTTPException(403, "требуются права владельца данных или админа")
+    return row
+
+
+class OwnerIn(BaseModel):
+    tid: Optional[int] = None   # None снимает владельца
+
+
+@app.put("/api/clients/{client_id}/owner", response_model=ClientOut)
+def set_client_owner_ep(client_id: str, body: OwnerIn, request: Request, conn=Depends(get_conn)):
+    _require_owner_or_admin(client_id, request, conn)
+    matrix.set_client_owner(conn, client_id, body.tid)
+    return _row_to_client(conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone())
+
+
+class HiddenIn(BaseModel):
+    hidden: bool
+
+
+@app.put("/api/clients/{client_id}/hidden", response_model=ClientOut)
+def set_client_hidden_ep(client_id: str, body: HiddenIn, request: Request, conn=Depends(get_conn)):
+    _require_owner_or_admin(client_id, request, conn)
+    matrix.set_client_hidden(conn, client_id, body.hidden)
+    return _row_to_client(conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone())
 
 
 # ---------- brief composer: factology + analyst prompt -> MD/JSON for external LLM ----------
@@ -713,7 +768,8 @@ def update_client_methodology(client_id: str, subsection_id: str,
 
 
 @app.post("/api/clients", response_model=ClientOut)
-def upsert_client(c: ClientOut, conn=Depends(get_conn)):
+def upsert_client(c: ClientOut, request: Request, conn=Depends(get_conn)):
+    prior = conn.execute("SELECT owner_tid FROM clients WHERE id=?", (c.id,)).fetchone()
     matrix.upsert_client(
         conn, c.id, c.name,
         sector=c.sector or "", one_liner=c.one_liner or "",
@@ -722,6 +778,10 @@ def upsert_client(c: ClientOut, conn=Depends(get_conn)):
         tone_preset=c.tone_preset,
     )
     matrix.ensure_full_grid(conn, c.id)
+    # создатель = владелец данных (проставляем только если владельца ещё нет)
+    tid = current_tid(request)
+    if tid and (prior is None or prior["owner_tid"] is None):
+        matrix.set_client_owner(conn, c.id, tid)
     row = conn.execute("SELECT * FROM clients WHERE id=?", (c.id,)).fetchone()
     return _row_to_client(row) if row else c
 

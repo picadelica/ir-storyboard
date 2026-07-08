@@ -39,6 +39,24 @@ def enabled() -> bool:
     return bool(BOT_TOKEN and GROUP_ID and SESSION_SECRET)
 
 
+def _admin_tids() -> set:
+    """Супер-админы (переназначают владельца любой компании) — Telegram id из env
+    IR_ADMIN_TIDS (через запятую). Пусто = админов нет."""
+    out = set()
+    for part in os.environ.get("IR_ADMIN_TIDS", "").replace(";", ",").split(","):
+        part = part.strip()
+        if part.lstrip("-").isdigit():
+            out.add(int(part))
+    return out
+
+
+def is_admin(tid) -> bool:
+    try:
+        return int(tid) in _admin_tids()
+    except (TypeError, ValueError):
+        return False
+
+
 # ── session cookie: compact HMAC-signed token (stdlib, no extra deps) ──────────
 
 def _b64(raw: bytes) -> str:

@@ -132,6 +132,30 @@ def init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (client_id, telegram_id)
         )
     """)
+
+    # multi-user roles (права экспертов): known Telegram users (наполняется при
+    # входе из сессии — источник имён для выбора владельца/исполнителя).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            tid        INTEGER PRIMARY KEY,
+            name       TEXT NOT NULL DEFAULT '',
+            username   TEXT NOT NULL DEFAULT '',
+            first_seen TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # у компании есть владелец данных (финализирует правки); скрытие вместо удаления
+    _add_column_if_missing(conn, "clients", "owner_tid", "INTEGER")
+    _add_column_if_missing(conn, "clients", "hidden", "INTEGER NOT NULL DEFAULT 0")
+    # провенанс факта: кто внёс (tid к created_by-имени), кто/когда подтвердил,
+    # автор слияния. Факт от контрибьютора едет в state='review' (черновик).
+    _add_column_if_missing(conn, "facts", "created_by_tid", "INTEGER")
+    _add_column_if_missing(conn, "facts", "approved_by", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "facts", "approved_by_tid", "INTEGER")
+    _add_column_if_missing(conn, "facts", "approved_at", "TIMESTAMP")
+    _add_column_if_missing(conn, "facts", "merged_by", "TEXT NOT NULL DEFAULT ''")
+    # канбан: исполнитель как реальный юзер (assignee-имя остаётся для совместимости)
+    _add_column_if_missing(conn, "work_items", "assignee_tid", "INTEGER")
     # brief composer: analyst-editable prompt templates for external-LLM materials
     conn.execute("""
         CREATE TABLE IF NOT EXISTS brief_templates (
