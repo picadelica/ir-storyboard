@@ -75,6 +75,58 @@ def test_md_loader_basic_smoke(tmp_path):
     assert ir.detected_cite_format == "bracket_n"
 
 
+@pytest.mark.parametrize("sources_header", [
+    "## Источники",          # markdown-заголовок (эталон)
+    "**Источники:**",        # жирным — частый вывод Claude
+    "__Sources__",           # жирным (underscore)
+    "Источники:",            # просто строкой с двоеточием
+    "#### Sources",          # 4 решётки (markdown до 6)
+    "###### References",     # 6 решёток
+])
+def test_md_loader_lenient_sources_header(tmp_path, sources_header):
+    """Секция источников распознаётся не только markdown-заголовком `##`, но и когда LLM
+    отдал её жирным (`**Sources**`), строкой с двоеточием (`Sources:`) или 4-6 решётками —
+    URL из `[N] … URL` парсятся во всех случаях (робастность к формату вывода LLM)."""
+    from ir_storyboard.ingest.loaders.md_loader import load
+
+    md = textwrap.dedent(f"""\
+        ## Founder
+        Запустил стартап в 2021 [1]. Раунд A на $5M [2].
+
+        {sources_header}
+        [1] TechCrunch — Launch — https://techcrunch.com/a
+        [2] Forbes — Series A — https://forbes.com/b
+        """)
+    f = tmp_path / "report.md"
+    f.write_text(md, encoding="utf-8")
+    ir = load(f)
+
+    assert len(ir.citations) == 2
+    urls = {c.url for c in ir.citations}
+    assert urls == {"https://techcrunch.com/a", "https://forbes.com/b"}
+
+
+def test_md_loader_bold_label_in_body_not_a_source_section(tmp_path):
+    """Ложное срабатывание: жирный ярлык в теле (не «источники/sources/…») режим НЕ
+    переключает — остаётся контентом."""
+    from ir_storyboard.ingest.loaders.md_loader import load
+
+    md = textwrap.dedent("""\
+        ## Founder
+        **Ключевые факты:**
+        Запустил в 2021 [1] https://tc.com/a
+
+        ## Sources
+        [1] TechCrunch — https://tc.com/a
+        """)
+    f = tmp_path / "report.md"
+    f.write_text(md, encoding="utf-8")
+    ir = load(f)
+    # жирный ярлык остался в контент-секции Founder; источники разобраны из ## Sources
+    assert any("Ключевые факты" in p for p in ir.sections[0].paragraphs)
+    assert len(ir.citations) == 1 and ir.citations[0].url == "https://tc.com/a"
+
+
 def test_md_loader_skips_conclusions(tmp_path):
     from ir_storyboard.ingest.loaders.md_loader import load
 

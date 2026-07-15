@@ -8,13 +8,42 @@ from ..ir import LLMReportIR, RawCitation, RawSection
 
 _RE_BRACKET_N = re.compile(r"\[(\d+)\]")
 _RE_URL = re.compile(r"https?://[^\s\]\)\>\"']+")
-_RE_HEADING = re.compile(r"^(#{1,3})\s+(.+)$")
+_RE_HEADING = re.compile(r"^(#{1,6})\s+(.+)$")  # markdown допускает до 6 уровней (LLM даёт ####)
 # Gemini/Perplexity inline links: [title](url) or [^N]: url
 _RE_INLINE_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)")
 
 _SOURCES_HINTS = ["источники", "sources", "references", "bibliography", "ссылки"]
 _OPEN_Q_HINTS = ["open questions", "вопросы для интервью", "interview questions", "открытые вопросы"]
 _SKIP_HINTS = ["выводы", "conclusions", "заключение", "conclusion", "summary", "итог"]
+
+
+def _special_mode(heading_low: str) -> str | None:
+    """Метка секции по её тексту (нижний регистр): sources / open_questions / skip / None."""
+    if any(h in heading_low for h in _SOURCES_HINTS):
+        return "sources"
+    if any(h in heading_low for h in _OPEN_Q_HINTS):
+        return "open_questions"
+    if any(h in heading_low for h in _SKIP_HINTS):
+        return "skip"
+    return None
+
+
+def _pseudo_heading_label(stripped: str) -> str | None:
+    """LLM часто оформляет секцию не markdown-заголовком, а жирным (`**Sources**`) или
+    строкой с двоеточием (`Источники:`). Распознаём такую строку-ярлык (короткую,
+    самостоятельную) → её текст; иначе None. Только для СПЕЦ-секций (проверяет вызывающий)."""
+    s = stripped
+    is_bold = (s.startswith("**") and s.endswith("**") and len(s) > 4) or (
+        s.startswith("__") and s.endswith("__") and len(s) > 4)
+    core = s.strip("*_").strip()
+    has_colon = core.endswith(":")
+    if not (is_bold or has_colon):
+        return None
+    core = core.rstrip(":").strip()
+    # ярлык-заголовок: короткий, без внутренней пунктуации предложения
+    if not core or len(core) > 40 or "." in core:
+        return None
+    return core
 
 
 def load(path: Path) -> LLMReportIR:
@@ -38,26 +67,34 @@ def load(path: Path) -> LLMReportIR:
         if hm:
             level = len(hm.group(1))
             heading = hm.group(2).strip()
-            heading_low = heading.lower()
-
-            if any(h in heading_low for h in _SOURCES_HINTS):
-                mode = "sources"
+            special = _special_mode(heading.lower())
+            if special is not None:
+                mode = special
                 current_section = None
-                continue
-            if any(h in heading_low for h in _OPEN_Q_HINTS):
-                mode = "open_questions"
-                current_section = None
-                continue
-            if any(h in heading_low for h in _SKIP_HINTS):
-                mode = "skip"
-                current_section = None
-                parser_notes.append(f"Skipped section '{heading}' (meta/conclusions)")
+                if special == "skip":
+                    parser_notes.append(f"Skipped section '{heading}' (meta/conclusions)")
                 continue
 
             mode = "content"
             current_section = RawSection(heading=heading, level=level)
             sections.append(current_section)
             continue
+
+        # LLM оформил спец-секцию не заголовком, а жирным/строкой с двоеточием
+        if mode != "sources":  # уже в источниках — строки разбираем как цитаты, не как ярлык
+            label = _pseudo_heading_label(stripped)
+            if label is not None:
+                special = _special_mode(label.lower())
+                if special is not None:
+                    mode = special
+                    current_section = None
+                    if special == "skip":
+                        parser_notes.append(f"Skipped section '{label}' (meta/conclusions)")
+                    else:
+                        parser_notes.append(
+                            f"Секция '{label}' распознана без markdown-заголовка "
+                            f"({'жирным' if stripped.startswith('*') or stripped.startswith('_') else 'строкой с двоеточием'})")
+                    continue
 
         if mode == "skip":
             continue
