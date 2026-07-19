@@ -68,24 +68,18 @@ async def _auth_gate(request: Request, call_next):
 def auth_start():
     if not auth.enabled():
         raise HTTPException(400, "auth not configured")
-    token = auth.create_login_token()
-    bu = auth.bot_username()
-    return {"token": token, "bot_username": bu, "deep_link": f"https://t.me/{bu}?start={token}"}
+    return auth.authgw_start()  # {token, deep_link} на общего бота (продукт=ir-storyboard)
 
 
 @app.get("/api/auth/status")
 def auth_status(token: str, response: Response):
-    tok = auth.get_login_token(token)
-    if not tok:
-        return {"status": "expired"}
-    if tok["status"] == "approved":
-        auth.consume_login_token(token)
+    s = auth.authgw_status(token)
+    if s.get("status") == "approved" and s.get("session"):
         response.set_cookie(
-            auth.COOKIE, auth.issue_session(tok["tid"], tok["name"]),
+            auth.COOKIE, s["session"],
             httponly=True, samesite="lax", max_age=auth.SESSION_TTL, path="/",
         )
-        return {"status": "approved", "user": {"name": tok["name"], "tid": tok["tid"]}}
-    return {"status": tok["status"]}
+    return {k: v for k, v in s.items() if k != "session"}
 
 
 @app.post("/api/auth/logout")
