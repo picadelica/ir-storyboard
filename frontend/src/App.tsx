@@ -21,6 +21,7 @@ import IngestYouTube from "./components/IngestYouTube";
 import IngestAudio from "./components/IngestAudio";
 import IngestClientFacts from "./components/IngestClientFacts";
 import MethodologyView from "./components/MethodologyView";
+import UsersView from "./components/UsersView";
 import PlanView from "./components/PlanView";
 import BriefComposer from "./components/BriefComposer";
 import ExportView from "./components/ExportView";
@@ -140,6 +141,7 @@ function ClientPage() {
           {activeTab === "methodology" && (
             <MethodologyView key={clientId} clientId={clientId!} />
           )}
+          {activeTab === "users" && <UsersView />}
           {activeTab === "plan" && (
             <PlanView clientId={clientId!} quarter={quarter} layers={layers.data} />
           )}
@@ -247,6 +249,10 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
   const activeZone = ZONES.find(z => z.tabs.some(t => t.id === activeTab)) ?? ZONES[0];
   const showSub = activeZone.tabs.length > 1 || activeZone.id === "deliver";
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.getClient(clientId) });
+  const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
+  // «Пользователи» видят супер-админ и владелец данных этой компании
+  const canSeeUsers = !!me.data?.is_admin
+    || (me.data?.tid != null && client.data?.owner_tid === me.data.tid);
 
   return (
     <div className="border-b border-ink-line bg-white">
@@ -275,6 +281,13 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
         )}
 
         <div className="ml-auto flex items-center gap-3">
+          {canSeeUsers && (
+            <button
+              onClick={() => nav(`/clients/${clientId}/users`)}
+              className={`text-xs transition ${activeTab === "users" ? "text-ink font-medium" : "text-ink-mute hover:text-ink"}`}
+              title="Пользователи системы"
+            >Пользователи</button>
+          )}
           <button
             onClick={() => nav(`/clients/${clientId}/methodology`)}
             className={`text-xs transition ${activeTab === "methodology" ? "text-ink font-medium" : "text-ink-mute hover:text-ink"}`}

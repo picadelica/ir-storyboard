@@ -63,6 +63,18 @@ export interface ReclassifyResult {
   total: number;
 }
 
+export interface UserOverview {
+  tid: number;
+  name: string;
+  username: string;
+  first_seen: string | null;
+  last_seen: string | null;
+  owned_clients: string[];
+  facts_created: number;
+  facts_approved: number;
+  is_admin: boolean;
+}
+
 export interface TonePreset {
   id: string;
   label: string;

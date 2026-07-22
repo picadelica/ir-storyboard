@@ -539,6 +539,29 @@ def list_users_ep(conn=Depends(get_conn)):
     return matrix.list_users(conn)
 
 
+@app.get("/api/users/overview")
+def users_overview_ep(conn=Depends(get_conn),
+                      user: Optional[dict] = Depends(current_user)):
+    """«Пользователи системы» — кто есть кто: роль (админ / владелец компаний), активность
+    (внёс/одобрил фактов, входы). Видит супер-админ (всех) или владелец данных (своих
+    контрибьюторов + себя). Локально без auth — все."""
+    only_tids = None
+    if auth.enabled():
+        tid = (user or {}).get("tid")
+        if tid is None:
+            raise HTTPException(401, "not authenticated")
+        if not auth.is_admin(tid):
+            owned = [r["id"] for r in conn.execute(
+                "SELECT id FROM clients WHERE owner_tid = ?", (tid,))]
+            if not owned:
+                raise HTTPException(403, "требуются права владельца данных или админа")
+            only_tids = matrix.contributor_tids_for_clients(conn, owned) | {tid}
+    rows = matrix.users_overview(conn, only_tids=only_tids)
+    for r in rows:
+        r["is_admin"] = bool(auth.is_admin(r["tid"])) if auth.enabled() else False
+    return rows
+
+
 def _require_owner_or_admin(client_id: str, request: Request, conn) -> sqlite3.Row:
     """Проверка «текущий владелец ИЛИ супер-админ». Локально без auth — пропускаем."""
     row = conn.execute("SELECT owner_tid FROM clients WHERE id=?", (client_id,)).fetchone()

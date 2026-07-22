@@ -6,7 +6,7 @@ import type {
   AboutProposal, AboutAutofillResult, FounderDiscoverResult, FounderProfilesResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
-  ReclassifyResult,
+  ReclassifyResult, UserOverview,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport, Dossier,
@@ -66,6 +66,9 @@ export const api = {
   channels: () => call<string[]>("/channels"),
 
   authMe: () => call<{ name: string; tid: number; auth: boolean; is_admin?: boolean }>("/auth/me"),
+
+  // «Пользователи системы» — кто есть кто (роль + активность). Админ/владельцы.
+  usersOverview: (): Promise<UserOverview[]> => call<UserOverview[]>("/users/overview"),
   authStart: () => call<{ token: string; bot_username: string; deep_link: string }>(
     "/auth/start", { method: "POST" }),
   authStatus: (token: string) => call<{ status: string; user?: { name: string; tid: number } }>(

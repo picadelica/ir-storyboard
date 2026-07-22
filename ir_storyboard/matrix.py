@@ -168,6 +168,48 @@ def list_users(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
         "SELECT tid, name, username, last_seen FROM users ORDER BY name COLLATE NOCASE")]
 
 
+def contributor_tids_for_clients(conn: sqlite3.Connection,
+                                 client_ids: List[str]) -> set:
+    """tid'ы всех, кто вносил факты в компании из списка (для owner-скоупа обзора юзеров)."""
+    if not client_ids:
+        return set()
+    ph = ",".join("?" * len(client_ids))
+    rows = conn.execute(
+        f"""SELECT DISTINCT f.created_by_tid FROM facts f JOIN cells c ON c.id = f.cell_id
+             WHERE c.client_id IN ({ph}) AND f.created_by_tid IS NOT NULL""",
+        tuple(client_ids),
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def users_overview(conn: sqlite3.Connection,
+                   only_tids: Optional[set] = None) -> List[Dict[str, Any]]:
+    """«Кто есть кто»: юзеры + владелец каких компаний + активность (внёс/одобрил фактов,
+    последний вход). only_tids — ограничить набор (owner-скоуп). is_admin проставляет вызывающий."""
+    users = conn.execute(
+        "SELECT tid, name, username, first_seen, last_seen FROM users "
+        "ORDER BY name COLLATE NOCASE"
+    ).fetchall()
+    out: List[Dict[str, Any]] = []
+    for u in users:
+        tid = u["tid"]
+        if only_tids is not None and tid not in only_tids:
+            continue
+        owned = [r["name"] for r in conn.execute(
+            "SELECT name FROM clients WHERE owner_tid = ? AND hidden = 0 "
+            "ORDER BY name COLLATE NOCASE", (tid,))]
+        created = conn.execute(
+            "SELECT count(*) FROM facts WHERE created_by_tid = ?", (tid,)).fetchone()[0]
+        approved = conn.execute(
+            "SELECT count(*) FROM facts WHERE approved_by_tid = ?", (tid,)).fetchone()[0]
+        out.append({
+            "tid": tid, "name": u["name"], "username": u["username"],
+            "first_seen": u["first_seen"], "last_seen": u["last_seen"],
+            "owned_clients": owned, "facts_created": created, "facts_approved": approved,
+        })
+    return out
+
+
 def get_user(conn: sqlite3.Connection, tid: int) -> Optional[Dict[str, Any]]:
     r = conn.execute("SELECT tid, name, username FROM users WHERE tid=?", (tid,)).fetchone()
     return dict(r) if r else None
