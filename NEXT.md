@@ -4,10 +4,25 @@
 
 ---
 
-**Последнее обновление:** 2026-07-08
+**Последнее обновление:** 2026-07-22
 **Ветка:** `feat/v2`
 **Прод:** 216.57.108.107 (Caddy :80, Basic Auth; health открыт), deploy_ir_storyboard зелёный.
-Тесты: `pytest -m "not network"` → **293 passed** (сетевой `test_youtube_e2e` deselected).
+Тесты: `pytest -m "not network"` → **304 passed** (сетевой `test_youtube_e2e` deselected).
+
+## Переосмысление раскладки при смене методологии — СДЕЛАНО (2026-07-22, коммит 3a3d9c4)
+
+Кнопка «Применить новую методологию» в Methodology (per-client) → пересчёт раскладки
+active-фактов текущей методологией → превью переездов «из X.Y → в A.B» с чекбоксами →
+apply выбранных. Async-джоб (`reclassify/start` → poll `/jobs/{id}`) + `reclassify/apply`.
+- `llm.reclassify_facts` (батч-классификатор, инъектит методологию через `_build_subsection_list`,
+  generate_json/стаб); `matrix.active_facts_for_reclassify` + `move_fact_to_subsection`
+  (UPDATE cell_id, текст не тронут — инвариант #5; кросс-клиент заблокирован).
+- Фронт: панель + модалка (`MovesPreviewModal`) в `MethodologyView.tsx`.
+- Проверено в браузере (RoleTest Co: 3.1 → 3.2 → apply → факт в новой ячейке). НЕ задеплоено.
+- **Дальше (если нужно):** global-режим (все клиенты сразу, супер-админ); опц. провенанс
+  переезда (кто переклассифицировал). Деплой — workflow `deploy_ir_storyboard`.
+
+--- ниже: предыдущее состояние (права экспертов) ---
 
 ## Права экспертов (multi-user) — В РАБОТЕ (начато 2026-07-08)
 
