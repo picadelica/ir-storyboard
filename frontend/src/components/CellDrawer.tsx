@@ -359,15 +359,26 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                       {/* footer (source + merged-from links) — collapsed behind the info icon */}
                       {infoIds.has(f.id) && (
                         <div className="mt-2 pt-2 border-t border-ink-line/60">
-                          {kids.length > 0 && (
+                          {kids.length > 0 && (() => {
+                            // Два режима склейки:
+                            //  • curated (created_by='merge') — это НОВАЯ синтез-карточка, собранная из kids
+                            //    оригиналов; сама она не оригинал → «собрано из kids», без чипа «эта».
+                            //  • default-keep — видимая карточка сама один из оригиналов (+ kids дублей)
+                            //    → «собрано из kids+1», первый чип «#id · эта».
+                            const curated = f.created_by === "merge";
+                            const total = curated ? kids.length : kids.length + 1;
+                            const nounForm = total === 1 ? "карточки" : "карточек";
+                            return (
                             <div className="mb-1">
                               <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
-                                <span>собрано из {kids.length + 1} карточек:</span>
-                                {/* сама эта карточка — одна из собранных (не ссылка), чтобы число совпадало с чипами */}
-                                <span title="эта карточка — канонический вариант"
-                                  className="font-mono px-1.5 py-0.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-700">
-                                  #{f.id} · эта
-                                </span>
+                                <span>собрано из {total} {nounForm}:</span>
+                                {/* сама эта карточка — один из оригиналов (не ссылка), чтобы число совпадало с чипами */}
+                                {!curated && (
+                                  <span title="эта карточка — канонический вариант"
+                                    className="font-mono px-1.5 py-0.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-700">
+                                    #{f.id} · эта
+                                  </span>
+                                )}
                                 {kids.map(k => {
                                   const open = expandedKids.has(k.id);
                                   return (
@@ -404,7 +415,8 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                                 </div>
                               )}
                             </div>
-                          )}
+                            );
+                          })()}
                           {/* собранная карточка несёт ТОЛЬКО ссылки на исходные — цитата/источник живут в исходных */}
                           {kids.length === 0 && (<>
                             {f.evidence_snippet && (
