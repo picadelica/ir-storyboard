@@ -363,6 +363,11 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                             <div className="mb-1">
                               <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
                                 <span>собрано из {kids.length + 1} карточек:</span>
+                                {/* сама эта карточка — одна из собранных (не ссылка), чтобы число совпадало с чипами */}
+                                <span title="эта карточка — канонический вариант"
+                                  className="font-mono px-1.5 py-0.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-700">
+                                  #{f.id} · эта
+                                </span>
                                 {kids.map(k => {
                                   const open = expandedKids.has(k.id);
                                   return (
