@@ -269,6 +269,32 @@ def init_schema(conn: sqlite3.Connection) -> None:
     """)
     conn.commit()
     _migrate_red_to_grey_once(conn)
+    _migrate_matrix_v2_once(conn)
+
+
+def _migrate_matrix_v2_once(conn: sqlite3.Connection) -> None:
+    """One-time: применить новую матрицу — синхронизировать имена и описания подсекций из
+    models.LAYERS в существующие БД. Меняются L6 (6.1 Architecture & Philosophy [слияние],
+    6.2 → Market context, 6.3 → Product & company evolution) и L8 (8.1 Social / 8.2 Technology /
+    8.3 Political & Economical context) + уточнённые описания по слоям. Guarded по app_meta:
+    последующие ручные правки описаний через UI сохраняются. Переселение фактов между
+    ячейками — отдельно, фичей переклассификации (per-client)."""
+    done = conn.execute(
+        "SELECT value FROM app_meta WHERE key='matrix_v2_names_desc_v1'"
+    ).fetchone()
+    if done:
+        return
+    from .models import LAYERS
+    for L in LAYERS:
+        for s in L.subsections:
+            conn.execute(
+                "UPDATE subsections SET name=?, description=? WHERE id=?",
+                (s.name, s.description, s.id),
+            )
+    conn.execute(
+        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('matrix_v2_names_desc_v1', '1')"
+    )
+    conn.commit()
 
 
 def _migrate_red_to_grey_once(conn: sqlite3.Connection) -> None:
