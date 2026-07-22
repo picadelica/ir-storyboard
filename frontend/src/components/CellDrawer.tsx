@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { Channel, Entity, Fact, Flag, Layer } from "../types";
 import SourceLine from "./SourceLine";
@@ -11,9 +11,10 @@ interface Props {
   subsectionId: string;
   onClose: () => void;
   layers?: Layer[];
+  focusFactId?: number;   // из поиска: подсветить/раскрыть эту карточку
 }
 
-export default function CellDrawer({ clientId, subsectionId, onClose, layers }: Props) {
+export default function CellDrawer({ clientId, subsectionId, onClose, layers, focusFactId }: Props) {
   const qc = useQueryClient();
   const facts = useQuery<Fact[]>({
     queryKey: ["facts", clientId, subsectionId],
@@ -53,6 +54,8 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
 
   const [showAdd, setShowAdd] = useState(false);
   const [showHidden, setShowHidden] = useState(false);   // collapsible for merged-away cards
+  const [expandedKids, setExpandedKids] = useState<Set<number>>(new Set());   // inline-раскрытые исходники под собранной карточкой
+  const toggleKid = (id: number) => setExpandedKids(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [infoIds, setInfoIds] = useState<Set<number>>(new Set());   // per-fact "info" footer open
   const toggleInfo = (id: number) => setInfoIds(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const InfoBtn = ({ id }: { id: number }) => (
@@ -143,6 +146,24 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
     mutationFn: ({ id, source }: { id: number; source: "" | "client" | "expert" }) => api.setMustHave(id, source),
     onSuccess: invalidate,
   });
+
+  // Фокус из поиска: доскроллить к карточке и подсветить; исходник — раскрыть.
+  const focusedRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!focusFactId) { focusedRef.current = undefined; return; }
+    if (!facts.data || focusedRef.current === focusFactId) return;
+    const target = facts.data.find(f => f.id === focusFactId);
+    if (!target) return;
+    focusedRef.current = focusFactId;
+    if (target.state === "rejected") setShowHidden(true);
+    setInfoIds(s => new Set(s).add(focusFactId));
+    setTimeout(() => {
+      const el = document.getElementById(`fact-${focusFactId}`);
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      el?.classList.add("ring-2", "ring-blue-400");
+      setTimeout(() => el?.classList.remove("ring-2", "ring-blue-400"), 1600);
+    }, 80);
+  }, [focusFactId, facts.data]);
 
   const channelHint = subsection
     ? `Primary channels for L${subsection.layer.id}: ${subsection.layer.primary_channels.join(", ")}`
@@ -315,27 +336,68 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                         </div>
                       )}
 
-                      {/* провенанс: кто внёс · кто подтвердил · когда */}
-                      {(f.created_by || f.approved_by || f.merged_by) && (
-                        <div className="mt-1.5 text-[10px] text-ink-mute/70 flex flex-wrap gap-x-2 gap-y-0.5">
-                          {f.merged_by
-                            ? <span>слил {f.merged_by}</span>
-                            : f.created_by && <span>внёс {f.created_by}</span>}
-                          {f.approved_by && <span>· подтвердил {f.approved_by}</span>}
-                          {f.captured_at && <span>· {f.captured_at.slice(0, 10)}</span>}
-                        </div>
-                      )}
+                      {/* провенанс: кто внёс/собрал · кто подтвердил · когда.
+                          Сентинелы пайплайна (merge/attribute/…) — не пользователи, не показываем как автора. */}
+                      {(() => {
+                        const SENT = new Set(["merge", "attribute", "dev", "stub", "import", "seed", ""]);
+                        const isJoint = kids.length > 0 || f.created_by === "merge" || !!f.merged_by;
+                        const author = isJoint
+                          ? (f.merged_by && !SENT.has(f.merged_by) ? `собрал ${f.merged_by}` : "собрано")
+                          : (f.created_by && !SENT.has(f.created_by) ? `внёс ${f.created_by}` : "");
+                        const parts: string[] = [];
+                        if (author) parts.push(author);
+                        if (f.approved_by) parts.push(`подтвердил ${f.approved_by}`);
+                        if (f.captured_at) parts.push(f.captured_at.slice(0, 10));
+                        if (!parts.length) return null;
+                        return (
+                          <div className="mt-1.5 text-[10px] text-ink-mute/70 flex flex-wrap gap-x-2 gap-y-0.5">
+                            {parts.map((p, i) => <span key={i}>{i ? "· " : ""}{p}</span>)}
+                          </div>
+                        );
+                      })()}
 
                       {/* footer (source + merged-from links) — collapsed behind the info icon */}
                       {infoIds.has(f.id) && (
                         <div className="mt-2 pt-2 border-t border-ink-line/60">
                           {kids.length > 0 && (
-                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute mb-1">
-                              <span>слито из {kids.length} карточек:</span>
-                              {kids.map(k => (
-                                <button key={k.id} onClick={() => jumpTo(k.id)} title={k.text}
-                                  className="font-mono px-1.5 py-0.5 rounded border border-ink-line text-blue-600 hover:bg-blue-50">#{k.id}</button>
-                              ))}
+                            <div className="mb-1">
+                              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
+                                <span>собрано из {kids.length + 1} карточек:</span>
+                                {kids.map(k => {
+                                  const open = expandedKids.has(k.id);
+                                  return (
+                                    <button key={k.id} onClick={() => toggleKid(k.id)} title={k.text}
+                                      className={`font-mono px-1.5 py-0.5 rounded border text-blue-600 hover:bg-blue-50 ${open ? "border-blue-300 bg-blue-50" : "border-ink-line"}`}>
+                                      {open ? "▾" : "▸"} #{k.id}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {/* исходники раскрываются тут же, без прыжка вниз */}
+                              {kids.some(k => expandedKids.has(k.id)) && (
+                                <div className="mt-1.5 space-y-1.5">
+                                  {kids.filter(k => expandedKids.has(k.id)).map(k => (
+                                    <div key={k.id} className="rounded border border-ink-line bg-slate-50/70 p-2">
+                                      <div className="flex items-center gap-1.5 text-[10px] text-ink-mute mb-1">
+                                        <FlagDot flag={k.flag} size={9} />
+                                        <span>исходная #{k.id}</span>
+                                        <button onClick={() => restoreFact.mutate(k.id)}
+                                          className="ml-auto text-ink-mute hover:text-ink" title="вернуть в матрицу как отдельную карточку">вернуть</button>
+                                      </div>
+                                      {k.title && <div className="text-xs font-semibold text-ink-mute leading-tight">{k.title}</div>}
+                                      <div className="text-xs leading-snug whitespace-pre-wrap text-ink-mute" style={{ textAlign: "justify" }}>{k.text}</div>
+                                      {k.evidence_snippet && (
+                                        <blockquote className="mt-1 text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug">{k.evidence_snippet}</blockquote>
+                                      )}
+                                      <SourceLine client_id={clientId} channel={k.source_channel} source_url={k.source_url}
+                                        source_title={k.source_title} source_archive_url={k.source_archive_url}
+                                        ingest_audit_id={k.ingest_audit_id} ingest_kind={k.ingest_kind} audio_sha={k.audio_sha}
+                                        timestamp_sec={k.snippet_start_sec ?? undefined} captured_at={k.captured_at}
+                                        onOpenAudio={(sha, sec) => openAudio(k.id, sha, sec)} />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           )}
                           {/* собранная карточка несёт ТОЛЬКО ссылки на исходные — цитата/источник живут в исходных */}

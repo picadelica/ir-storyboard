@@ -773,6 +773,43 @@ def fact_sources(conn: sqlite3.Connection, fact_id: int) -> List[dict]:
     return out
 
 
+def search_facts(conn: sqlite3.Connection, query: str,
+                 client_id: Optional[str] = None, limit: int = 60) -> List[dict]:
+    """Full-text-ish поиск по фактам (текст + заголовок). Регистронезависимо для
+    кириллицы через pylower (SQLite LIKE/lower — только ASCII). Скрытые дубли
+    (state='rejected') не показываем. client_id=None → по всем компаниям."""
+    q = (query or "").strip()
+    if len(q) < 2:
+        return []
+    conn.create_function("pylower", 1, lambda s: (s or "").lower())
+    esc = q.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = f"%{esc}%"
+    params: List = [like, like]
+    where_client = ""
+    if client_id:
+        where_client = "AND ce.client_id = ? "
+        params.append(client_id)
+    params.append(int(limit))
+    rows = conn.execute(
+        f"""SELECT f.id AS fact_id, cl.id AS client_id, cl.name AS client_name,
+                   ce.subsection_id AS subsection_id, s.name AS subsection_name,
+                   COALESCE(f.title, '') AS title, f.text AS text,
+                   f.flag AS flag, f.state AS state
+             FROM facts f
+             JOIN cells ce ON f.cell_id = ce.id
+             JOIN clients cl ON ce.client_id = cl.id
+             JOIN subsections s ON ce.subsection_id = s.id
+            WHERE f.state != 'rejected'
+              AND (pylower(f.text) LIKE ? ESCAPE '\\'
+                   OR pylower(COALESCE(f.title, '')) LIKE ? ESCAPE '\\')
+              {where_client}
+            ORDER BY cl.name, ce.subsection_id, f.id
+            LIMIT ?""",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def review_facts(conn: sqlite3.Connection, client_id: str) -> List[dict]:
     """Facts held in the ingest-gate quarantine (state='review') — for the
     triage screen to promote (→ active) or reject."""

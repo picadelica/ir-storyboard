@@ -1131,6 +1131,39 @@ def delete_fact(fact_id: int, conn=Depends(get_conn)):
     return {"ok": True}
 
 
+# ---------- поиск по фактам ----------
+
+class SearchHit(BaseModel):
+    fact_id: int
+    client_id: str
+    client_name: str
+    subsection_id: str
+    subsection_name: str
+    title: str = ""
+    text: str
+    flag: str
+    state: str
+
+
+class SearchOut(BaseModel):
+    query: str
+    scope: str
+    results: List[SearchHit]
+
+
+@app.get("/api/search", response_model=SearchOut)
+def search_ep(q: str, scope: str = "client", client_id: Optional[str] = None,
+              conn=Depends(get_conn)):
+    """Поиск фактов по тексту/заголовку. scope='client' → в рамках client_id,
+    'all' → по всем компаниям. Скрытые дубли исключены."""
+    query = (q or "").strip()
+    if len(query) < 2:
+        return SearchOut(query=query, scope=scope, results=[])
+    cid = client_id if scope == "client" else None
+    rows = matrix.search_facts(conn, query, client_id=cid, limit=60)
+    return SearchOut(query=query, scope=scope, results=[SearchHit(**r) for r in rows])
+
+
 # ---------- fact verification / trust (phase 1) ----------
 
 class AuditFactOut(BaseModel):

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Navigate, NavLink, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "./api";
 import type { CellSummary, Layer } from "./types";
 import Sidebar from "./components/Sidebar";
@@ -22,6 +22,7 @@ import IngestAudio from "./components/IngestAudio";
 import IngestClientFacts from "./components/IngestClientFacts";
 import MethodologyView from "./components/MethodologyView";
 import UsersView from "./components/UsersView";
+import SearchBox from "./components/SearchBox";
 import PlanView from "./components/PlanView";
 import BriefComposer from "./components/BriefComposer";
 import ExportView from "./components/ExportView";
@@ -62,15 +63,32 @@ function EmptyState() {
 function ClientPage() {
   const { clientId, tab } = useParams();
   const nav = useNavigate();
+  const [sp, setSp] = useSearchParams();
   const activeTab = tab ?? "matrix";
 
   const [quarter, setQuarter] = useState("2026Q2");
-  const [selectedSid, setSelectedSid] = useState<string | undefined>();
+  const [selectedSid, setSelectedSid] = useState<string | undefined>(sp.get("cell") ?? undefined);
+  const [focusFactId, setFocusFactId] = useState<number | undefined>(
+    sp.get("fact") ? Number(sp.get("fact")) : undefined);
   const [cycleKind, setCycleKind] = useState<"weekly" | "event" | "quarterly" | null>(null);
   const [pickedArtifactId, setPickedArtifactId] = useState<number | undefined>();
   const [present, setPresent] = useState(false);
 
   const layers = useQuery<Layer[]>({ queryKey: ["layers"], queryFn: api.layers });
+
+  // Приход из поиска: ?cell=<sid>&fact=<id> → открыть ячейку, подсветить карточку,
+  // затем убрать query, чтобы повторный выбор той же ячейки снова срабатывал.
+  const cellParam = sp.get("cell");
+  const factParam = sp.get("fact");
+  useEffect(() => {
+    if (!cellParam && !factParam) return;
+    if (cellParam) setSelectedSid(cellParam);
+    setFocusFactId(factParam ? Number(factParam) : undefined);
+    const next = new URLSearchParams(sp);
+    next.delete("cell"); next.delete("fact");
+    setSp(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cellParam, factParam]);
 
   const onJumpToCell = (sid: string) => {
     nav(`/clients/${clientId}/matrix`);
@@ -160,7 +178,8 @@ function ClientPage() {
         <CellDrawer
           clientId={clientId!}
           subsectionId={selectedSid}
-          onClose={() => setSelectedSid(undefined)}
+          focusFactId={focusFactId}
+          onClose={() => { setSelectedSid(undefined); setFocusFactId(undefined); }}
           layers={layers.data}
         />
       )}
@@ -281,6 +300,7 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
         )}
 
         <div className="ml-auto flex items-center gap-3">
+          <SearchBox clientId={clientId} />
           {canSeeUsers && (
             <button
               onClick={() => nav(`/clients/${clientId}/users`)}

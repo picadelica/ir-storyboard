@@ -383,6 +383,24 @@ export interface CellSummary {
   channels?: Channel[];
 }
 
+export interface SearchHit {
+  fact_id: number;
+  client_id: string;
+  client_name: string;
+  subsection_id: string;
+  subsection_name: string;
+  title: string;
+  text: string;
+  flag: Flag;
+  state: string;
+}
+
+export interface SearchResult {
+  query: string;
+  scope: "client" | "all";
+  results: SearchHit[];
+}
+
 export interface Fact {
   id: number;
   text: string;

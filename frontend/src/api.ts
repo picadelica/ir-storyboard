@@ -6,7 +6,7 @@ import type {
   AboutProposal, AboutAutofillResult, FounderDiscoverResult, FounderProfilesResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
-  ReclassifyResult, UserOverview,
+  ReclassifyResult, UserOverview, SearchResult,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport, Dossier,
@@ -143,6 +143,10 @@ export const api = {
     call<{ ok: boolean }>(`/facts/${factId}`, { method: "DELETE" }),
   moveFact: (factId: number, toSid: string): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/move`, { method: "POST", body: JSON.stringify({ to_sid: toSid }) }),
+
+  search: (q: string, scope: "client" | "all", clientId?: string): Promise<SearchResult> =>
+    call<SearchResult>(`/search?q=${encodeURIComponent(q)}&scope=${scope}` +
+      (scope === "client" && clientId ? `&client_id=${encodeURIComponent(clientId)}` : "")),
 
   tracks: (clientId: string, quarter: string) =>
     call<Track[]>(`/clients/${clientId}/plans/${quarter}/tracks`),
