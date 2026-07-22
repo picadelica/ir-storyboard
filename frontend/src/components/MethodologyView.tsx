@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   Client, ClientMethodologyCell, MethodologyCell, TonePreset,
-  MethodologyMove, ReclassifyResult,
+  MethodologyMove, ReclassifyResult, Layer,
 } from "../types";
 
 interface Props {
@@ -363,20 +363,25 @@ function ReapplyMethodologySection({ clientId, clientName }: {
   const qc = useQueryClient();
   const [preview, setPreview] = useState<ReclassifyResult | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // ручное переопределение целевого раздела для переезда (по умолчанию — предложение LLM)
+  const [overrides, setOverrides] = useState<Record<number, string>>({});
+  const layers = useQuery({ queryKey: ["layers"], queryFn: api.layers });
+  const targetOf = (m: MethodologyMove) => overrides[m.fact_id] ?? m.to_sid;
 
   const runMut = useMutation({
     mutationFn: () => api.reclassifyMethodology(clientId),
     onSuccess: (res) => {
       setPreview(res);
       setSelected(new Set(res.moves.map((m) => m.fact_id)));  // по умолчанию все выбраны
+      setOverrides({});
     },
   });
 
   const applyMut = useMutation({
     mutationFn: () => {
       const moves = (preview?.moves ?? [])
-        .filter((m) => selected.has(m.fact_id))
-        .map((m) => ({ fact_id: m.fact_id, to_sid: m.to_sid }));
+        .filter((m) => selected.has(m.fact_id) && targetOf(m) !== m.from_sid)
+        .map((m) => ({ fact_id: m.fact_id, to_sid: targetOf(m) }));
       return api.applyMethodologyMoves(clientId, moves);
     },
     onSuccess: () => {
@@ -427,6 +432,9 @@ function ReapplyMethodologySection({ clientId, clientName }: {
           onApply={() => applyMut.mutate()}
           applying={applyMut.isPending}
           error={applyMut.isError ? String(applyMut.error) : null}
+          layers={layers.data ?? []}
+          targetOf={targetOf}
+          onChangeTarget={(id, sid) => setOverrides((o) => ({ ...o, [id]: sid }))}
         />
       )}
     </section>
@@ -435,6 +443,7 @@ function ReapplyMethodologySection({ clientId, clientName }: {
 
 function MovesPreviewModal({
   preview, selected, onToggle, onSelectAll, onSelectNone, onClose, onApply, applying, error,
+  layers, targetOf, onChangeTarget,
 }: {
   preview: ReclassifyResult;
   selected: Set<number>;
@@ -445,6 +454,9 @@ function MovesPreviewModal({
   onApply: () => void;
   applying: boolean;
   error: string | null;
+  layers: Layer[];
+  targetOf: (m: MethodologyMove) => string;
+  onChangeTarget: (id: number, sid: string) => void;
 }) {
   const { moves, total } = preview;
   return (
@@ -474,7 +486,10 @@ function MovesPreviewModal({
               {moves.map((m) => (
                 <MoveRow key={m.fact_id} move={m}
                          checked={selected.has(m.fact_id)}
-                         onToggle={() => onToggle(m.fact_id)} />
+                         onToggle={() => onToggle(m.fact_id)}
+                         layers={layers}
+                         value={targetOf(m)}
+                         onChangeTarget={(sid) => onChangeTarget(m.fact_id, sid)} />
               ))}
             </div>
           </>
@@ -499,12 +514,14 @@ function MovesPreviewModal({
   );
 }
 
-function MoveRow({ move, checked, onToggle }: {
+function MoveRow({ move, checked, onToggle, layers, value, onChangeTarget }: {
   move: MethodologyMove; checked: boolean; onToggle: () => void;
+  layers: Layer[]; value: string; onChangeTarget: (sid: string) => void;
 }) {
+  const overridden = value !== move.to_sid;
   return (
-    <label className="flex items-start gap-3 px-5 py-2.5 cursor-pointer hover:bg-slate-50">
-      <input type="checkbox" checked={checked} onChange={onToggle} className="mt-1" />
+    <div className="flex items-start gap-3 px-5 py-2.5 hover:bg-slate-50">
+      <input type="checkbox" checked={checked} onChange={onToggle} className="mt-1 cursor-pointer" />
       <div className="min-w-0 flex-1">
         <div className="text-sm">
           {move.title
@@ -519,14 +536,31 @@ function MoveRow({ move, checked, onToggle }: {
             {move.from_sid}
           </span>
           <span className="text-ink-mute">→</span>
-          <span className="font-mono px-1 py-0.5 rounded bg-emerald-100 border border-emerald-200 text-emerald-700">
-            {move.to_sid}
-          </span>
-          {move.rationale && (
+          <select
+            value={value}
+            onChange={(e) => onChangeTarget(e.target.value)}
+            className={`font-mono text-xs rounded border px-1 py-0.5 cursor-pointer ${
+              overridden
+                ? "bg-amber-100 border-amber-300 text-amber-800"
+                : "bg-emerald-100 border-emerald-200 text-emerald-700"
+            }`}
+          >
+            {layers.map((l) => (
+              <optgroup key={l.id} label={`${l.id}. ${l.name}`}>
+                {l.subsections.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.id} · {s.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {overridden && <span className="text-amber-700">(вручную)</span>}
+          {move.rationale && !overridden && (
             <span className="text-ink-mute italic truncate">· {move.rationale}</span>
           )}
         </div>
       </div>
-    </label>
+    </div>
   );
 }

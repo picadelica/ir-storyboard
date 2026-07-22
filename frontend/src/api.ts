@@ -141,6 +141,8 @@ export const api = {
     call<Fact>(`/facts/${factId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteFact: (factId: number) =>
     call<{ ok: boolean }>(`/facts/${factId}`, { method: "DELETE" }),
+  moveFact: (factId: number, toSid: string): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/move`, { method: "POST", body: JSON.stringify({ to_sid: toSid }) }),
 
   tracks: (clientId: string, quarter: string) =>
     call<Track[]>(`/clients/${clientId}/plans/${quarter}/tracks`),

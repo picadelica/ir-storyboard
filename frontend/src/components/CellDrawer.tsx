@@ -106,6 +106,17 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
     onSuccess: invalidate,
   });
 
+  // перенос факта в другой раздел (подсекцию) — факт уходит из этой ячейки
+  const moveFact = useMutation({
+    mutationFn: ({ id, toSid }: { id: number; toSid: string }) => api.moveFact(id, toSid),
+    onSuccess: () => {
+      qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "facts" });
+      qc.invalidateQueries({ queryKey: ["matrix", clientId] });
+      qc.invalidateQueries({ queryKey: ["scorecard", clientId] });
+      qc.invalidateQueries({ queryKey: ["punch", clientId] });
+    },
+  });
+
   const restoreFact = useMutation({
     mutationFn: (id: number) => api.restoreFact(id),
     onSuccess: invalidate,
@@ -211,6 +222,23 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers }: 
                           disabled={draftFlag === "red" && !draftRationale.trim()}
                           className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">Save</button>
                         <button onClick={() => setEditingId(null)} className="text-xs px-3 py-1 hover:bg-slate-100 rounded text-ink-mute">Cancel</button>
+                      </div>
+                      {/* перенос в другой раздел (подсекцию) — факт уходит из этой ячейки */}
+                      <div className="flex items-center gap-2 pt-1 border-t border-ink-line/60">
+                        <span className="text-xs text-ink-mute" title="перенести факт в другой раздел матрицы">Раздел:</span>
+                        <select value={subsectionId} disabled={moveFact.isPending}
+                          onChange={e => {
+                            const to = e.target.value;
+                            if (to && to !== subsectionId) { moveFact.mutate({ id: f.id, toSid: to }); setEditingId(null); }
+                          }}
+                          className="text-xs border border-ink-line rounded px-1.5 py-1 bg-white max-w-[18rem]">
+                          {(layers ?? []).map(L => (
+                            <optgroup key={L.id} label={`L${L.id}. ${L.name}`}>
+                              {L.subsections.map(s => <option key={s.id} value={s.id}>{s.id} {s.name}</option>)}
+                            </optgroup>
+                          ))}
+                        </select>
+                        {moveFact.isPending && <span className="text-[11px] text-ink-mute">переношу…</span>}
                       </div>
                     </div>
                   ) : (

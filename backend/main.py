@@ -1105,6 +1105,24 @@ def update_fact(fact_id: int, u: FactUpdate, conn=Depends(get_conn)):
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
+class FactMoveIn(BaseModel):
+    to_sid: str
+
+
+@app.post("/api/facts/{fact_id}/move", response_model=FactOut)
+def move_fact_ep(fact_id: int, body: FactMoveIn, conn=Depends(get_conn)):
+    """Перенести факт в другой раздел (подсекцию) той же компании. Текст не трогается."""
+    if matrix.get_fact(conn, fact_id) is None:
+        raise HTTPException(404, "fact not found")
+    cid = matrix.fact_client_id(conn, fact_id)
+    if cid is None:
+        raise HTTPException(404, "fact has no client")
+    if body.to_sid not in set(matrix.get_subsection_descriptions(conn).keys()):
+        raise HTTPException(422, f"unknown subsection: {body.to_sid}")
+    matrix.move_fact_to_subsection(conn, fact_id, cid, body.to_sid)
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
 @app.delete("/api/facts/{fact_id}")
 def delete_fact(fact_id: int, conn=Depends(get_conn)):
     if matrix.get_fact(conn, fact_id) is None:
