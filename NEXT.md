@@ -9,6 +9,21 @@
 **Прод:** 216.57.108.107 (Caddy :80, Basic Auth; health открыт), deploy_ir_storyboard зелёный.
 Тесты: `pytest -m "not network"` → **304 passed** (сетевой `test_youtube_e2e` deselected).
 
+## Новая матрица v2 — СДЕЛАНО (2026-07-22, коммит 16fc7f3)
+
+Обновлены имена+описания подсекций по новой матрице (`~/Downloads/matrix new.md`).
+Структурные изменения L6/L8:
+- 6.1 → «Architecture & Philosophy of the solution» (слито с бывшей 6.2 Philosophy)
+- 6.2 → «Market context» (было Philosophy); 6.3 → «Product & company evolution»
+- 8.1 → «Social context»; 8.2 → «Technology context» (рынок ушёл в 6.2); 8.3 → «Political
+  & Economical context»
+- описания 1.3/2.x/3.x/4.x/5.1/5.2/7.1 расширены.
+- `models.py` (канон) + `db.py _migrate_matrix_v2_once` (one-time sync в существующие БД,
+  guard app_meta; прод — при рестарте app). Коды подсекций не тронуты.
+- **Дальше: переселить факты** — фичей переклассификации (per-client, «Применить новую
+  методологию»). Важно для L6↔L8 (Philosophy-факты в 6.2 → 6.1; Market-факты в 8.2 → 6.2).
+  Accumulator большой (18k фактов) — прогон через Haiku платный/долгий, решение за владельцем.
+
 ## Переосмысление раскладки при смене методологии — СДЕЛАНО (2026-07-22, коммит 3a3d9c4)
 
 Кнопка «Применить новую методологию» в Methodology (per-client) → пересчёт раскладки
