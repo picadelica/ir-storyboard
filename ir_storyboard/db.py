@@ -280,7 +280,7 @@ def _migrate_matrix_v2_once(conn: sqlite3.Connection) -> None:
     последующие ручные правки описаний через UI сохраняются. Переселение фактов между
     ячейками — отдельно, фичей переклассификации (per-client)."""
     done = conn.execute(
-        "SELECT value FROM app_meta WHERE key='matrix_v2_names_desc_v1'"
+        "SELECT value FROM app_meta WHERE key='matrix_v2_names_desc_v3'"
     ).fetchone()
     if done:
         return
@@ -292,7 +292,7 @@ def _migrate_matrix_v2_once(conn: sqlite3.Connection) -> None:
                 (s.name, s.description, s.id),
             )
     conn.execute(
-        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('matrix_v2_names_desc_v1', '1')"
+        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('matrix_v2_names_desc_v3', '1')"
     )
     conn.commit()
 
