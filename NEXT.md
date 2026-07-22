@@ -9,7 +9,7 @@
 **Прод:** 216.57.108.107 (Caddy :80, Basic Auth; health открыт), deploy_ir_storyboard зелёный.
 Тесты: `pytest -m "not network"` → **304 passed** (сетевой `test_youtube_e2e` deselected).
 
-## Поиск + починка собранных карточек — СДЕЛАНО, в feat/v2 (2026-07-22, коммит 3f946e8, НЕ задеплоено)
+## Поиск + починка собранных карточек — ЗАДЕПЛОЕНО НА ПРОД (2026-07-22, коммит 3f946e8, deploy COMPLETED)
 
 Четыре нюанса по обратной связи Дмитрия (проверено в браузере, 314 passed):
 - **Поиск фактов** (не хватало): `GET /api/search` (scope `client`|`all`) + `matrix.search_facts`
