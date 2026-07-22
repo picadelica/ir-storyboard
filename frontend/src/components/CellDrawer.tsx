@@ -360,43 +360,57 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                       {infoIds.has(f.id) && (
                         <div className="mt-2 pt-2 border-t border-ink-line/60">
                           {kids.length > 0 && (() => {
-                            // Два режима склейки:
-                            //  • curated (created_by='merge') — это НОВАЯ синтез-карточка, собранная из kids
-                            //    оригиналов; сама она не оригинал → «собрано из kids», без чипа «эта».
-                            //  • default-keep — видимая карточка сама один из оригиналов (+ kids дублей)
-                            //    → «собрано из kids+1», первый чип «#id · эта».
+                            // Скрытые «дети» бывают двух природ — НЕ путать:
+                            //  • переименование спикера (attribute_fact): тот же факт, где «Фаундер» заменён
+                            //    на имя. Из-за иммутабельности старая версия стала новой карточкой. Это НЕ мерж —
+                            //    показываем «спикер уточнён», без «собрано из N».
+                            //  • реальная склейка дублей: curated-синтез (created_by='merge') → «собрано из kids»
+                            //    без «эта»; default-keep (видимая карточка сама оригинал) → «kids+1» с чипом «эта».
+                            const isRename = (k: Fact) => (k.verification_note || "").startsWith("переименован спикер");
+                            const renameKids = kids.filter(isRename);
+                            const mergeKids = kids.filter(k => !isRename(k));
                             const curated = f.created_by === "merge";
-                            const total = curated ? kids.length : kids.length + 1;
+                            const total = curated ? mergeKids.length : mergeKids.length + 1;
                             const nounForm = total === 1 ? "карточки" : "карточек";
+                            const chip = (k: Fact) => {
+                              const open = expandedKids.has(k.id);
+                              return (
+                                <button key={k.id} onClick={() => toggleKid(k.id)} title={k.text}
+                                  className={`font-mono px-1.5 py-0.5 rounded border text-blue-600 hover:bg-blue-50 ${open ? "border-blue-300 bg-blue-50" : "border-ink-line"}`}>
+                                  {open ? "▾" : "▸"} #{k.id}
+                                </button>
+                              );
+                            };
+                            const expandedAll = kids.filter(k => expandedKids.has(k.id));
                             return (
-                            <div className="mb-1">
-                              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
-                                <span>собрано из {total} {nounForm}:</span>
-                                {/* сама эта карточка — один из оригиналов (не ссылка), чтобы число совпадало с чипами */}
-                                {!curated && (
-                                  <span title="эта карточка — канонический вариант"
-                                    className="font-mono px-1.5 py-0.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-700">
-                                    #{f.id} · эта
-                                  </span>
-                                )}
-                                {kids.map(k => {
-                                  const open = expandedKids.has(k.id);
-                                  return (
-                                    <button key={k.id} onClick={() => toggleKid(k.id)} title={k.text}
-                                      className={`font-mono px-1.5 py-0.5 rounded border text-blue-600 hover:bg-blue-50 ${open ? "border-blue-300 bg-blue-50" : "border-ink-line"}`}>
-                                      {open ? "▾" : "▸"} #{k.id}
-                                    </button>
-                                  );
-                                })}
-                              </div>
+                            <div className="mb-1 space-y-1">
+                              {mergeKids.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
+                                  <span>собрано из {total} {nounForm}:</span>
+                                  {/* сама эта карточка — один из оригиналов (не ссылка), чтобы число совпадало с чипами */}
+                                  {!curated && (
+                                    <span title="эта карточка — канонический вариант"
+                                      className="font-mono px-1.5 py-0.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-700">
+                                      #{f.id} · эта
+                                    </span>
+                                  )}
+                                  {mergeKids.map(chip)}
+                                </div>
+                              )}
+                              {renameKids.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
+                                  <span title="тот же факт — ранее спикер был без имени">спикер уточнён · ранее без имени:</span>
+                                  {renameKids.map(chip)}
+                                </div>
+                              )}
                               {/* исходники раскрываются тут же, без прыжка вниз */}
-                              {kids.some(k => expandedKids.has(k.id)) && (
+                              {expandedAll.length > 0 && (
                                 <div className="mt-1.5 space-y-1.5">
-                                  {kids.filter(k => expandedKids.has(k.id)).map(k => (
+                                  {expandedAll.map(k => (
                                     <div key={k.id} className="rounded border border-ink-line bg-slate-50/70 p-2">
                                       <div className="flex items-center gap-1.5 text-[10px] text-ink-mute mb-1">
                                         <FlagDot flag={k.flag} size={9} />
-                                        <span>исходная #{k.id}</span>
+                                        <span>{isRename(k) ? `ранее (без имени) #${k.id}` : `исходная #${k.id}`}</span>
                                         <button onClick={() => restoreFact.mutate(k.id)}
                                           className="ml-auto text-ink-mute hover:text-ink" title="вернуть в матрицу как отдельную карточку">вернуть</button>
                                       </div>
