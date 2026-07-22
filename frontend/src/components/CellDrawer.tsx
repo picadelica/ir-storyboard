@@ -364,14 +364,12 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                             //  • переименование спикера (attribute_fact): тот же факт, где «Фаундер» заменён
                             //    на имя. Из-за иммутабельности старая версия стала новой карточкой. Это НЕ мерж —
                             //    показываем «спикер уточнён», без «собрано из N».
-                            //  • реальная склейка дублей: curated-синтез (created_by='merge') → «собрано из kids»
-                            //    без «эта»; default-keep (видимая карточка сама оригинал) → «kids+1» с чипом «эта».
+                            //  • реальная склейка дублей → «собрано из N карточек», где N = число СВЁРНУТЫХ
+                            //    (сама видимая карточка в счёт не входит).
                             const isRename = (k: Fact) => (k.verification_note || "").startsWith("переименован спикер");
                             const renameKids = kids.filter(isRename);
                             const mergeKids = kids.filter(k => !isRename(k));
-                            const curated = f.created_by === "merge";
-                            const total = curated ? mergeKids.length : mergeKids.length + 1;
-                            const nounForm = total === 1 ? "карточки" : "карточек";
+                            const nounForm = mergeKids.length === 1 ? "карточки" : "карточек";
                             const chip = (k: Fact) => {
                               const open = expandedKids.has(k.id);
                               return (
@@ -386,14 +384,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                             <div className="mb-1 space-y-1">
                               {mergeKids.length > 0 && (
                                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-mute">
-                                  <span>собрано из {total} {nounForm}:</span>
-                                  {/* сама эта карточка — один из оригиналов (не ссылка), чтобы число совпадало с чипами */}
-                                  {!curated && (
-                                    <span title="эта карточка — канонический вариант"
-                                      className="font-mono px-1.5 py-0.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-700">
-                                      #{f.id} · эта
-                                    </span>
-                                  )}
+                                  <span title="эта карточка — канонический вариант; в счёт входят только свёрнутые в неё">собрано из {mergeKids.length} {nounForm}:</span>
                                   {mergeKids.map(chip)}
                                 </div>
                               )}
