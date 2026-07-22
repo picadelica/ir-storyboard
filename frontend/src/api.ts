@@ -6,6 +6,7 @@ import type {
   AboutProposal, AboutAutofillResult, FounderDiscoverResult, FounderProfilesResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
+  ReclassifyResult,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport, Dossier,
@@ -379,6 +380,15 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ note }),
     }),
+
+  // Переосмысление раскладки при смене методологии: превью переездов (async job) + apply
+  reclassifyMethodology: (clientId: string): Promise<ReclassifyResult> =>
+    runJob<ReclassifyResult>(`/clients/${clientId}/methodology/reclassify/start`),
+  applyMethodologyMoves: (clientId: string, moves: { fact_id: number; to_sid: string }[]):
+    Promise<{ applied: number; requested: number }> =>
+    call<{ applied: number; requested: number }>(
+      `/clients/${clientId}/methodology/reclassify/apply`,
+      { method: "POST", body: JSON.stringify({ moves }) }),
 
   // fact trust / verification
   runAudit: (clientId: string): Promise<AuditResult> =>

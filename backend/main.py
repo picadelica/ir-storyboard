@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
 from ir_storyboard import backup, brief, db, deliver, dossier, matrix, outputs, seed, verification, interview, company
 from ir_storyboard.archive import lookup_snapshot, enqueue_save
 from ir_storyboard.cycles import run_event, run_quarterly, run_weekly
-from ir_storyboard.llm import web_search, classify_facts_batch
+from ir_storyboard.llm import web_search, classify_facts_batch, reclassify_facts
 from ir_storyboard.models import LAYERS, ALL_CHANNELS, subsection_by_id, layer_by_id
 from ir_storyboard.workitems import synthesize_work_items
 
@@ -2741,6 +2741,70 @@ def llm_job_status(job_id: str):
     if job is None:
         raise HTTPException(404, f"Job {job_id} not found")
     return LLMJobOut(job_id=job_id, status=job["status"], result=job["result"], error=job["error"])
+
+
+# ── Переосмысление раскладки при смене методологии ───────────────────────────
+# Методология (описания подсекций + заметки на клиента) изменилась → переклассифицировать
+# active-факты новой методологией, показать переезды «из X.Y → в A.B», применить выбранные.
+def _compute_methodology_moves(conn, client_id: str) -> dict:
+    """Job: переклассифицировать active-факты клиента текущей методологией → список переездов."""
+    rows = matrix.active_facts_for_reclassify(conn, client_id)
+    descriptions = matrix.get_subsection_descriptions(conn)
+    client_notes = matrix.get_client_subsection_notes(conn, client_id)
+    valid = set(descriptions.keys())
+    cands = reclassify_facts([r["text"] for r in rows], descriptions, client_notes)
+    moves = []
+    for r, cand in zip(rows, cands):
+        to_sid = cand.suggested_subsection_id
+        if to_sid and to_sid in valid and to_sid != r["subsection_id"]:
+            moves.append({
+                "fact_id": r["id"],
+                "title": r["title"] or "",
+                "text": (r["text"] or "")[:240],
+                "from_sid": r["subsection_id"],
+                "to_sid": to_sid,
+                "confidence": round(cand.confidence, 2),
+                "rationale": cand.rationale or "",
+            })
+    return {"moves": moves, "moved": len(moves), "total": len(rows)}
+
+
+@app.post("/api/clients/{client_id}/methodology/reclassify/start", response_model=LLMJobOut)
+def start_methodology_reclassify(client_id: str, conn=Depends(get_conn),
+                                 user: Optional[dict] = Depends(current_user)):
+    """Запустить переклассификацию раскладки новой методологией (превью переездов). Джоб →
+    poll /api/jobs/{id}. Только владелец компании или админ."""
+    _check_client(client_id, conn)
+    if not _is_owner_or_admin(conn, client_id, user):
+        raise HTTPException(403, "Переклассификацию запускает владелец компании или админ")
+    return LLMJobOut(job_id=_start_llm_job(_compute_methodology_moves, client_id),
+                     status="processing")
+
+
+class ReclassifyMove(BaseModel):
+    fact_id: int
+    to_sid: str
+
+
+class ReclassifyApplyIn(BaseModel):
+    moves: List[ReclassifyMove]
+
+
+@app.post("/api/clients/{client_id}/methodology/reclassify/apply")
+def apply_methodology_reclassify(client_id: str, body: ReclassifyApplyIn,
+                                 conn=Depends(get_conn),
+                                 user: Optional[dict] = Depends(current_user)):
+    """Применить выбранные переезды (переместить факты в новые ячейки). Только владелец/админ."""
+    _check_client(client_id, conn)
+    if not _is_owner_or_admin(conn, client_id, user):
+        raise HTTPException(403, "Применяет владелец компании или админ")
+    valid = set(matrix.get_subsection_descriptions(conn).keys())
+    applied = 0
+    for m in body.moves:
+        if m.to_sid in valid and matrix.move_fact_to_subsection(
+                conn, m.fact_id, client_id, m.to_sid):
+            applied += 1
+    return {"applied": applied, "requested": len(body.moves)}
 
 
 # ---------- company About: auto-fill (proposals → analyst review → commit) ----------

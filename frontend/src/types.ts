@@ -47,6 +47,22 @@ export interface ClientMethodologyCell extends MethodologyCell {
   client_note: string;
 }
 
+export interface MethodologyMove {
+  fact_id: number;
+  title: string;
+  text: string;
+  from_sid: string;
+  to_sid: string;
+  confidence: number;
+  rationale: string;
+}
+
+export interface ReclassifyResult {
+  moves: MethodologyMove[];
+  moved: number;
+  total: number;
+}
+
 export interface TonePreset {
   id: string;
   label: string;

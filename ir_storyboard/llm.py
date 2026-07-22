@@ -904,6 +904,55 @@ def generate_json(system: str, user: str, *, max_tokens: int = 4096,
     return None
 
 
+_RECLASSIFY_SYSTEM_TMPL = """\
+You are an IR narrative analyst. Re-classify each fact into the IR Storyboard matrix using
+the CURRENT methodology — the per-subsection guides below may have changed, so a fact may
+now belong in a different cell than before.
+
+Subsections (id — name — parent layer), with methodology notes:
+SUBSECTION_LIST_PLACEHOLDER
+
+Rules:
+- Assign exactly one subsection id from the list that best fits the fact under these notes.
+- You only decide PLACEMENT — do not rewrite the fact, do not change its meaning.
+- Set sid to null only if truly nothing fits.
+
+Return ONLY valid JSON — no markdown fences, no explanation:
+{"results":[{"sid":"X.Y","conf":0.0,"rationale":"one short phrase"}]}
+
+One object per input fact, same order."""
+
+
+def reclassify_facts(texts: List[str], descriptions: Optional[dict] = None,
+                     client_notes: Optional[dict] = None) -> List[FactCandidate]:
+    """Re-classify existing fact texts against the CURRENT methodology (global descriptions
+    + per-client notes injected into the prompt). Реальный Claude при наличии ключа, иначе
+    keyword-стаб. Решает только раскладку по подсекциям (subsection_id), не трогает текст."""
+    if not texts:
+        return []
+    all_sids = [sub.id for layer in LAYERS for sub in layer.subsections]
+    subsection_list = _build_subsection_list(all_sids, descriptions, client_notes)
+    system = _RECLASSIFY_SYSTEM_TMPL.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+    numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+    data = generate_json(system, numbered, max_tokens=min(8192, 90 * len(texts) + 512))
+    results = data.get("results") if isinstance(data, dict) else None
+    if not results:  # нет ключа / провал парса → keyword-фолбэк (раскладка по стабу)
+        return [stub_classify(t) for t in texts]
+    out: List[FactCandidate] = []
+    for i, item in enumerate(results):
+        text = texts[i] if i < len(texts) else (texts[-1] if texts else "")
+        sid = item.get("sid") if isinstance(item, dict) else None
+        conf = item.get("conf", 0.0) if isinstance(item, dict) else 0.0
+        rationale = item.get("rationale", "") if isinstance(item, dict) else ""
+        out.append(FactCandidate(
+            text=text, suggested_subsection_id=sid, suggested_flag="green",
+            confidence=max(0.0, min(1.0, float(conf or 0.0))), rationale=rationale or "",
+        ))
+    for i in range(len(out), len(texts)):  # модель вернула меньше — добить стабом
+        out.append(stub_classify(texts[i]))
+    return out
+
+
 def extract_facts_from_transcript(
     segments: List[dict],
     available_subsections: List[str],

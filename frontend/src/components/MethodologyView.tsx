@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   Client, ClientMethodologyCell, MethodologyCell, TonePreset,
+  MethodologyMove, ReclassifyResult,
 } from "../types";
 
 interface Props {
@@ -39,6 +40,11 @@ export default function MethodologyView({ clientId }: Props) {
           (добавляется к описанию в prompt). Тон = регистр формулировок (per-client).
         </div>
       </div>
+
+      <ReapplyMethodologySection
+        clientId={clientId}
+        clientName={client.data?.name ?? "клиента"}
+      />
 
       <TonePresetSection
         client={client.data}
@@ -346,5 +352,181 @@ function CellRow({
         )}
       </div>
     </div>
+  );
+}
+
+// ── Переосмысление раскладки при смене методологии ───────────────────────────
+
+function ReapplyMethodologySection({ clientId, clientName }: {
+  clientId: string; clientName: string;
+}) {
+  const qc = useQueryClient();
+  const [preview, setPreview] = useState<ReclassifyResult | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+
+  const runMut = useMutation({
+    mutationFn: () => api.reclassifyMethodology(clientId),
+    onSuccess: (res) => {
+      setPreview(res);
+      setSelected(new Set(res.moves.map((m) => m.fact_id)));  // по умолчанию все выбраны
+    },
+  });
+
+  const applyMut = useMutation({
+    mutationFn: () => {
+      const moves = (preview?.moves ?? [])
+        .filter((m) => selected.has(m.fact_id))
+        .map((m) => ({ fact_id: m.fact_id, to_sid: m.to_sid }));
+      return api.applyMethodologyMoves(clientId, moves);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["matrix", clientId] });
+      qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "facts" });
+      qc.invalidateQueries({ queryKey: ["scorecard", clientId] });
+      qc.invalidateQueries({ queryKey: ["review-queue", clientId] });
+      setPreview(null);
+    },
+  });
+
+  const toggle = (id: number) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+
+  return (
+    <section className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-4 space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">Переосмысление раскладки</h3>
+          <div className="text-xs text-ink-mute mt-0.5">
+            Изменили методологию выше? Пересчитайте раскладку active-фактов «{clientName}»
+            по новым описаниям — увидите, какие карточки переезжают и куда, и подтвердите.
+          </div>
+        </div>
+        <button
+          onClick={() => runMut.mutate()}
+          disabled={runMut.isPending}
+          className="shrink-0 text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
+        >
+          {runMut.isPending ? "Считаю переезды…" : "Применить новую методологию"}
+        </button>
+      </div>
+      {runMut.isError && (
+        <div className="text-xs text-red-600">{String(runMut.error)}</div>
+      )}
+      {preview && (
+        <MovesPreviewModal
+          preview={preview}
+          selected={selected}
+          onToggle={toggle}
+          onSelectAll={() => setSelected(new Set(preview.moves.map((m) => m.fact_id)))}
+          onSelectNone={() => setSelected(new Set())}
+          onClose={() => setPreview(null)}
+          onApply={() => applyMut.mutate()}
+          applying={applyMut.isPending}
+          error={applyMut.isError ? String(applyMut.error) : null}
+        />
+      )}
+    </section>
+  );
+}
+
+function MovesPreviewModal({
+  preview, selected, onToggle, onSelectAll, onSelectNone, onClose, onApply, applying, error,
+}: {
+  preview: ReclassifyResult;
+  selected: Set<number>;
+  onToggle: (id: number) => void;
+  onSelectAll: () => void;
+  onSelectNone: () => void;
+  onClose: () => void;
+  onApply: () => void;
+  applying: boolean;
+  error: string | null;
+}) {
+  const { moves, total } = preview;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+         onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col"
+           onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b border-ink-line">
+          <h3 className="text-base font-semibold">Переезды при новой методологии</h3>
+          <div className="text-xs text-ink-mute mt-0.5">
+            Из {total} active-фактов переезжает {moves.length}. Отметьте, какие применить.
+          </div>
+        </div>
+
+        {moves.length === 0 ? (
+          <div className="px-5 py-8 text-sm text-ink-mute text-center">
+            Ничего не переезжает — раскладка уже соответствует текущей методологии.
+          </div>
+        ) : (
+          <>
+            <div className="px-5 py-2 border-b border-ink-line flex items-center gap-3 text-xs">
+              <span className="text-ink-mute">Выбрано {selected.size} из {moves.length}</span>
+              <button onClick={onSelectAll} className="text-indigo-600 hover:underline">все</button>
+              <button onClick={onSelectNone} className="text-indigo-600 hover:underline">ничего</button>
+            </div>
+            <div className="overflow-y-auto flex-1 divide-y divide-ink-line">
+              {moves.map((m) => (
+                <MoveRow key={m.fact_id} move={m}
+                         checked={selected.has(m.fact_id)}
+                         onToggle={() => onToggle(m.fact_id)} />
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="px-5 py-3 border-t border-ink-line flex items-center justify-between gap-3">
+          {error && <span className="text-xs text-red-600 truncate">{error}</span>}
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={onClose}
+                    className="text-xs px-3 py-1.5 border border-slate-300 text-slate-600 rounded hover:bg-slate-100">
+              Отмена
+            </button>
+            <button onClick={onApply}
+                    disabled={applying || selected.size === 0}
+                    className="text-xs px-3 py-1.5 bg-ink text-white rounded hover:bg-ink/90 disabled:opacity-50">
+              {applying ? "Применяю…" : `Применить выбранные (${selected.size})`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoveRow({ move, checked, onToggle }: {
+  move: MethodologyMove; checked: boolean; onToggle: () => void;
+}) {
+  return (
+    <label className="flex items-start gap-3 px-5 py-2.5 cursor-pointer hover:bg-slate-50">
+      <input type="checkbox" checked={checked} onChange={onToggle} className="mt-1" />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm">
+          {move.title
+            ? <span className="font-medium">{move.title}</span>
+            : <span className="text-ink">{move.text}</span>}
+        </div>
+        {move.title && (
+          <div className="text-xs text-ink-mute truncate">{move.text}</div>
+        )}
+        <div className="mt-1 flex items-center gap-1.5 text-xs">
+          <span className="font-mono px-1 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600">
+            {move.from_sid}
+          </span>
+          <span className="text-ink-mute">→</span>
+          <span className="font-mono px-1 py-0.5 rounded bg-emerald-100 border border-emerald-200 text-emerald-700">
+            {move.to_sid}
+          </span>
+          {move.rationale && (
+            <span className="text-ink-mute italic truncate">· {move.rationale}</span>
+          )}
+        </div>
+      </div>
+    </label>
   );
 }

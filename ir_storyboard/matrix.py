@@ -212,6 +212,38 @@ def ensure_full_grid(conn: sqlite3.Connection, client_id: str) -> None:
             get_or_create_cell(conn, client_id, s.id)
 
 
+def active_facts_for_reclassify(conn: sqlite3.Connection,
+                                client_id: str) -> List[sqlite3.Row]:
+    """Active facts (in the matrix) with their current subsection — вход переклассификации
+    новой методологией (переосмысление раскладки)."""
+    return list(conn.execute(
+        """SELECT f.id AS id, f.text AS text, f.title AS title,
+                  c.subsection_id AS subsection_id
+             FROM facts f JOIN cells c ON c.id = f.cell_id
+            WHERE c.client_id = ? AND f.state = 'active'
+            ORDER BY f.id""",
+        (client_id,),
+    ))
+
+
+def move_fact_to_subsection(conn: sqlite3.Connection, fact_id: int,
+                            client_id: str, subsection_id: str) -> bool:
+    """Переезд факта в другую ячейку (той же компании): cell_id → новая (client, subsection).
+    Текст факта не трогается (инвариант неизменности). Возвращает False, если факт не
+    принадлежит компании (защита от кросс-клиентского переезда)."""
+    row = conn.execute(
+        "SELECT c.client_id AS cid FROM facts f JOIN cells c ON c.id = f.cell_id "
+        "WHERE f.id = ?",
+        (fact_id,),
+    ).fetchone()
+    if not row or row["cid"] != client_id:
+        return False
+    cell_id = get_or_create_cell(conn, client_id, subsection_id)
+    conn.execute("UPDATE facts SET cell_id = ? WHERE id = ?", (cell_id, fact_id))
+    conn.commit()
+    return True
+
+
 # ---------- sources ----------
 
 ONLINE_CHANNELS = {"online_research", "online_interview", "archival"}
