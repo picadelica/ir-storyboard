@@ -30,12 +30,17 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const subsection = layers
     ?.flatMap(L => L.subsections.map(s => ({ ...s, layer: L })))
     .find(s => s.id === subsectionId);
+  // тег «про другую компанию» осмыслен только в слоях 1-2 (личная/проф. история фаундера);
+  // с 3-го слоя всё про базовую компанию.
+  const layerNo = subsection?.layer.id ?? 99;
+  const allowAboutCompany = layerNo <= 2;
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftText, setDraftText] = useState("");
   const [draftFlag, setDraftFlag] = useState<Flag>("green");
   const [draftRationale, setDraftRationale] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
+  const [draftAbout, setDraftAbout] = useState("");
 
   // Audio source player: one open panel at a time, keyed by fact id.
   const [audioPanel, setAudioPanel] = useState<{ factId: number; sha: string } | null>(null);
@@ -274,11 +279,22 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                         placeholder={draftFlag === "red" ? "Concern: что именно проблема (обязательно для red)" : "Rationale (опц.)"}
                         rows={3}
                         className={`w-full text-xs border rounded px-2 py-1.5 min-h-[3rem] resize-none ${draftFlag === "red" && !draftRationale.trim() ? "border-red-400" : "border-ink-line"}`} />
+                      {/* только слои 1-2: факт может быть про другую компанию (характеризует фаундера).
+                          Пусто → на карточке ничего не показываем. */}
+                      {allowAboutCompany && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-ink-mute" title="если факт про ДРУГУЮ компанию (не про эту)">🏢 про компанию:</span>
+                          <input value={draftAbout} onChange={e => setDraftAbout(e.target.value)}
+                            placeholder="если про другую — напр. GetTaxi"
+                            className="flex-1 text-xs border border-ink-line rounded px-2 py-1" />
+                        </div>
+                      )}
                       <div className="flex items-center gap-2">
                         <FlagPicker value={draftFlag} onChange={setDraftFlag} />
                         <button onClick={() => {
                             patchFact.mutate({ id: f.id, text: draftText, flag: draftFlag, rationale: draftRationale });
                             if ((draftTitle ?? "") !== (f.title ?? "")) setTitle.mutate({ id: f.id, title: draftTitle });
+                            if (allowAboutCompany && (draftAbout.trim() !== (f.about_company ?? "").trim())) setAbout.mutate({ id: f.id, value: draftAbout });
                           }}
                           disabled={draftFlag === "red" && !draftRationale.trim()}
                           className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">Save</button>
@@ -335,7 +351,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                               className="text-[11px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-300"
                               title="одобрить черновик — попадёт в матрицу">одобрить</button>
                           )}
-                          <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); }}
+                          <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
                             aria-label="Редактировать" className="hover:text-ink">
                             <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M4 13.5V16h2.5l7.4-7.4-2.5-2.5L4 13.5zM13.1 4.9l2.5 2.5 1-1a1.4 1.4 0 0 0-2-2l-1.5.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>
                           </button>
@@ -378,29 +394,26 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                         )
                       )}
 
-                      {/* тег «факт про другую компанию» (характеризует спикера — Вайзер про GetTaxi).
-                          Назначен → чип 🏢 про: X (клик → правка); нет → тихая кнопка. */}
-                      {editAbout?.id === f.id ? (
-                        <div className="mt-1 flex items-center gap-1.5">
-                          <span className="text-[11px] text-ink-mute" title="про какую компанию этот факт">🏢</span>
-                          <input autoFocus value={editAbout.value}
-                            onChange={e => setEditAbout({ id: f.id, value: e.target.value })}
-                            onKeyDown={e => { if (e.key === "Enter") setAbout.mutate({ id: f.id, value: editAbout.value }); if (e.key === "Escape") setEditAbout(null); }}
-                            placeholder="напр. GetTaxi"
-                            className="text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white w-40" />
-                          <button onClick={() => setAbout.mutate({ id: f.id, value: editAbout.value })} className="text-[11px] text-ink hover:underline">ок</button>
-                          <button onClick={() => setEditAbout(null)} className="text-[11px] text-ink-mute hover:text-ink">✕</button>
-                        </div>
-                      ) : f.about_company ? (
-                        <button onClick={() => setEditAbout({ id: f.id, value: f.about_company || "" })} title="про какую компанию (клик — изменить)"
-                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
-                          <span>🏢</span><span>про: <span className="font-medium text-ink">{f.about_company}</span></span>
-                        </button>
-                      ) : (
-                        <button onClick={() => setEditAbout({ id: f.id, value: "" })} title="отметить, про какую компанию этот факт"
-                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute/50 hover:text-ink">
-                          <span>🏢</span><span>про компанию?</span>
-                        </button>
+                      {/* тег «факт про другую компанию» — только слои 1-2 и только когда задан
+                          (задаётся при редактировании; пусто → поля нет). Клик по чипу — быстрая правка. */}
+                      {allowAboutCompany && (
+                        editAbout?.id === f.id ? (
+                          <div className="mt-1 flex items-center gap-1.5">
+                            <span className="text-[11px] text-ink-mute" title="про какую компанию этот факт">🏢</span>
+                            <input autoFocus value={editAbout.value}
+                              onChange={e => setEditAbout({ id: f.id, value: e.target.value })}
+                              onKeyDown={e => { if (e.key === "Enter") setAbout.mutate({ id: f.id, value: editAbout.value }); if (e.key === "Escape") setEditAbout(null); }}
+                              placeholder="напр. GetTaxi"
+                              className="text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white w-40" />
+                            <button onClick={() => setAbout.mutate({ id: f.id, value: editAbout.value })} className="text-[11px] text-ink hover:underline">ок</button>
+                            <button onClick={() => setEditAbout(null)} className="text-[11px] text-ink-mute hover:text-ink">✕</button>
+                          </div>
+                        ) : f.about_company ? (
+                          <button onClick={() => setEditAbout({ id: f.id, value: f.about_company || "" })} title="про какую компанию (клик — изменить)"
+                            className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
+                            <span>🏢</span><span>про: <span className="font-medium text-ink">{f.about_company}</span></span>
+                          </button>
+                        ) : null
                       )}
 
                       {/* risk / gap — kept in the text body */}

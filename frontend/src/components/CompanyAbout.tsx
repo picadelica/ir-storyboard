@@ -543,6 +543,53 @@ function Autofill({ clientId, onCommitted }: { clientId: string; onCommitted: ()
   );
 }
 
+// Детерминированный цвет монограммы из имени (фавикон-стиль).
+function monoColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360} 42% 42%)`;
+}
+
+// Логотип компании: кастомная картинка (links.logo) или авто-двухбуквенная монограмма.
+function CompanyLogo({ company, onChanged }: { company: Entity; onChanged: () => void }) {
+  const logo = company.links?.logo;
+  const [imgBad, setImgBad] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [url, setUrl] = useState(logo || "");
+  const save = useMutation({
+    mutationFn: (u: string) => {
+      const links = { ...(company.links || {}) };
+      if (u) links.logo = u; else delete links.logo;
+      return api.patchEntity(company.id, { links });
+    },
+    onSuccess: () => { setEditing(false); setImgBad(false); onChanged(); },
+  });
+  const initials = company.name.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "—";
+  return (
+    <div className="shrink-0 relative">
+      {logo && !imgBad
+        ? <img src={logo} alt="" onError={() => setImgBad(true)} className="w-11 h-11 rounded-lg object-cover border border-ink-line" />
+        : <span className="w-11 h-11 rounded-lg grid place-items-center text-sm font-semibold text-white select-none"
+            style={{ background: monoColor(company.name) }}>{initials}</span>}
+      <button onClick={() => { setUrl(logo || ""); setEditing(v => !v); }} title="изменить логотип"
+        className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-white border border-ink-line grid place-items-center text-[9px] text-ink-mute hover:text-ink">✎</button>
+      {editing && (
+        <div className="absolute right-0 top-12 z-10 bg-white border border-ink-line rounded-lg shadow-lg p-2 w-64">
+          <div className="text-[11px] text-ink-mute mb-1">Ссылка на логотип (пусто = буквенный):</div>
+          <input autoFocus value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/logo.png"
+            className="w-full text-xs border border-ink-line rounded px-2 py-1" />
+          <div className="flex gap-2 mt-1.5 items-center">
+            <button onClick={() => save.mutate(url.trim())} disabled={save.isPending}
+              className="text-[11px] px-2 py-1 rounded bg-ink text-white disabled:bg-slate-300">сохранить</button>
+            {logo && <button onClick={() => save.mutate("")} className="text-[11px] text-ink-mute hover:text-red-600">убрать</button>}
+            <button onClick={() => setEditing(false)} className="text-[11px] text-ink-mute hover:text-ink ml-auto">отмена</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CompanyHeader({ company: e, siteFacts = [], onChanged }: { company: Entity; siteFacts?: EntityFact[]; onChanged: () => void }) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -580,7 +627,8 @@ function CompanyHeader({ company: e, siteFacts = [], onChanged }: { company: Ent
   }
 
   return (
-    <div className="bg-white rounded-lg border border-ink-line p-4">
+    <div className="bg-white rounded-lg border border-ink-line p-4 flex items-start gap-3">
+      <div className="flex-1 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
         <h2 className="text-lg font-semibold">{e.name}</h2>
         {e.role && <span className="text-sm text-ink-mute">· {e.role}</span>}
@@ -618,6 +666,8 @@ function CompanyHeader({ company: e, siteFacts = [], onChanged }: { company: Ent
           onSubmit={(label, url) => setLinks.mutate({ ...(e.links || {}), [label]: url })}
           onCancel={() => setLinkOpen(false)} />
       )}
+      </div>
+      <CompanyLogo company={e} onChanged={onChanged} />
     </div>
   );
 }
