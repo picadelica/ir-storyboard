@@ -424,6 +424,7 @@ export interface Fact {
   state?: string;               // active | review | rejected
   speaker_entity_id?: number | null;  // which founder this fact is from
   speaker_name?: string | null;
+  about_company?: string;       // факт про другую компанию (характеризует спикера)
   title?: string;               // short 2-3 word card title
   must_have?: boolean;          // client-provided must-have → blue
   must_have_by?: string;        // '' | 'client' (blue) | 'expert' (purple)

@@ -416,6 +416,8 @@ export const api = {
     call<Fact>(`/facts/${factId}/must-have`, { method: "POST", body: JSON.stringify({ source }) }),
   setFactTitle: (factId: number, title: string): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/title`, { method: "POST", body: JSON.stringify({ title }) }),
+  setFactAbout: (factId: number, aboutCompany: string): Promise<Fact> =>
+    call<Fact>(`/facts/${factId}/about-company`, { method: "POST", body: JSON.stringify({ about_company: aboutCompany }) }),
   generateTitles: (clientId: string): Promise<{ available: boolean; titled: number }> =>
     runJob<{ available: boolean; titled: number }>(`/clients/${clientId}/generate-titles/start`),
   // Скачать must-have (синие) факты нумерованным списком (для согласования с заказчиком)

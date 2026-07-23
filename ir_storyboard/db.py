@@ -85,6 +85,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "facts", "ingest_audit_id", "TEXT")
     # ручная сортировка карточек в ячейке (drag вверх/вниз); NULL = не трогали (по дате)
     _add_column_if_missing(conn, "facts", "sort_order", "INTEGER")
+    # факт характеризует спикера, но говорит про ДРУГУЮ компанию (Вайзер про GetTaxi) — тег
+    _add_column_if_missing(conn, "facts", "about_company", "TEXT DEFAULT ''")
     # llm-5: ingest_audit table for LLM Report Ingest provenance
     conn.execute("""
         CREATE TABLE IF NOT EXISTS ingest_audit (

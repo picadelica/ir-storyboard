@@ -404,6 +404,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
                   f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.must_have_by, f.merged_into,
+                  f.about_company,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -466,6 +467,7 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
                   f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.must_have_by, f.merged_into,
+                  f.about_company,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -522,6 +524,13 @@ def set_fact_speaker(conn: sqlite3.Connection, fact_id: int, entity_id: Optional
     """Attribute a fact to a specific person (entities row, normally kind='founder').
     entity_id=None clears the attribution."""
     conn.execute("UPDATE facts SET speaker_entity_id=? WHERE id=?", (entity_id, fact_id))
+    conn.commit()
+
+
+def set_fact_about_company(conn: sqlite3.Connection, fact_id: int, about_company: str) -> None:
+    """Тег «факт про другую компанию» (характеризует спикера, но не про текущего клиента —
+    напр. Вайзер про GetTaxi). Метаданные, не текст факта → UPDATE допустим (инвариант #5)."""
+    conn.execute("UPDATE facts SET about_company=? WHERE id=?", ((about_company or "").strip(), fact_id))
     conn.commit()
 
 

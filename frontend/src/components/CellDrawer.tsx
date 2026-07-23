@@ -59,6 +59,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const [editSpeakerIds, setEditSpeakerIds] = useState<Set<number>>(new Set());   // у каких карточек открыт выбор спикера
   const openSpeaker = (id: number) => setEditSpeakerIds(s => new Set(s).add(id));
   const closeSpeaker = (id: number) => setEditSpeakerIds(s => { const n = new Set(s); n.delete(id); return n; });
+  const [editAbout, setEditAbout] = useState<{ id: number; value: string } | null>(null);   // правка тега «про компанию»
 
   // drag-сортировка активных карточек (тянуть за ручку ⠿)
   const [dragHandleId, setDragHandleId] = useState<number | null>(null);   // за какую карточку схватились ручкой
@@ -172,6 +173,10 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const setMustHave = useMutation({
     mutationFn: ({ id, source }: { id: number; source: "" | "client" | "expert" }) => api.setMustHave(id, source),
     onSuccess: invalidate,
+  });
+  const setAbout = useMutation({
+    mutationFn: ({ id, value }: { id: number; value: string }) => api.setFactAbout(id, value),
+    onSuccess: () => { setEditAbout(null); invalidate(); },
   });
 
   // Фокус из поиска: доскроллить к карточке и подсветить; исходник — раскрыть.
@@ -371,6 +376,31 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                             <span>🗣</span><span>указать спикера</span>
                           </button>
                         )
+                      )}
+
+                      {/* тег «факт про другую компанию» (характеризует спикера — Вайзер про GetTaxi).
+                          Назначен → чип 🏢 про: X (клик → правка); нет → тихая кнопка. */}
+                      {editAbout?.id === f.id ? (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <span className="text-[11px] text-ink-mute" title="про какую компанию этот факт">🏢</span>
+                          <input autoFocus value={editAbout.value}
+                            onChange={e => setEditAbout({ id: f.id, value: e.target.value })}
+                            onKeyDown={e => { if (e.key === "Enter") setAbout.mutate({ id: f.id, value: editAbout.value }); if (e.key === "Escape") setEditAbout(null); }}
+                            placeholder="напр. GetTaxi"
+                            className="text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white w-40" />
+                          <button onClick={() => setAbout.mutate({ id: f.id, value: editAbout.value })} className="text-[11px] text-ink hover:underline">ок</button>
+                          <button onClick={() => setEditAbout(null)} className="text-[11px] text-ink-mute hover:text-ink">✕</button>
+                        </div>
+                      ) : f.about_company ? (
+                        <button onClick={() => setEditAbout({ id: f.id, value: f.about_company || "" })} title="про какую компанию (клик — изменить)"
+                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
+                          <span>🏢</span><span>про: <span className="font-medium text-ink">{f.about_company}</span></span>
+                        </button>
+                      ) : (
+                        <button onClick={() => setEditAbout({ id: f.id, value: "" })} title="отметить, про какую компанию этот факт"
+                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute/50 hover:text-ink">
+                          <span>🏢</span><span>про компанию?</span>
+                        </button>
                       )}
 
                       {/* risk / gap — kept in the text body */}

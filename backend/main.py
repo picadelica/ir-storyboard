@@ -293,6 +293,7 @@ class FactOut(BaseModel):
     must_have_by: str = ""    # '' | 'client' (blue) | 'expert' (purple)
     merged_into: Optional[int] = None   # set → this fact is hidden, folded into #merged_into
     n_sources: int = 1   # corroboration: 1 (primary) + folded-in sources
+    about_company: str = ""   # факт про другую компанию (характеризует спикера)
 
 
 class FactCreate(BaseModel):
@@ -459,6 +460,7 @@ def _row_to_fact(row) -> FactOut:
         must_have_by=(row["must_have_by"] if "must_have_by" in keys and row["must_have_by"] else ""),
         merged_into=row["merged_into"] if "merged_into" in keys and row["merged_into"] else None,
         n_sources=1 + (row["extra_sources"] if "extra_sources" in keys and row["extra_sources"] else 0),
+        about_company=(row["about_company"] if "about_company" in keys and row["about_company"] else ""),
     )
 
 
@@ -1301,6 +1303,19 @@ def set_title(fact_id: int, body: TitleIn, conn=Depends(get_conn)):
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
     matrix.set_fact_title(conn, fact_id, body.title)
+    return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
+class AboutCompanyIn(BaseModel):
+    about_company: str = ""
+
+
+@app.post("/api/facts/{fact_id}/about-company", response_model=FactOut)
+def set_about_company(fact_id: int, body: AboutCompanyIn, conn=Depends(get_conn)):
+    """Тег «факт про другую компанию» (характеризует спикера — напр. Вайзер про GetTaxi)."""
+    if matrix.get_fact(conn, fact_id) is None:
+        raise HTTPException(404, "fact not found")
+    matrix.set_fact_about_company(conn, fact_id, body.about_company)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
