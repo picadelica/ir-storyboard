@@ -241,9 +241,9 @@ function ZoneIcon({ id }: { id: string }) {
 
 type Sub = { id: string; label: string };
 const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
-  { id: "dossier", label: "Досье", tabs: [{ id: "dossier", label: "Досье" }] },
+  // Досье + About объединены в одну зону «Компания» (обзор + структурный профиль)
+  { id: "dossier", label: "Компания", tabs: [{ id: "dossier", label: "Досье" }, { id: "about", label: "Профиль" }] },
   { id: "map", label: "Map", tabs: [{ id: "matrix", label: "Matrix" }] },
-  { id: "about", label: "About", tabs: [{ id: "about", label: "About" }] },
   {
     id: "build", label: "Build", tabs: [
       { id: "ingest", label: "LLM report" },
@@ -284,11 +284,26 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
 
   return (
     <div className="border-b border-ink-line bg-white">
-      {/* row 1: айдентика компании (слева, приоритет) + глобальные действия (справа) */}
-      <div className="flex items-center gap-3 px-4 pt-2.5 pb-1.5">
+      {/* одна строка: зоны · айдентика компании (приоритет) · глобальные действия */}
+      <div className="flex items-center gap-2 px-4 py-2.5">
+        {ZONES.map(z => {
+          const active = z.id === activeZone.id;
+          return (
+            <button
+              key={z.id}
+              onClick={() => nav(`/clients/${clientId}/${z.tabs[0].id}`)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition shrink-0
+                ${active ? "bg-ink text-white font-medium" : "text-ink-mute hover:text-ink hover:bg-ink/[0.04]"}`}
+            >
+              <ZoneIcon id={z.id} />
+              {z.label}
+            </button>
+          );
+        })}
+
         {client.data?.name ? (
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <span className="w-8 h-8 rounded-lg grid place-items-center text-[11px] font-semibold text-white select-none shrink-0"
+          <div className="ml-2 min-w-0 flex-1 flex items-center gap-2">
+            <span className="w-7 h-7 rounded-lg grid place-items-center text-[10px] font-semibold text-white select-none shrink-0"
               style={{ background: monoColor(client.data.name) }}>{monogram(client.data.name)}</span>
             <div className="min-w-0">
               <div className="text-sm font-semibold text-ink truncate leading-tight" title={client.data.name}>{client.data.name}</div>
@@ -297,15 +312,8 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
           </div>
         ) : <div className="flex-1" />}
 
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <SearchBox clientId={clientId} />
-          {canSeeUsers && (
-            <button
-              onClick={() => nav(`/clients/${clientId}/users`)}
-              className={`text-xs transition ${activeTab === "users" ? "text-ink font-medium" : "text-ink-mute hover:text-ink"}`}
-              title="Пользователи системы"
-            >Пользователи</button>
-          )}
           <button
             onClick={() => nav(`/clients/${clientId}/methodology`)}
             className={`text-xs transition ${activeTab === "methodology" ? "text-ink font-medium" : "text-ink-mute hover:text-ink"}`}
@@ -318,26 +326,8 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
               className="px-3 py-1.5 text-ink-mute hover:text-ink transition"
             >Present</button>
           </div>
-          <UserMenu />
+          <UserMenu clientId={clientId} canSeeUsers={canSeeUsers} />
         </div>
-      </div>
-
-      {/* row 2: зоны навигации */}
-      <div className="flex items-center gap-1.5 px-4 pb-2 flex-wrap">
-        {ZONES.map(z => {
-          const active = z.id === activeZone.id;
-          return (
-            <button
-              key={z.id}
-              onClick={() => nav(`/clients/${clientId}/${z.tabs[0].id}`)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm transition
-                ${active ? "bg-ink text-white font-medium" : "text-ink-mute hover:text-ink hover:bg-ink/[0.04]"}`}
-            >
-              <ZoneIcon id={z.id} />
-              {z.label}
-            </button>
-          );
-        })}
       </div>
 
       {/* sub-tab row (hidden in present mode) */}
