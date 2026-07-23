@@ -277,14 +277,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_matrix_v2_once(conn: sqlite3.Connection) -> None:
-    """One-time: применить новую матрицу — синхронизировать имена и описания подсекций из
-    models.LAYERS в существующие БД. Меняются L6 (6.1 Architecture & Philosophy [слияние],
-    6.2 → Market context, 6.3 → Product & company evolution) и L8 (8.1 Social / 8.2 Technology /
-    8.3 Political & Economical context) + уточнённые описания по слоям. Guarded по app_meta:
-    последующие ручные правки описаний через UI сохраняются. Переселение фактов между
-    ячейками — отдельно, фичей переклассификации (per-client)."""
+    """One-time (guard-key `matrix_v3_names_desc_v1`): синхронизировать имена и описания
+    подсекций из models.LAYERS в существующие БД — «финальная форма матрицы» (v3).
+    Смысловой сдвиг L2: 2.1 Path of expertise, 2.2 → Founders & Core team relations
+    (отношения в ПРЕДЫДУЩИХ командах), 2.3 → Investors relations (инвесторы прошлых компаний);
+    + уточнённые кросс-ссылки в L3/L4/L6. Guard по app_meta: бамп ключа заставляет применить
+    заново (ручные UI-правки описаний перезапишутся канонической методологией). Переселение
+    фактов между ячейками — отдельно, фичей переклассификации (per-client); особенно L2.2/L2.3."""
     done = conn.execute(
-        "SELECT value FROM app_meta WHERE key='matrix_v2_names_desc_v3'"
+        "SELECT value FROM app_meta WHERE key='matrix_v3_names_desc_v1'"
     ).fetchone()
     if done:
         return
@@ -296,7 +297,7 @@ def _migrate_matrix_v2_once(conn: sqlite3.Connection) -> None:
                 (s.name, s.description, s.id),
             )
     conn.execute(
-        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('matrix_v2_names_desc_v3', '1')"
+        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('matrix_v3_names_desc_v1', '1')"
     )
     conn.commit()
 
