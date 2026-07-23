@@ -62,3 +62,25 @@ def test_reclassify_facts_no_key_fallback(conn):
     out = reclassify_facts(["some fact text about revenue growth"], {}, {})
     assert len(out) == 1
     assert isinstance(out[0], FactCandidate)
+
+
+def test_reclassify_chunks_large_batch(monkeypatch):
+    """Большой батч бьётся на чанки (иначе вывод обрезается по max_tokens → стаб на всё).
+    Каждый чанк — отдельный generate_json; все факты возвращаются в порядке."""
+    from ir_storyboard import llm
+    calls = {"n": 0, "sizes": []}
+
+    def fake_gen(system, user, **kw):
+        calls["n"] += 1
+        n = user.count("\n") + 1  # строк = фактов в чанке
+        calls["sizes"].append(n)
+        return {"results": [{"sid": "2.1", "conf": 0.9, "rationale": "ok"} for _ in range(n)]}
+
+    monkeypatch.setattr(llm, "generate_json", fake_gen)
+    monkeypatch.setenv("LLM_RECLASSIFY_CHUNK", "25")
+    texts = [f"fact {i}" for i in range(60)]
+    out = llm.reclassify_facts(texts, {}, {})
+    assert len(out) == 60
+    assert calls["n"] == 3          # 25 + 25 + 10
+    assert calls["sizes"] == [25, 25, 10]
+    assert all(c.suggested_subsection_id == "2.1" for c in out)

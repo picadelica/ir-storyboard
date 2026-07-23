@@ -960,29 +960,37 @@ def reclassify_facts(texts: List[str], descriptions: Optional[dict] = None,
               .replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
               .replace("BASE_COMPANY_PLACEHOLDER", base_company or "the client company"))
     ab = about_companies or []
-    lines = []
-    for i, t in enumerate(texts):
-        tag = (ab[i] if i < len(ab) else "") or ""
-        hint = f"  [про компанию: {tag} — НЕ базовую]" if tag.strip() else ""
-        lines.append(f"{i + 1}. {t}{hint}")
-    numbered = "\n".join(lines)
     use_model = model or os.environ.get("LLM_RECLASSIFY_MODEL", "claude-sonnet-4-6")
-    data = generate_json(system, numbered, max_tokens=min(8192, 90 * len(texts) + 512), model=use_model)
-    results = data.get("results") if isinstance(data, dict) else None
-    if not results:  # нет ключа / провал парса → keyword-фолбэк (раскладка по стабу)
-        return [stub_classify(t) for t in texts]
+    # ВАЖНО: чанкуем. Один запрос на все факты обрезается по max_tokens (8192) для клиентов
+    # с >~85 фактами → парс падает → стаб на весь батч (баг: «matched N keyword(s)»). Мелкие
+    # чанки → LLM реально отрабатывает каждый, вывод не обрезается.
+    CHUNK = int(os.environ.get("LLM_RECLASSIFY_CHUNK", "25"))
     out: List[FactCandidate] = []
-    for i, item in enumerate(results):
-        text = texts[i] if i < len(texts) else (texts[-1] if texts else "")
-        sid = item.get("sid") if isinstance(item, dict) else None
-        conf = item.get("conf", 0.0) if isinstance(item, dict) else 0.0
-        rationale = item.get("rationale", "") if isinstance(item, dict) else ""
-        out.append(FactCandidate(
-            text=text, suggested_subsection_id=sid, suggested_flag="green",
-            confidence=max(0.0, min(1.0, float(conf or 0.0))), rationale=rationale or "",
-        ))
-    for i in range(len(out), len(texts)):  # модель вернула меньше — добить стабом
-        out.append(stub_classify(texts[i]))
+    for start in range(0, len(texts), CHUNK):
+        chunk = texts[start:start + CHUNK]
+        lines = []
+        for j, t in enumerate(chunk):
+            idx = start + j
+            tag = (ab[idx] if idx < len(ab) else "") or ""
+            hint = f"  [про компанию: {tag} — НЕ базовую]" if tag.strip() else ""
+            lines.append(f"{j + 1}. {t}{hint}")
+        numbered = "\n".join(lines)
+        data = generate_json(system, numbered, max_tokens=min(8192, 110 * len(chunk) + 512),
+                             model=use_model)
+        results = data.get("results") if isinstance(data, dict) else None
+        if not results:  # этот чанк не удался (нет ключа / провал) → стаб только для чанка
+            out.extend(stub_classify(t) for t in chunk)
+            continue
+        for j, t in enumerate(chunk):
+            item = results[j] if j < len(results) and isinstance(results[j], dict) else None
+            if item is None:  # модель вернула меньше по чанку → добить стабом
+                out.append(stub_classify(t))
+                continue
+            out.append(FactCandidate(
+                text=t, suggested_subsection_id=item.get("sid"), suggested_flag="green",
+                confidence=max(0.0, min(1.0, float(item.get("conf", 0.0) or 0.0))),
+                rationale=item.get("rationale", "") or "",
+            ))
     return out
 
 
