@@ -150,7 +150,8 @@ export default function CompanyAbout({ clientId }: Props) {
         <p className="text-xs text-ink-mute">Голые бизнес-факты со ссылками. Без нарратива.</p>
         <Autofill clientId={clientId} onCommitted={inval} />
       </div>
-      <CompanyHeader company={company} siteFacts={siteFacts} onChanged={inval} />
+      <CompanyHeader company={company} siteFacts={siteFacts}
+        founders={(entities.data ?? []).filter(e => e.kind === "founder")} onChanged={inval} />
       <FoundersBlock clientId={clientId} founders={(entities.data ?? []).filter(e => e.kind === "founder")}
         candidates={founderCandidates(company.facts || [])} onChanged={inval} />
       {/* одна широкая колонка — секции стопкой во всю ширину */}
@@ -590,7 +591,23 @@ function CompanyLogo({ company, onChanged }: { company: Entity; onChanged: () =>
   );
 }
 
-function CompanyHeader({ company: e, siteFacts = [], onChanged }: { company: Entity; siteFacts?: EntityFact[]; onChanged: () => void }) {
+// Мини-аватар фаундера для шапки: фото или инициалы.
+function FounderAvatar({ f }: { f: Entity }) {
+  const [bad, setBad] = useState(false);
+  const photo = (f.links || {}).photo;
+  const initials = f.name.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "—";
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs bg-ink/[0.04] rounded-full pl-0.5 pr-2 py-0.5"
+      title={f.role ? `${f.name} · ${f.role}` : f.name}>
+      {photo && !bad
+        ? <img src={photo} alt="" onError={() => setBad(true)} className="w-5 h-5 rounded-full object-cover" />
+        : <span className="w-5 h-5 rounded-full bg-slate-200 grid place-items-center text-[9px] font-medium text-ink-mute">{initials}</span>}
+      <span className="text-ink">{f.name}</span>
+    </span>
+  );
+}
+
+function CompanyHeader({ company: e, siteFacts = [], founders = [], onChanged }: { company: Entity; siteFacts?: EntityFact[]; founders?: Entity[]; onChanged: () => void }) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(e.name);
@@ -636,6 +653,12 @@ function CompanyHeader({ company: e, siteFacts = [], onChanged }: { company: Ent
         <span className="ml-auto text-[11px] text-ink-mute">бизнес-профиль · без нарратива</span>
       </div>
       {e.note && <div className="mt-1 text-xs text-ink-mute">{e.note}</div>}
+      {founders.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-ink-mute/80 mr-0.5">Фаундеры:</span>
+          {founders.map(f => <FounderAvatar key={f.id} f={f} />)}
+        </div>
+      )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <span className="text-[11px] uppercase tracking-wide text-ink-mute/80 mr-0.5">Официальные ссылки:</span>
         {!hasAnyLink && (
