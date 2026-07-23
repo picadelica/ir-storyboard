@@ -56,6 +56,9 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const [showHidden, setShowHidden] = useState(false);   // collapsible for merged-away cards
   const [expandedKids, setExpandedKids] = useState<Set<number>>(new Set());   // inline-раскрытые исходники под собранной карточкой
   const toggleKid = (id: number) => setExpandedKids(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const [editSpeakerIds, setEditSpeakerIds] = useState<Set<number>>(new Set());   // у каких карточек открыт выбор спикера
+  const openSpeaker = (id: number) => setEditSpeakerIds(s => new Set(s).add(id));
+  const closeSpeaker = (id: number) => setEditSpeakerIds(s => { const n = new Set(s); n.delete(id); return n; });
   const [infoIds, setInfoIds] = useState<Set<number>>(new Set());   // per-fact "info" footer open
   const toggleInfo = (id: number) => setInfoIds(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const InfoBtn = ({ id }: { id: number }) => (
@@ -264,10 +267,10 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                     </div>
                   ) : (
                     <>
-                      {/* top row: flag + star (left), edit + delete (right) */}
+                      {/* top row: star (left), edit + delete (right). Флаг-кружок убран —
+                          сама карточка уже окрашена во флаговый цвет (flagBg/flagBorder). */}
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-3">
-                          <FlagDot flag={f.flag} size={11} />
                           {(() => {
                             const by = f.must_have_by || (f.must_have ? "client" : "");
                             const next = by === "" ? "client" : by === "client" ? "expert" : "";
@@ -305,17 +308,32 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                       {f.title && <div className="text-[15px] font-semibold text-ink leading-tight mb-0.5">{f.title}</div>}
                       <div className="text-sm leading-snug whitespace-pre-wrap text-ink" style={{ textAlign: "justify" }}>{f.text}</div>
 
-                      {/* speaker — kept in the text body */}
+                      {/* спикер: если назначен — компактный чип 🗣 Имя (клик → правка), без
+                          постоянного выпадающего списка. Не назначен — тихая кнопка. Список
+                          показываем только когда карточка в режиме правки спикера. */}
                       {founders.length > 0 && (
-                        <div className="mt-1.5 flex items-center gap-1.5">
-                          <span className="text-[11px] text-ink-mute" title="кто из фаундеров это говорит/чей факт">🗣</span>
-                          <select value={f.speaker_entity_id ?? ""}
-                            onChange={e => setSpeaker.mutate({ id: f.id, entityId: e.target.value ? Number(e.target.value) : null })}
-                            className={`text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white max-w-[15rem] ${f.speaker_entity_id ? "text-ink" : "text-ink-mute"}`}>
-                            <option value="">— кто говорит? —</option>
-                            {founders.map(fo => <option key={fo.id} value={fo.id}>{fo.name}</option>)}
-                          </select>
-                        </div>
+                        editSpeakerIds.has(f.id) ? (
+                          <div className="mt-1.5 flex items-center gap-1.5">
+                            <span className="text-[11px] text-ink-mute" title="кто из фаундеров это говорит/чей факт">🗣</span>
+                            <select autoFocus value={f.speaker_entity_id ?? ""}
+                              onChange={e => { setSpeaker.mutate({ id: f.id, entityId: e.target.value ? Number(e.target.value) : null }); closeSpeaker(f.id); }}
+                              className="text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white max-w-[15rem] text-ink">
+                              <option value="">— не указан —</option>
+                              {founders.map(fo => <option key={fo.id} value={fo.id}>{fo.name}</option>)}
+                            </select>
+                            <button onClick={() => closeSpeaker(f.id)} className="text-[11px] text-ink-mute hover:text-ink">✕</button>
+                          </div>
+                        ) : f.speaker_name ? (
+                          <button onClick={() => openSpeaker(f.id)} title="сменить спикера"
+                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
+                            <span>🗣</span><span className="font-medium text-ink">{f.speaker_name}</span>
+                          </button>
+                        ) : (
+                          <button onClick={() => openSpeaker(f.id)} title="указать, кто говорит"
+                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-ink-mute/60 hover:text-ink">
+                            <span>🗣</span><span>указать спикера</span>
+                          </button>
+                        )
                       )}
 
                       {/* risk / gap — kept in the text body */}

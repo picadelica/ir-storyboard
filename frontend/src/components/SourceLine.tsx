@@ -57,11 +57,21 @@ function fmtTime(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+const CHANNEL_META: Record<string, { icon: string; label: string }> = {
+  offline_interview: { icon: "🎙", label: "офлайн-интервью" },
+  online_interview: { icon: "🎧", label: "онлайн-интервью" },
+  online_research: { icon: "🌐", label: "веб-ресёрч" },
+  archival: { icon: "🗄", label: "архив" },
+};
+
 function ChannelBadge({ channel }: { channel?: string }) {
   if (!channel) return null;
+  const meta = CHANNEL_META[channel];
   return (
-    <span className="px-1.5 py-0.5 bg-white border border-ink-line rounded text-[11px] font-mono text-ink-mute">
-      {channel}
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-ink-mute bg-ink/[0.04]"
+      title={meta ? channel : undefined}>
+      <span className="leading-none">{meta ? meta.icon : "•"}</span>
+      <span>{meta ? meta.label : channel}</span>
     </span>
   );
 }
@@ -176,7 +186,6 @@ export default function SourceLine(props: SourceLineProps) {
         <>
           <ChannelBadge channel={channel} />
           <span className="truncate max-w-[18rem]">{source_title}</span>
-          <span title="Offline interview">🎙 offline</span>
         </>
       )}
 
