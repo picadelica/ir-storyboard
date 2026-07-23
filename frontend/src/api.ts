@@ -6,7 +6,7 @@ import type {
   AboutProposal, AboutAutofillResult, FounderDiscoverResult, FounderProfilesResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
-  ReclassifyResult, UserOverview, SearchResult, FounderMatch,
+  ReclassifyResult, UserOverview, SearchResult, FounderMatch, MentionedCompany,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport, Dossier,
@@ -508,6 +508,16 @@ export const api = {
       (excludeClient ? `&exclude_client=${encodeURIComponent(excludeClient)}` : "")),
   importFounderProfile: (entityId: number, fromEntityId: number): Promise<Entity> =>
     call<Entity>(`/entities/${entityId}/import-profile`, { method: "POST", body: JSON.stringify({ from_entity_id: fromEntityId }) }),
+
+  // упомянутые (внешние) компании под клиентом
+  mentionedCompanies: (clientId: string): Promise<MentionedCompany[]> =>
+    call<MentionedCompany[]>(`/clients/${clientId}/mentioned-companies`),
+  addMentionedCompany: (clientId: string, body: { name: string; logo?: string; note?: string }): Promise<MentionedCompany> =>
+    call<MentionedCompany>(`/clients/${clientId}/mentioned-companies`, { method: "POST", body: JSON.stringify(body) }),
+  patchMentionedCompany: (id: number, body: Partial<Pick<MentionedCompany, "name" | "logo" | "note">>): Promise<{ ok: boolean }> =>
+    call(`/mentioned-companies/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteMentionedCompany: (id: number): Promise<{ ok: boolean }> =>
+    call(`/mentioned-companies/${id}`, { method: "DELETE" }),
   addEntityFact: (entityId: number, body: Partial<EntityFact>): Promise<EntityFact> =>
     call<EntityFact>(`/entities/${entityId}/facts`, { method: "POST", body: JSON.stringify(body) }),
   deleteEntityFact: (factId: number): Promise<{ ok: boolean }> =>

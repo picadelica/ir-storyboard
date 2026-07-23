@@ -221,6 +221,19 @@ def init_schema(conn: sqlite3.Connection) -> None:
             CHECK(kind IN ('company','founder','decoy'))
         )
     """)
+    # Внешние компании, упомянутые под клиентом (GetTaxi, прошлые компании фаундеров,
+    # конкуренты) — лёгкая карточка с логотипом. Пер-клиентские (не глобальный реестр).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS mentioned_companies (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id   TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            name        TEXT NOT NULL,
+            logo        TEXT NOT NULL DEFAULT '',
+            note        TEXT NOT NULL DEFAULT '',
+            sort_order  INTEGER NOT NULL DEFAULT 0,
+            created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entity_facts (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,

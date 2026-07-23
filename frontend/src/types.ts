@@ -572,6 +572,16 @@ export interface Entity {
   facts: EntityFact[];
 }
 
+// внешняя компания, упомянутая под клиентом (GetTaxi, прошлые компании фаундера, конкурент)
+export interface MentionedCompany {
+  id: number;
+  client_id: string;
+  name: string;
+  logo: string;
+  note: string;
+  sort_order: number;
+}
+
 // тот же фаундер (по имени) в другой компании — для предложения влить профиль
 export interface FounderMatch {
   id: number;

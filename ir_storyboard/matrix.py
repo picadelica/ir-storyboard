@@ -671,6 +671,40 @@ def delete_entity(conn: sqlite3.Connection, entity_id: int) -> None:
     conn.commit()
 
 
+def list_mentioned_companies(conn: sqlite3.Connection, client_id: str) -> List[dict]:
+    """Внешние компании, упомянутые под клиентом (не клиенты сами по себе)."""
+    return [dict(r) for r in conn.execute(
+        """SELECT id, client_id, name, logo, note, sort_order FROM mentioned_companies
+            WHERE client_id=? ORDER BY sort_order, name COLLATE NOCASE""", (client_id,))]
+
+
+def add_mentioned_company(conn: sqlite3.Connection, client_id: str, name: str,
+                          logo: str = "", note: str = "") -> int:
+    cur = conn.execute(
+        "INSERT INTO mentioned_companies (client_id, name, logo, note) VALUES (?,?,?,?)",
+        (client_id, (name or "").strip(), (logo or "").strip(), (note or "").strip()))
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_mentioned_company(conn: sqlite3.Connection, mc_id: int, **fields) -> None:
+    cols = {"name", "logo", "note", "sort_order"}
+    sets, params = [], []
+    for k, v in fields.items():
+        if k in cols and v is not None:
+            sets.append(f"{k}=?"); params.append(v.strip() if isinstance(v, str) else v)
+    if not sets:
+        return
+    params.append(mc_id)
+    conn.execute(f"UPDATE mentioned_companies SET {', '.join(sets)} WHERE id=?", params)
+    conn.commit()
+
+
+def delete_mentioned_company(conn: sqlite3.Connection, mc_id: int) -> None:
+    conn.execute("DELETE FROM mentioned_companies WHERE id=?", (mc_id,))
+    conn.commit()
+
+
 def founders_by_name(conn: sqlite3.Connection, name: str,
                      exclude_client: Optional[str] = None) -> List[dict]:
     """Тот же человек в ДРУГИХ компаниях: фаундер-сущности с совпадающим именем

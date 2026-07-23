@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { RunProgress, useElapsed } from "./RunProgress";
-import type { Entity, EntityFact, Client, AboutProposal, AboutAutofillResult, FounderProposal, FounderDiscoverResult } from "../types";
+import type { Entity, EntityFact, Client, AboutProposal, AboutAutofillResult, FounderProposal, FounderDiscoverResult, MentionedCompany } from "../types";
 
 interface Props {
   clientId: string;
@@ -154,6 +154,7 @@ export default function CompanyAbout({ clientId }: Props) {
         founders={(entities.data ?? []).filter(e => e.kind === "founder")} onChanged={inval} />
       <FoundersBlock clientId={clientId} founders={(entities.data ?? []).filter(e => e.kind === "founder")}
         candidates={founderCandidates(company.facts || [])} onChanged={inval} />
+      <MentionedCompaniesBlock clientId={clientId} />
       {/* одна широкая колонка — секции стопкой во всю ширину */}
       {SECTIONS.map(s => (
         <SectionBlock key={s.id} section={s} entityId={company.id} facts={bySection(s.id)} onChanged={inval} />
@@ -604,6 +605,90 @@ function FounderAvatar({ f }: { f: Entity }) {
         : <span className="w-5 h-5 rounded-full bg-slate-200 grid place-items-center text-[9px] font-medium text-ink-mute">{initials}</span>}
       <span className="text-ink">{f.name}</span>
     </span>
+  );
+}
+
+// Блок «Упомянутые компании» — внешние компании (не клиенты) под этим клиентом.
+function MentionedCompaniesBlock({ clientId }: { clientId: string }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["mentioned-companies", clientId], queryFn: () => api.mentionedCompanies(clientId) });
+  const inval = () => qc.invalidateQueries({ queryKey: ["mentioned-companies", clientId] });
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const add = useMutation({
+    mutationFn: () => api.addMentionedCompany(clientId, { name: name.trim(), note: note.trim() }),
+    onSuccess: () => { setAdding(false); setName(""); setNote(""); inval(); },
+  });
+  const del = useMutation({ mutationFn: (id: number) => api.deleteMentionedCompany(id), onSuccess: inval });
+  const list = q.data ?? [];
+  const inp = "text-sm border border-ink-line rounded px-2 py-1";
+  return (
+    <section className="bg-white rounded-lg border border-ink-line p-4">
+      <div className="flex items-baseline justify-between gap-3 mb-2">
+        <div>
+          <h3 className="text-sm font-semibold inline">Упомянутые компании</h3>
+          <span className="text-xs text-ink-mute ml-2">внешние компании, о которых говорим — не клиенты (GetTaxi, прошлые компании фаундеров, конкуренты)</span>
+        </div>
+      </div>
+      {list.length === 0 && !adding && (
+        <div className="text-xs text-ink-mute italic py-1">Пусто. Добавь компанию, которую упоминают, но которую мы не ведём как клиента.</div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {list.map(m => <MentionedCard key={m.id} m={m} onChanged={inval} onRemove={() => del.mutate(m.id)} />)}
+      </div>
+      {adding ? (
+        <div className="mt-2 flex flex-wrap gap-2 items-center">
+          <input className={`${inp} w-44`} placeholder="название *" value={name} onChange={e => setName(e.target.value)} autoFocus />
+          <input className={`${inp} w-60`} placeholder="контекст (напр. прошлая компания фаундера)" value={note} onChange={e => setNote(e.target.value)} />
+          <button onClick={() => add.mutate()} disabled={!name.trim() || add.isPending}
+            className="text-[11px] px-2 py-1 rounded bg-ink text-white hover:bg-black disabled:bg-slate-300">добавить</button>
+          <button onClick={() => setAdding(false)} className="text-[11px] text-ink-mute hover:text-ink">отмена</button>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)}
+          className="mt-2 text-[11px] px-2 py-0.5 rounded border border-dashed border-ink-line text-ink-mute hover:bg-slate-50">+ компания</button>
+      )}
+    </section>
+  );
+}
+
+function MentionedCard({ m, onChanged, onRemove }: { m: MentionedCompany; onChanged: () => void; onRemove: () => void }) {
+  const [editLogo, setEditLogo] = useState(false);
+  const [url, setUrl] = useState(m.logo || "");
+  const [imgBad, setImgBad] = useState(false);
+  const save = useMutation({
+    mutationFn: (u: string) => api.patchMentionedCompany(m.id, { logo: u }),
+    onSuccess: () => { setEditLogo(false); setImgBad(false); onChanged(); },
+  });
+  const initials = m.name.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "—";
+  return (
+    <div className="relative flex items-center gap-2 border border-ink-line rounded-lg px-2 py-1.5 group">
+      {m.logo && !imgBad
+        ? <img src={m.logo} alt="" onError={() => setImgBad(true)} className="w-7 h-7 rounded object-cover shrink-0" />
+        : <span className="w-7 h-7 rounded grid place-items-center text-[10px] font-semibold text-white select-none shrink-0"
+            style={{ background: monoColor(m.name) }}>{initials}</span>}
+      <div className="min-w-0">
+        <div className="text-xs font-medium text-ink leading-tight">{m.name}</div>
+        {m.note && <div className="text-[10px] text-ink-mute leading-tight truncate max-w-[13rem]">{m.note}</div>}
+      </div>
+      <button onClick={() => { setUrl(m.logo || ""); setEditLogo(v => !v); }} title="логотип"
+        className="text-[10px] text-ink-mute/50 hover:text-ink ml-1">✎</button>
+      <button onClick={onRemove} title="убрать"
+        className="text-[13px] text-ink-mute/50 hover:text-red-600 opacity-0 group-hover:opacity-100">×</button>
+      {editLogo && (
+        <div className="absolute left-0 top-11 z-10 bg-white border border-ink-line rounded-lg shadow-lg p-2 w-56">
+          <div className="text-[10px] text-ink-mute mb-1">Ссылка на логотип (пусто = буквенный):</div>
+          <input autoFocus value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/logo.png"
+            className="w-full text-xs border border-ink-line rounded px-2 py-1" />
+          <div className="flex gap-2 mt-1.5 items-center">
+            <button onClick={() => save.mutate(url.trim())} className="text-[11px] px-2 py-0.5 rounded bg-ink text-white">ок</button>
+            {m.logo && <button onClick={() => save.mutate("")} className="text-[11px] text-ink-mute hover:text-red-600">убрать</button>}
+            <button onClick={() => setEditLogo(false)} className="text-[11px] text-ink-mute hover:text-ink ml-auto">отмена</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

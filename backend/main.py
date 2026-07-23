@@ -1718,6 +1718,52 @@ def import_founder_profile_ep(entity_id: int, body: ImportProfileIn, conn=Depend
         raise HTTPException(404, str(e))
 
 
+# ---------- упомянутые (внешние) компании — пер-клиентские ----------
+
+class MentionedCompanyIn(BaseModel):
+    name: str
+    logo: str = ""
+    note: str = ""
+
+
+class MentionedCompanyPatch(BaseModel):
+    name: Optional[str] = None
+    logo: Optional[str] = None
+    note: Optional[str] = None
+
+
+class MentionedCompanyOut(BaseModel):
+    id: int
+    client_id: str
+    name: str
+    logo: str = ""
+    note: str = ""
+    sort_order: int = 0
+
+
+@app.get("/api/clients/{client_id}/mentioned-companies", response_model=List[MentionedCompanyOut])
+def list_mentioned_companies_ep(client_id: str, conn=Depends(get_conn)):
+    return [MentionedCompanyOut(**m) for m in matrix.list_mentioned_companies(conn, client_id)]
+
+
+@app.post("/api/clients/{client_id}/mentioned-companies", response_model=MentionedCompanyOut)
+def add_mentioned_company_ep(client_id: str, body: MentionedCompanyIn, conn=Depends(get_conn)):
+    mid = matrix.add_mentioned_company(conn, client_id, body.name, body.logo, body.note)
+    return next(MentionedCompanyOut(**m) for m in matrix.list_mentioned_companies(conn, client_id) if m["id"] == mid)
+
+
+@app.patch("/api/mentioned-companies/{mc_id}", response_model=dict)
+def patch_mentioned_company_ep(mc_id: int, body: MentionedCompanyPatch, conn=Depends(get_conn)):
+    matrix.update_mentioned_company(conn, mc_id, **body.model_dump(exclude_none=True))
+    return {"ok": True}
+
+
+@app.delete("/api/mentioned-companies/{mc_id}")
+def delete_mentioned_company_ep(mc_id: int, conn=Depends(get_conn)):
+    matrix.delete_mentioned_company(conn, mc_id)
+    return {"ok": True}
+
+
 @app.post("/api/entities/{entity_id}/facts", response_model=EntityFactOut)
 def add_entity_fact_ep(entity_id: int, f: EntityFactIn, conn=Depends(get_conn)):
     fid = matrix.add_entity_fact(conn, entity_id=entity_id, key=f.key, value=f.value,
