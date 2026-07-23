@@ -59,6 +59,11 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const [editSpeakerIds, setEditSpeakerIds] = useState<Set<number>>(new Set());   // у каких карточек открыт выбор спикера
   const openSpeaker = (id: number) => setEditSpeakerIds(s => new Set(s).add(id));
   const closeSpeaker = (id: number) => setEditSpeakerIds(s => { const n = new Set(s); n.delete(id); return n; });
+
+  // drag-сортировка активных карточек (тянуть за ручку ⠿)
+  const [dragHandleId, setDragHandleId] = useState<number | null>(null);   // за какую карточку схватились ручкой
+  const [dragId, setDragId] = useState<number | null>(null);               // что тащим
+  const [dragOverId, setDragOverId] = useState<number | null>(null);       // над кем висим
   const [infoIds, setInfoIds] = useState<Set<number>>(new Set());   // per-fact "info" footer open
   const toggleInfo = (id: number) => setInfoIds(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const InfoBtn = ({ id }: { id: number }) => (
@@ -80,6 +85,25 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
     qc.invalidateQueries({ queryKey: ["matrix", clientId] });
     qc.invalidateQueries({ queryKey: ["scorecard", clientId] });
     qc.invalidateQueries({ queryKey: ["punch", clientId] });
+  };
+
+  const reorderMut = useMutation({
+    mutationFn: (orderedIds: number[]) => api.reorderFacts(clientId, subsectionId, orderedIds),
+    onSuccess: invalidate,
+  });
+  const dropOn = (targetId: number) => {
+    const cur = qc.getQueryData<Fact[]>(["facts", clientId, subsectionId]) ?? [];
+    if (dragId == null || dragId === targetId) return;
+    const act = cur.filter(f => f.state !== "rejected");
+    const rest = cur.filter(f => f.state === "rejected");
+    const from = act.findIndex(f => f.id === dragId);
+    const to = act.findIndex(f => f.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...act];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    qc.setQueryData<Fact[]>(["facts", clientId, subsectionId], [...next, ...rest]);   // оптимистично
+    reorderMut.mutate(next.map(f => f.id));
   };
 
   const isOnlineChannel = (ch: Channel) =>
@@ -225,7 +249,15 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
             {active.map(f => {
               const kids = hidden.filter(h => h.merged_into === f.id);
               return (
-                <div key={f.id} id={`fact-${f.id}`} className={`rounded-lg border p-3 transition-shadow ${flagBg(f.flag)} ${flagBorder(f.flag)}`}>
+                <div key={f.id} id={`fact-${f.id}`}
+                  draggable={dragHandleId === f.id}
+                  onDragStart={() => setDragId(f.id)}
+                  onDragOver={e => { if (dragId != null && dragId !== f.id) { e.preventDefault(); setDragOverId(f.id); } }}
+                  onDragLeave={() => setDragOverId(o => (o === f.id ? null : o))}
+                  onDrop={() => { dropOn(f.id); setDragId(null); setDragOverId(null); setDragHandleId(null); }}
+                  onDragEnd={() => { setDragId(null); setDragOverId(null); setDragHandleId(null); }}
+                  className={`rounded-lg border p-3 transition-shadow ${flagBg(f.flag)} ${flagBorder(f.flag)}
+                    ${dragId === f.id ? "opacity-50" : ""} ${dragOverId === f.id ? "ring-2 ring-blue-400" : ""}`}>
                   {editingId === f.id ? (
                     <div className="space-y-2">
                       <input value={draftTitle} onChange={e => setDraftTitle(e.target.value)}
@@ -270,7 +302,12 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                       {/* top row: star (left), edit + delete (right). Флаг-кружок убран —
                           сама карточка уже окрашена во флаговый цвет (flagBg/flagBorder). */}
                       <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <span
+                            onMouseDown={() => setDragHandleId(f.id)}
+                            onMouseUp={() => setDragHandleId(null)}
+                            title="перетащить: изменить порядок"
+                            className="cursor-grab active:cursor-grabbing text-ink-mute/40 hover:text-ink-mute select-none leading-none text-[13px]">⠿</span>
                           {(() => {
                             const by = f.must_have_by || (f.must_have ? "client" : "");
                             const next = by === "" ? "client" : by === "client" ? "expert" : "";

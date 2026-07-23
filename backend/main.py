@@ -1056,6 +1056,18 @@ def get_cell_facts(client_id: str, subsection_id: str, conn=Depends(get_conn)):
             for r in matrix.facts_for_cell(conn, client_id, subsection_id, include_rejected=True)]
 
 
+class ReorderIn(BaseModel):
+    ordered_ids: List[int]
+
+
+@app.post("/api/clients/{client_id}/cells/{subsection_id}/facts/reorder")
+def reorder_cell_facts(client_id: str, subsection_id: str, body: ReorderIn,
+                       conn=Depends(get_conn)):
+    """Ручной порядок карточек в ячейке: ordered_ids = сверху вниз."""
+    n = matrix.reorder_facts(conn, client_id, subsection_id, body.ordered_ids)
+    return {"ordered": n}
+
+
 @app.post("/api/clients/{client_id}/cells/{subsection_id}/facts",
           response_model=FactOut)
 def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,

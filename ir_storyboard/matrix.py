@@ -417,9 +417,25 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
             LEFT JOIN ingest_audit ia ON ia.id = f.ingest_audit_id
             LEFT JOIN entities se ON se.id = f.speaker_entity_id
             WHERE c.client_id=? AND c.subsection_id=?""" + state_clause + """
-            ORDER BY f.captured_at DESC""",
+            ORDER BY (f.sort_order IS NULL), f.sort_order, f.captured_at DESC""",
         (client_id, subsection_id),
     ))
+
+
+def reorder_facts(conn: sqlite3.Connection, client_id: str, subsection_id: str,
+                  ordered_ids: List[int]) -> int:
+    """Присвоить ручной порядок карточкам ячейки: sort_order = позиция в списке.
+    Принимаются только факты, реально лежащие в этой ячейке (чужие игнорируются)."""
+    valid = {r["id"] for r in conn.execute(
+        """SELECT f.id FROM facts f JOIN cells c ON c.id=f.cell_id
+            WHERE c.client_id=? AND c.subsection_id=?""", (client_id, subsection_id))}
+    n = 0
+    for pos, fid in enumerate(ordered_ids):
+        if fid in valid:
+            conn.execute("UPDATE facts SET sort_order=? WHERE id=?", (pos, fid))
+            n += 1
+    conn.commit()
+    return n
 
 
 def must_have_facts(conn: sqlite3.Connection, client_id: str) -> List[dict]:

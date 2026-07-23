@@ -144,6 +144,10 @@ export const api = {
   moveFact: (factId: number, toSid: string): Promise<Fact> =>
     call<Fact>(`/facts/${factId}/move`, { method: "POST", body: JSON.stringify({ to_sid: toSid }) }),
 
+  reorderFacts: (clientId: string, sid: string, orderedIds: number[]): Promise<{ ordered: number }> =>
+    call<{ ordered: number }>(`/clients/${clientId}/cells/${sid}/facts/reorder`,
+      { method: "POST", body: JSON.stringify({ ordered_ids: orderedIds }) }),
+
   search: (q: string, scope: "client" | "all", clientId?: string): Promise<SearchResult> =>
     call<SearchResult>(`/search?q=${encodeURIComponent(q)}&scope=${scope}` +
       (scope === "client" && clientId ? `&client_id=${encodeURIComponent(clientId)}` : "")),

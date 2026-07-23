@@ -83,6 +83,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _migrate_collapse_1_4(conn)
     # llm-report: link facts to the ingest audit row they came from
     _add_column_if_missing(conn, "facts", "ingest_audit_id", "TEXT")
+    # ручная сортировка карточек в ячейке (drag вверх/вниз); NULL = не трогали (по дате)
+    _add_column_if_missing(conn, "facts", "sort_order", "INTEGER")
     # llm-5: ingest_audit table for LLM Report Ingest provenance
     conn.execute("""
         CREATE TABLE IF NOT EXISTS ingest_audit (
