@@ -418,23 +418,24 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                           </div>
                         ) : f.speaker_name ? (
                           <button onClick={() => openSpeaker(f.id)} title="сменить спикера"
-                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
+                            className="mt-1.5 flex w-fit items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
                             <span>🗣</span><span className="font-medium text-ink">{f.speaker_name}</span>
                           </button>
                         ) : (
                           <button onClick={() => openSpeaker(f.id)} title="указать, кто говорит"
-                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-ink-mute/60 hover:text-ink">
+                            className="mt-1.5 flex w-fit items-center gap-1 text-[11px] text-ink-mute/60 hover:text-ink">
                             <span>🗣</span><span>указать спикера</span>
                           </button>
                         )
                       )}
 
-                      {/* тег «факт про другую компанию» — только слои 1-2, только когда задан.
-                          Помечаем карточку фавиконом упомянутой компании. Клик → форма правки. */}
+                      {/* тег «про какую компанию» — на ВСЕХ карточках (все слои). Когда задан —
+                          чип с фавиконом отдельной строкой (не налазит на спикера/автора); клик →
+                          форма редактирования (там select из списка + «+ новая»). Пусто → ничего. */}
                       {allowAboutCompany && f.about_company && (
                         <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
-                          title="про какую компанию (клик — изменить)"
-                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
+                          title="про какую компанию (клик — изменить в форме)"
+                          className="mt-1 flex w-fit items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
                           <span>про:</span>
                           <CompanyFavicon name={f.about_company} logo={companyByName(f.about_company)?.logo} />
                           <span className="font-medium text-ink">{f.about_company}</span>

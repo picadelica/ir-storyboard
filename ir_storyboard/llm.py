@@ -222,8 +222,9 @@ def _try_init_anthropic() -> None:
         return
 
     _client = anthropic.Anthropic(api_key=api_key)
-    # Haiku is the right choice here: high-volume classification, cost matters
-    _MODEL = os.environ.get("LLM_CLASSIFY_MODEL", "claude-haiku-4-5")
+    # Классификация — на Sonnet: решение «в какую ячейку / чья компания» смысловое, не по словам
+    # (см. reclassify). Дороже Haiku, но качество раскладки важнее. Env: LLM_CLASSIFY_MODEL.
+    _MODEL = os.environ.get("LLM_CLASSIFY_MODEL", "claude-sonnet-4-6")
     _SUMMARIZE_MODEL = os.environ.get("LLM_SUMMARIZE_MODEL", "claude-haiku-4-5")
 
     class _Item(BaseModel):
