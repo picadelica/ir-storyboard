@@ -210,6 +210,15 @@ interface TabsProps {
   onTogglePresent: (v: boolean) => void;
 }
 
+function monogram(name: string): string {
+  return name.replace(/^@/, "").split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "—";
+}
+function monoColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360} 42% 42%)`;
+}
+
 function ZoneIcon({ id }: { id: string }) {
   const p = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (id) {
@@ -275,31 +284,20 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
 
   return (
     <div className="border-b border-ink-line bg-white">
-      {/* zone row */}
-      <div className="flex items-center gap-1.5 px-4 pt-2.5 pb-2">
-        {ZONES.map(z => {
-          const active = z.id === activeZone.id;
-          return (
-            <button
-              key={z.id}
-              onClick={() => nav(`/clients/${clientId}/${z.tabs[0].id}`)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm transition
-                ${active ? "bg-ink text-white font-medium" : "text-ink-mute hover:text-ink hover:bg-ink/[0.04]"}`}
-            >
-              <ZoneIcon id={z.id} />
-              {z.label}
-            </button>
-          );
-        })}
-
-        {client.data?.name && (
-          <div className="ml-4 min-w-0 flex items-baseline gap-2">
-            <span className="text-sm font-semibold text-ink truncate" title={client.data.name}>{client.data.name}</span>
-            {client.data.sector && <span className="text-[11px] text-ink-mute truncate">{client.data.sector}</span>}
+      {/* row 1: айдентика компании (слева, приоритет) + глобальные действия (справа) */}
+      <div className="flex items-center gap-3 px-4 pt-2.5 pb-1.5">
+        {client.data?.name ? (
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <span className="w-8 h-8 rounded-lg grid place-items-center text-[11px] font-semibold text-white select-none shrink-0"
+              style={{ background: monoColor(client.data.name) }}>{monogram(client.data.name)}</span>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-ink truncate leading-tight" title={client.data.name}>{client.data.name}</div>
+              {client.data.sector && <div className="text-[11px] text-ink-mute truncate leading-tight">{client.data.sector}</div>}
+            </div>
           </div>
-        )}
+        ) : <div className="flex-1" />}
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="flex items-center gap-2.5 shrink-0">
           <SearchBox clientId={clientId} />
           {canSeeUsers && (
             <button
@@ -322,6 +320,24 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
           </div>
           <UserMenu />
         </div>
+      </div>
+
+      {/* row 2: зоны навигации */}
+      <div className="flex items-center gap-1.5 px-4 pb-2 flex-wrap">
+        {ZONES.map(z => {
+          const active = z.id === activeZone.id;
+          return (
+            <button
+              key={z.id}
+              onClick={() => nav(`/clients/${clientId}/${z.tabs[0].id}`)}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm transition
+                ${active ? "bg-ink text-white font-medium" : "text-ink-mute hover:text-ink hover:bg-ink/[0.04]"}`}
+            >
+              <ZoneIcon id={z.id} />
+              {z.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* sub-tab row (hidden in present mode) */}
