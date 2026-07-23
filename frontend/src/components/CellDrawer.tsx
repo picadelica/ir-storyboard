@@ -6,6 +6,21 @@ import SourceLine from "./SourceLine";
 import AudioSourcePanel, { type AudioSourceHandle } from "./AudioSourcePanel";
 import FlagDot from "./FlagDot";
 
+function monoColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360} 42% 42%)`;
+}
+
+// мини-фавикон компании (лого или двухбуквенная монограмма) для пометки карточки факта
+function CompanyFavicon({ name, logo }: { name: string; logo?: string }) {
+  const [bad, setBad] = useState(false);
+  const initials = name.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "—";
+  return logo && !bad
+    ? <img src={logo} alt="" onError={() => setBad(true)} className="w-4 h-4 rounded object-cover" />
+    : <span className="w-4 h-4 rounded grid place-items-center text-[7px] font-semibold text-white select-none" style={{ background: monoColor(name) }}>{initials}</span>;
+}
+
 interface Props {
   clientId: string;
   subsectionId: string;
@@ -64,7 +79,6 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const [editSpeakerIds, setEditSpeakerIds] = useState<Set<number>>(new Set());   // у каких карточек открыт выбор спикера
   const openSpeaker = (id: number) => setEditSpeakerIds(s => new Set(s).add(id));
   const closeSpeaker = (id: number) => setEditSpeakerIds(s => { const n = new Set(s); n.delete(id); return n; });
-  const [editAbout, setEditAbout] = useState<{ id: number; value: string } | null>(null);   // правка тега «про компанию»
 
   // drag-сортировка активных карточек (тянуть за ручку ⠿)
   const [dragHandleId, setDragHandleId] = useState<number | null>(null);   // за какую карточку схватились ручкой
@@ -181,7 +195,18 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   });
   const setAbout = useMutation({
     mutationFn: ({ id, value }: { id: number; value: string }) => api.setFactAbout(id, value),
-    onSuccess: () => { setEditAbout(null); invalidate(); },
+    onSuccess: invalidate,
+  });
+  // упомянутые (внешние) компании клиента — тег «про компанию» выбирается ИЗ ЭТОГО списка
+  // (не свободный текст → без бардака), их логотип помечает карточку факта.
+  const mentioned = useQuery({ queryKey: ["mentioned-companies", clientId], queryFn: () => api.mentionedCompanies(clientId) });
+  const mentionedList = mentioned.data ?? [];
+  const companyByName = (name?: string) =>
+    mentionedList.find(m => m.name.trim().toLowerCase() === (name || "").trim().toLowerCase());
+  const [addingCompany, setAddingCompany] = useState("");   // имя новой компании в форме добавления
+  const addMentioned = useMutation({
+    mutationFn: (name: string) => api.addMentionedCompany(clientId, { name }),
+    onSuccess: (m) => { qc.invalidateQueries({ queryKey: ["mentioned-companies", clientId] }); setDraftAbout(m.name); setAddingCompany(""); },
   });
 
   // Фокус из поиска: доскроллить к карточке и подсветить; исходник — раскрыть.
@@ -279,14 +304,25 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                         placeholder={draftFlag === "red" ? "Concern: что именно проблема (обязательно для red)" : "Rationale (опц.)"}
                         rows={3}
                         className={`w-full text-xs border rounded px-2 py-1.5 min-h-[3rem] resize-none ${draftFlag === "red" && !draftRationale.trim() ? "border-red-400" : "border-ink-line"}`} />
-                      {/* только слои 1-2: факт может быть про другую компанию (характеризует фаундера).
-                          Пусто → на карточке ничего не показываем. */}
+                      {/* только слои 1-2: факт может быть про ДРУГУЮ компанию (характеризует фаундера).
+                          Выбор ИЗ списка упомянутых компаний (не свободный текст) + добавить новую. */}
                       {allowAboutCompany && (
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[11px] text-ink-mute" title="если факт про ДРУГУЮ компанию (не про эту)">🏢 про компанию:</span>
-                          <input value={draftAbout} onChange={e => setDraftAbout(e.target.value)}
-                            placeholder="если про другую — напр. GetTaxi"
-                            className="flex-1 text-xs border border-ink-line rounded px-2 py-1" />
+                          <select value={draftAbout} onChange={e => setDraftAbout(e.target.value)}
+                            className="text-xs border border-ink-line rounded px-1.5 py-1 bg-white max-w-[12rem]">
+                            <option value="">— эта компания —</option>
+                            {mentionedList.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                            {draftAbout && !companyByName(draftAbout) && <option value={draftAbout}>{draftAbout}</option>}
+                          </select>
+                          <input value={addingCompany} onChange={e => setAddingCompany(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter" && addingCompany.trim()) { e.preventDefault(); addMentioned.mutate(addingCompany.trim()); } }}
+                            placeholder="+ новая компания"
+                            className="text-xs border border-dashed border-ink-line rounded px-1.5 py-1 w-32" />
+                          {addingCompany.trim() && (
+                            <button onClick={() => addMentioned.mutate(addingCompany.trim())} disabled={addMentioned.isPending}
+                              className="text-[11px] text-ink hover:underline">добавить</button>
+                          )}
                         </div>
                       )}
                       <div className="flex items-center gap-2">
@@ -394,26 +430,16 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                         )
                       )}
 
-                      {/* тег «факт про другую компанию» — только слои 1-2 и только когда задан
-                          (задаётся при редактировании; пусто → поля нет). Клик по чипу — быстрая правка. */}
-                      {allowAboutCompany && (
-                        editAbout?.id === f.id ? (
-                          <div className="mt-1 flex items-center gap-1.5">
-                            <span className="text-[11px] text-ink-mute" title="про какую компанию этот факт">🏢</span>
-                            <input autoFocus value={editAbout.value}
-                              onChange={e => setEditAbout({ id: f.id, value: e.target.value })}
-                              onKeyDown={e => { if (e.key === "Enter") setAbout.mutate({ id: f.id, value: editAbout.value }); if (e.key === "Escape") setEditAbout(null); }}
-                              placeholder="напр. GetTaxi"
-                              className="text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white w-40" />
-                            <button onClick={() => setAbout.mutate({ id: f.id, value: editAbout.value })} className="text-[11px] text-ink hover:underline">ок</button>
-                            <button onClick={() => setEditAbout(null)} className="text-[11px] text-ink-mute hover:text-ink">✕</button>
-                          </div>
-                        ) : f.about_company ? (
-                          <button onClick={() => setEditAbout({ id: f.id, value: f.about_company || "" })} title="про какую компанию (клик — изменить)"
-                            className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
-                            <span>🏢</span><span>про: <span className="font-medium text-ink">{f.about_company}</span></span>
-                          </button>
-                        ) : null
+                      {/* тег «факт про другую компанию» — только слои 1-2, только когда задан.
+                          Помечаем карточку фавиконом упомянутой компании. Клик → форма правки. */}
+                      {allowAboutCompany && f.about_company && (
+                        <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
+                          title="про какую компанию (клик — изменить)"
+                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
+                          <span>про:</span>
+                          <CompanyFavicon name={f.about_company} logo={companyByName(f.about_company)?.logo} />
+                          <span className="font-medium text-ink">{f.about_company}</span>
+                        </button>
                       )}
 
                       {/* risk / gap — kept in the text body */}
