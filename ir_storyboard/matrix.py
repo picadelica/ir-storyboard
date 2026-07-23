@@ -671,6 +671,57 @@ def delete_entity(conn: sqlite3.Connection, entity_id: int) -> None:
     conn.commit()
 
 
+def founders_by_name(conn: sqlite3.Connection, name: str,
+                     exclude_client: Optional[str] = None) -> List[dict]:
+    """Тот же человек в ДРУГИХ компаниях: фаундер-сущности с совпадающим именем
+    (регистро-/пробело-независимо) у других клиентов — чтобы предложить влить профиль."""
+    key = (name or "").strip().lower()
+    if not key:
+        return []
+    rows = conn.execute(
+        """SELECT e.id, e.client_id, c.name AS client_name, e.name, e.role,
+                  e.canonical_url, e.links, e.note
+            FROM entities e JOIN clients c ON c.id = e.client_id
+            WHERE e.kind='founder' AND lower(trim(e.name))=?
+              AND (? IS NULL OR e.client_id != ?)
+            ORDER BY c.name""",
+        (key, exclude_client, exclude_client)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["links"] = _json_ent.loads(d.get("links") or "{}")
+        except Exception:
+            d["links"] = {}
+        out.append(d)
+    return out
+
+
+def import_founder_profile(conn: sqlite3.Connection, target_id: int, source_id: int) -> dict:
+    """Влить профиль фаундера из source в target: links объединяются (существующие в
+    target не перетираются), role/canonical_url/note заполняются, если у target пусто.
+    Возвращает обновлённую сущность target."""
+    tgt = conn.execute("SELECT * FROM entities WHERE id=? AND kind='founder'", (target_id,)).fetchone()
+    src = conn.execute("SELECT * FROM entities WHERE id=? AND kind='founder'", (source_id,)).fetchone()
+    if tgt is None or src is None:
+        raise ValueError("founder entity not found")
+    try:
+        t_links = _json_ent.loads(tgt["links"] or "{}")
+    except Exception:
+        t_links = {}
+    try:
+        s_links = _json_ent.loads(src["links"] or "{}")
+    except Exception:
+        s_links = {}
+    merged_links = {**s_links, **t_links}   # target выигрывает при конфликте ключей
+    fields = {"links": merged_links}
+    for col in ("role", "canonical_url", "note"):
+        if not (tgt[col] or "").strip() and (src[col] or "").strip():
+            fields[col] = src[col]
+    update_entity(conn, target_id, **fields)
+    return dict(conn.execute("SELECT id, client_id, kind, name, role, canonical_url, links, note, confirmed FROM entities WHERE id=?", (target_id,)).fetchone())
+
+
 def add_entity_fact(conn: sqlite3.Connection, *, entity_id: int, key: str = "",
                     value: str = "", source_url: str = "", source_title: str = "",
                     as_of: Optional[str] = None, verified: bool = False,

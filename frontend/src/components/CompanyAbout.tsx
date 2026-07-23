@@ -246,12 +246,24 @@ function FounderRow({ clientId, f, onChanged, onRemove }: { clientId: string; f:
       if (Object.keys(r.links).length || r.photo) patch.mutate(merged);
     },
   });
+  // тот же человек в других компаниях → предложить влить профиль (ссылки/роль/url/note)
+  const sameElsewhere = useQuery({
+    queryKey: ["founder-by-name", f.name, clientId],
+    queryFn: () => api.foundersByName(f.name, clientId),
+    enabled: !!f.name.trim(),
+  });
+  const importProfile = useMutation({
+    mutationFn: (fromId: number) => api.importFounderProfile(f.id, fromId),
+    onSuccess: onChanged,
+  });
+  const matches = sameElsewhere.data?.matches ?? [];
+
   const [imgBad, setImgBad] = useState(false);
   const links = f.links || {};
   const photo = links.photo;
   const chips = Object.entries(links).filter(([k]) => k.toLowerCase() !== "photo");
   const initials = f.name.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase();
-  const busy = find.isPending || patch.isPending;
+  const busy = find.isPending || patch.isPending || importProfile.isPending;
 
   return (
     <li className="flex items-start gap-2.5 group">
@@ -271,6 +283,18 @@ function FounderRow({ clientId, f, onChanged, onRemove }: { clientId: string; f:
             {busy ? "ищу профили…" : "найти профили"}
           </button>
         </div>
+        {matches.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-ink-mute" title="тот же человек уже есть в этих компаниях">👤 тот же в:</span>
+            {matches.map(m => (
+              <button key={m.id} onClick={() => importProfile.mutate(m.id)} disabled={busy}
+                title={`влить профиль (ссылки/роль) из «${m.client_name}»`}
+                className="text-[11px] text-indigo-600 hover:bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5 disabled:opacity-50">
+                {m.client_name} ↓
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <button onClick={onRemove}
         className="text-ink-mute hover:text-red-600 opacity-0 group-hover:opacity-100 text-xs shrink-0">удалить</button>

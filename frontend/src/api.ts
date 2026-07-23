@@ -6,7 +6,7 @@ import type {
   AboutProposal, AboutAutofillResult, FounderDiscoverResult, FounderProfilesResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
-  ReclassifyResult, UserOverview, SearchResult,
+  ReclassifyResult, UserOverview, SearchResult, FounderMatch,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport, Dossier,
@@ -502,6 +502,12 @@ export const api = {
     call(`/entities/${entityId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteEntity: (entityId: number): Promise<{ ok: boolean }> =>
     call(`/entities/${entityId}`, { method: "DELETE" }),
+  // тот же фаундер в других компаниях + перенос его профиля
+  foundersByName: (name: string, excludeClient?: string): Promise<{ matches: FounderMatch[] }> =>
+    call<{ matches: FounderMatch[] }>(`/founders/by-name?name=${encodeURIComponent(name)}` +
+      (excludeClient ? `&exclude_client=${encodeURIComponent(excludeClient)}` : "")),
+  importFounderProfile: (entityId: number, fromEntityId: number): Promise<Entity> =>
+    call<Entity>(`/entities/${entityId}/import-profile`, { method: "POST", body: JSON.stringify({ from_entity_id: fromEntityId }) }),
   addEntityFact: (entityId: number, body: Partial<EntityFact>): Promise<EntityFact> =>
     call<EntityFact>(`/entities/${entityId}/facts`, { method: "POST", body: JSON.stringify(body) }),
   deleteEntityFact: (factId: number): Promise<{ ok: boolean }> =>

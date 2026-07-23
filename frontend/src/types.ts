@@ -572,6 +572,18 @@ export interface Entity {
   facts: EntityFact[];
 }
 
+// тот же фаундер (по имени) в другой компании — для предложения влить профиль
+export interface FounderMatch {
+  id: number;
+  client_id: string;
+  client_name: string;
+  name: string;
+  role: string;
+  canonical_url: string;
+  links: Record<string, string>;
+  note: string;
+}
+
 export interface AuditFact {
   id: number;
   verdict: string;              // suspect | refuted

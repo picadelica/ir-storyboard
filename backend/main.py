@@ -1685,6 +1685,26 @@ def remove_entity(entity_id: int, conn=Depends(get_conn)):
     return {"ok": True}
 
 
+@app.get("/api/founders/by-name")
+def founders_by_name_ep(name: str, exclude_client: Optional[str] = None,
+                        conn=Depends(get_conn)):
+    """Тот же человек в других компаниях — для предложения влить профиль."""
+    return {"matches": matrix.founders_by_name(conn, name, exclude_client)}
+
+
+class ImportProfileIn(BaseModel):
+    from_entity_id: int
+
+
+@app.post("/api/entities/{entity_id}/import-profile", response_model=dict)
+def import_founder_profile_ep(entity_id: int, body: ImportProfileIn, conn=Depends(get_conn)):
+    """Влить профиль фаундера (ссылки/роль/url/заметка) из другой компании в этого."""
+    try:
+        return matrix.import_founder_profile(conn, entity_id, body.from_entity_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 @app.post("/api/entities/{entity_id}/facts", response_model=EntityFactOut)
 def add_entity_fact_ep(entity_id: int, f: EntityFactIn, conn=Depends(get_conn)):
     fid = matrix.add_entity_fact(conn, entity_id=entity_id, key=f.key, value=f.value,
