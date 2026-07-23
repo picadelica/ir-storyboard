@@ -45,10 +45,9 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const subsection = layers
     ?.flatMap(L => L.subsections.map(s => ({ ...s, layer: L })))
     .find(s => s.id === subsectionId);
-  // тег «про другую компанию» осмыслен только в слоях 1-2 (личная/проф. история фаундера);
-  // с 3-го слоя всё про базовую компанию.
-  const layerNo = subsection?.layer.id ?? 99;
-  const allowAboutCompany = layerNo <= 2;
+  // тег «про какую компанию» доступен на ВСЕХ карточках: если факт про другую компанию
+  // (не базовую) — это сильный сигнал классификатору отправить его в слои истории фаундера (L2).
+  const allowAboutCompany = true;
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftText, setDraftText] = useState("");

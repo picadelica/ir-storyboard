@@ -260,7 +260,7 @@ def active_facts_for_reclassify(conn: sqlite3.Connection,
     новой методологией (переосмысление раскладки)."""
     return list(conn.execute(
         """SELECT f.id AS id, f.text AS text, f.title AS title,
-                  c.subsection_id AS subsection_id
+                  c.subsection_id AS subsection_id, f.about_company AS about_company
              FROM facts f JOIN cells c ON c.id = f.cell_id
             WHERE c.client_id = ? AND f.state = 'active'
             ORDER BY f.id""",

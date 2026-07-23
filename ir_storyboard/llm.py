@@ -905,16 +905,32 @@ def generate_json(system: str, user: str, *, max_tokens: int = 4096,
 
 
 _RECLASSIFY_SYSTEM_TMPL = """\
-You are an IR narrative analyst. Re-classify each fact into the IR Storyboard matrix using
-the CURRENT methodology — the per-subsection guides below may have changed, so a fact may
-now belong in a different cell than before.
+You are a senior IR narrative analyst re-classifying facts into the IR Storyboard matrix
+under the CURRENT methodology. Reason by MEANING, not keyword overlap.
+
+BASE COMPANY (the client this matrix is about): «BASE_COMPANY_PLACEHOLDER».
+
+CRITICAL — whose company is the fact about? This is the #1 source of mistakes:
+- The founder-history layers L2.x describe the founder's PAST / OTHER ventures and projects
+  (companies BEFORE / OTHER THAN the base company): 2.1 = professional path & decisions in
+  previous products; 2.2 = relations with co-founders/teams in PREVIOUS companies; 2.3 =
+  investor relations in PREVIOUS companies.
+- The layers L3–L8 (community, clients, product, vision, PEST) are about the BASE company
+  «BASE_COMPANY_PLACEHOLDER» ONLY.
+- So: if a fact is about a DIFFERENT company/project (e.g. the founder's earlier startup),
+  it almost always belongs in L2.x — NOT in L3–L8, even if the wording looks product/team/
+  investor-ish. First decide WHICH company the fact is about, THEN pick the subsection.
+- Some facts carry an explicit tag «про компанию: X» (X ≠ base). Treat that as a STRONG
+  signal the fact is about another company → founder-history layers (L2.x).
 
 Subsections (id — name — parent layer), with methodology notes:
 SUBSECTION_LIST_PLACEHOLDER
 
 Rules:
-- Assign exactly one subsection id from the list that best fits the fact under these notes.
+- Assign exactly one subsection id from the list that best fits under these notes and the
+  whose-company reasoning above.
 - You only decide PLACEMENT — do not rewrite the fact, do not change its meaning.
+- rationale: one short phrase that MUST state which company the fact is about (base vs other).
 - Set sid to null only if truly nothing fits.
 
 Return ONLY valid JSON — no markdown fences, no explanation:
@@ -924,17 +940,33 @@ One object per input fact, same order."""
 
 
 def reclassify_facts(texts: List[str], descriptions: Optional[dict] = None,
-                     client_notes: Optional[dict] = None) -> List[FactCandidate]:
+                     client_notes: Optional[dict] = None,
+                     about_companies: Optional[List[str]] = None,
+                     base_company: str = "",
+                     model: Optional[str] = None) -> List[FactCandidate]:
     """Re-classify existing fact texts against the CURRENT methodology (global descriptions
     + per-client notes injected into the prompt). Реальный Claude при наличии ключа, иначе
-    keyword-стаб. Решает только раскладку по подсекциям (subsection_id), не трогает текст."""
+    keyword-стаб. Решает только раскладку по подсекциям (subsection_id), не трогает текст.
+
+    Усилено: базовая компания как контекст + тег «про компанию» на факте как сильный сигнал
+    (факт про ДРУГУЮ компанию → слои истории фаундера L2.x). Модель по умолчанию — сильнее
+    (LLM_RECLASSIFY_MODEL, дефолт sonnet), т.к. это семантическое решение, не по словам."""
     if not texts:
         return []
     all_sids = [sub.id for layer in LAYERS for sub in layer.subsections]
     subsection_list = _build_subsection_list(all_sids, descriptions, client_notes)
-    system = _RECLASSIFY_SYSTEM_TMPL.replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
-    numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
-    data = generate_json(system, numbered, max_tokens=min(8192, 90 * len(texts) + 512))
+    system = (_RECLASSIFY_SYSTEM_TMPL
+              .replace("SUBSECTION_LIST_PLACEHOLDER", subsection_list)
+              .replace("BASE_COMPANY_PLACEHOLDER", base_company or "the client company"))
+    ab = about_companies or []
+    lines = []
+    for i, t in enumerate(texts):
+        tag = (ab[i] if i < len(ab) else "") or ""
+        hint = f"  [про компанию: {tag} — НЕ базовую]" if tag.strip() else ""
+        lines.append(f"{i + 1}. {t}{hint}")
+    numbered = "\n".join(lines)
+    use_model = model or os.environ.get("LLM_RECLASSIFY_MODEL", "claude-sonnet-4-6")
+    data = generate_json(system, numbered, max_tokens=min(8192, 90 * len(texts) + 512), model=use_model)
     results = data.get("results") if isinstance(data, dict) else None
     if not results:  # нет ключа / провал парса → keyword-фолбэк (раскладка по стабу)
         return [stub_classify(t) for t in texts]

@@ -2932,7 +2932,13 @@ def _compute_methodology_moves(conn, client_id: str) -> dict:
     descriptions = matrix.get_subsection_descriptions(conn)
     client_notes = matrix.get_client_subsection_notes(conn, client_id)
     valid = set(descriptions.keys())
-    cands = reclassify_facts([r["text"] for r in rows], descriptions, client_notes)
+    crow = conn.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
+    base_company = crow["name"] if crow else client_id
+    cands = reclassify_facts(
+        [r["text"] for r in rows], descriptions, client_notes,
+        about_companies=[(r["about_company"] or "") for r in rows],
+        base_company=base_company,
+    )
     moves = []
     for r, cand in zip(rows, cands):
         to_sid = cand.suggested_subsection_id

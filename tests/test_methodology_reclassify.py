@@ -38,7 +38,7 @@ def test_compute_methodology_moves(conn, monkeypatch):
                         text="founder childhood in a small town", flag="green")
     matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="stays here", flag="green")
 
-    def fake_reclassify(texts, descriptions=None, client_notes=None):
+    def fake_reclassify(texts, descriptions=None, client_notes=None, **kwargs):
         return [FactCandidate(
             text=t,
             suggested_subsection_id="1.1" if "childhood" in t else "2.1",
