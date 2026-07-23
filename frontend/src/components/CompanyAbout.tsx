@@ -654,14 +654,17 @@ function MentionedCompaniesBlock({ clientId }: { clientId: string }) {
 }
 
 function MentionedCard({ m, onChanged, onRemove }: { m: MentionedCompany; onChanged: () => void; onRemove: () => void }) {
-  const [editLogo, setEditLogo] = useState(false);
-  const [url, setUrl] = useState(m.logo || "");
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(m.name);
+  const [note, setNote] = useState(m.note || "");
+  const [logo, setLogo] = useState(m.logo || "");
   const [imgBad, setImgBad] = useState(false);
   const save = useMutation({
-    mutationFn: (u: string) => api.patchMentionedCompany(m.id, { logo: u }),
-    onSuccess: () => { setEditLogo(false); setImgBad(false); onChanged(); },
+    mutationFn: () => api.patchMentionedCompany(m.id, { name: name.trim() || m.name, note: note.trim(), logo: logo.trim() }),
+    onSuccess: () => { setEditing(false); setImgBad(false); onChanged(); },
   });
   const initials = m.name.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "—";
+  const inp = "w-full text-xs border border-ink-line rounded px-2 py-1";
   return (
     <div className="relative flex items-center gap-2 border border-ink-line rounded-lg px-2 py-1.5 group">
       {m.logo && !imgBad
@@ -672,19 +675,29 @@ function MentionedCard({ m, onChanged, onRemove }: { m: MentionedCompany; onChan
         <div className="text-xs font-medium text-ink leading-tight">{m.name}</div>
         {m.note && <div className="text-[10px] text-ink-mute leading-tight truncate max-w-[13rem]">{m.note}</div>}
       </div>
-      <button onClick={() => { setUrl(m.logo || ""); setEditLogo(v => !v); }} title="логотип"
+      <button onClick={() => { setName(m.name); setNote(m.note || ""); setLogo(m.logo || ""); setEditing(v => !v); }} title="править"
         className="text-[10px] text-ink-mute/50 hover:text-ink ml-1">✎</button>
       <button onClick={onRemove} title="убрать"
         className="text-[13px] text-ink-mute/50 hover:text-red-600 opacity-0 group-hover:opacity-100">×</button>
-      {editLogo && (
-        <div className="absolute left-0 top-11 z-10 bg-white border border-ink-line rounded-lg shadow-lg p-2 w-56">
-          <div className="text-[10px] text-ink-mute mb-1">Ссылка на логотип (пусто = буквенный):</div>
-          <input autoFocus value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/logo.png"
-            className="w-full text-xs border border-ink-line rounded px-2 py-1" />
-          <div className="flex gap-2 mt-1.5 items-center">
-            <button onClick={() => save.mutate(url.trim())} className="text-[11px] px-2 py-0.5 rounded bg-ink text-white">ок</button>
-            {m.logo && <button onClick={() => save.mutate("")} className="text-[11px] text-ink-mute hover:text-red-600">убрать</button>}
-            <button onClick={() => setEditLogo(false)} className="text-[11px] text-ink-mute hover:text-ink ml-auto">отмена</button>
+      {editing && (
+        <div className="absolute left-0 top-11 z-10 bg-white border border-ink-line rounded-lg shadow-lg p-2.5 w-64 space-y-1.5">
+          <div>
+            <div className="text-[10px] text-ink-mute mb-0.5">Название (эксперты косячат — можно поправить):</div>
+            <input autoFocus value={name} onChange={e => setName(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") save.mutate(); }} className={inp} />
+          </div>
+          <div>
+            <div className="text-[10px] text-ink-mute mb-0.5">Контекст:</div>
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder="напр. прошлая компания фаундера" className={inp} />
+          </div>
+          <div>
+            <div className="text-[10px] text-ink-mute mb-0.5">Логотип (ссылка, пусто = буквенный):</div>
+            <input value={logo} onChange={e => setLogo(e.target.value)} placeholder="https://…/logo.png" className={inp} />
+          </div>
+          <div className="flex gap-2 items-center pt-0.5">
+            <button onClick={() => save.mutate()} disabled={save.isPending || !name.trim()}
+              className="text-[11px] px-2 py-0.5 rounded bg-ink text-white disabled:bg-slate-300">сохранить</button>
+            <button onClick={() => setEditing(false)} className="text-[11px] text-ink-mute hover:text-ink ml-auto">отмена</button>
           </div>
         </div>
       )}
