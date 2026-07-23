@@ -818,6 +818,19 @@ def upsert_client(c: ClientOut, request: Request, conn=Depends(get_conn)):
         tone_preset=c.tone_preset,
     )
     matrix.ensure_full_grid(conn, c.id)
+    # Новый клиент → сразу завести карточку компании и фаундера как СУЩНОСТИ (не текстом),
+    # чтобы About был не пустой и фаундер был виден/привязываем сразу после создания.
+    if prior is None and not conn.execute(
+            "SELECT 1 FROM entities WHERE client_id=? LIMIT 1", (c.id,)).fetchone():
+        matrix.add_entity(conn, client_id=c.id, kind="company", name=c.name, confirmed=True)
+        fn = (c.founder_name or "").strip()
+        if fn:
+            links = {}
+            fh = (c.founder_handle or "").strip().lstrip("@")
+            if fh:
+                links["telegram"] = f"https://t.me/{fh}"
+            matrix.add_entity(conn, client_id=c.id, kind="founder", name=fn,
+                              links=links or None, confirmed=True)
     # создатель = владелец данных (проставляем только если владельца ещё нет)
     tid = current_tid(request)
     if tid and (prior is None or prior["owner_tid"] is None):
