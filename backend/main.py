@@ -1129,7 +1129,7 @@ def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
     if f.source_url and not archive_url and f.channel in ("online_research", "online_interview", "archival"):
         enqueue_save(f.source_url, src_id, db.connect)
 
-    _log_activity(conn, fid, "created", user, client_id=client_id, detail=subsection_id)
+    # 'created' логируется центрально в matrix.add_fact (актор из created_by/tid)
     row = matrix.get_fact(conn, fid)
     return _row_to_fact(row)
 

@@ -87,20 +87,18 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "facts", "sort_order", "INTEGER")
     # факт характеризует спикера, но говорит про ДРУГУЮ компанию (Вайзер про GetTaxi) — тег
     _add_column_if_missing(conn, "facts", "about_company", "TEXT DEFAULT ''")
-    # раскладка по методологии (версионирование вместо жёсткого лока):
+    # раскладка по методологии (версионирование):
     #  assigned_methodology_version — к какой версии методологии карточка отнесена;
     #  assigned_by — 'system' (прогон) | 'expert' (ручной перенос) | '' (ещё не относили).
     # Reclassify не показывает факты, уже отнесённые к ТЕКУЩЕЙ версии; при смене версии — переоценка.
-    _add_column_if_missing(conn, "facts", "placement_locked", "INTEGER NOT NULL DEFAULT 0")  # vestigial
     _add_column_if_missing(conn, "facts", "reclassified_at", "TIMESTAMP")
     _add_column_if_missing(conn, "facts", "assigned_methodology_version", "INTEGER NOT NULL DEFAULT 0")
     _add_column_if_missing(conn, "facts", "assigned_by", "TEXT NOT NULL DEFAULT ''")
-    # NB: инициализация methodology_version и перенос старого placement_locked → см. после
-    # создания app_meta (ниже, рядом с _migrate_matrix_v2_once) — app_meta создаётся позже.
-    # СКВОЗНОЙ журнал действий над карточками — атрибутируем всё пользователю (кто что сделал).
-    # Питает активность в «Пользователях» + change-log для будущей админки + историю карточки.
+    # СКВОЗНОЙ журнал действий над карточками — ЕДИНСТВЕННАЯ точка правды по истории (карточка =
+    # состояние, журнал = события). Питает активность в «Пользователях» + change-log админки.
     # action: created|moved|edited|merged|speaker_renamed|title|speaker|must_have|about_company|
-    #         approved|deleted|restored. from_sid/to_sid — для moved; detail — краткое описание.
+    #         approved|rejected|restored|deleted. from_sid/to_sid — для moved; detail — кратко;
+    # methodology_version — версия методологии, действовавшая В МОМЕНТ действия.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS fact_activity (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,20 +110,23 @@ def init_schema(conn: sqlite3.Connection) -> None:
             detail      TEXT NOT NULL DEFAULT '',
             actor_tid   INTEGER,
             actor_name  TEXT NOT NULL DEFAULT '',
+            methodology_version INTEGER,
             at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    _add_column_if_missing(conn, "fact_activity", "methodology_version", "INTEGER")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_activity_actor ON fact_activity(actor_tid)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_activity_client ON fact_activity(client_id)")
-    # старая узкая таблица переездов (введена ранее в эту сессию) — свёрнута в fact_activity; оставляем vestigial
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS fact_placement_history (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            fact_id      INTEGER NOT NULL, client_id TEXT, from_sid TEXT, to_sid TEXT NOT NULL,
-            method TEXT NOT NULL, moved_by TEXT NOT NULL DEFAULT '', moved_by_tid INTEGER,
-            at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_activity_fact ON fact_activity(fact_id)")
+    # чистка переходных огрызков этой недели: узкая таблица переездов (свёрнута в fact_activity)
+    # и колонка placement_locked (лок заменён версионированием)
+    conn.execute("DROP TABLE IF EXISTS fact_placement_history")
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(facts)")]
+        if "placement_locked" in cols:
+            conn.execute("ALTER TABLE facts DROP COLUMN placement_locked")
+    except sqlite3.OperationalError:
+        pass  # старый SQLite без DROP COLUMN — колонка безвредна, доживёт
     # llm-5: ingest_audit table for LLM Report Ingest provenance
     conn.execute("""
         CREATE TABLE IF NOT EXISTS ingest_audit (
@@ -326,12 +327,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
     # версия методологии (см. facts.assigned_methodology_version) — app_meta уже создан
     conn.execute("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('methodology_version', '1')")
-    # one-time: старый placement_locked=1 (ручные переносы до перехода на версии) → assigned_by='expert'
-    if not conn.execute("SELECT 1 FROM app_meta WHERE key='lock_to_assigned_v1'").fetchone():
-        conn.execute("UPDATE facts SET assigned_by='expert', assigned_methodology_version=1 "
-                     "WHERE placement_locked=1 AND assigned_by=''")
-        conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('lock_to_assigned_v1', '1')")
-        conn.commit()
+    conn.commit()
     _migrate_red_to_grey_once(conn)
     _migrate_matrix_v2_once(conn)
 

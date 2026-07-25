@@ -59,7 +59,10 @@ def test_activity_log_counts_toward_user_overview(conn):
     assert matrix.user_activity_counts(conn).get(5) == 2
     ov = {u["tid"]: u for u in matrix.users_overview(conn)}
     assert ov[5]["actions"] == 2
-    # журнал отдаёт действия; перенос виден и как placement-history
-    assert len(matrix.fact_activity_log(conn, "co")) == 2
+    # журнал: created (центрально из add_fact, без актора) + moved + merged = 3;
+    # у каждой записи зафиксирована версия методологии на момент действия
+    log = matrix.fact_activity_log(conn, "co")
+    assert len(log) == 3 and {e["action"] for e in log} == {"created", "moved", "merged"}
+    assert all(e["methodology_version"] == 1 for e in log)
     ph = matrix.fact_placement_history(conn, "co")
     assert len(ph) == 1 and ph[0]["from_sid"] == "2.1" and ph[0]["to_sid"] == "3.1"

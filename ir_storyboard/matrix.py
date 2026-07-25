@@ -312,15 +312,16 @@ def record_activity(conn: sqlite3.Connection, fact_id: int, client_id: Optional[
                     action: str, *, actor_name: str = "", actor_tid: Optional[int] = None,
                     from_sid: Optional[str] = None, to_sid: Optional[str] = None,
                     detail: str = "") -> None:
-    """Записать действие над карточкой в сквозной журнал (кто/что/когда). Не коммитит —
-    коммит на стороне вызывающей мутации (или явно). Тихо игнорирует, если таблицы нет."""
+    """Записать действие над карточкой в сквозной журнал (кто/что/когда + версия методологии,
+    действовавшая в момент действия). Не коммитит — коммит на стороне вызывающей мутации.
+    Тихо игнорирует, если таблицы нет (старые снапшоты БД)."""
     try:
         conn.execute(
             """INSERT INTO fact_activity (fact_id, client_id, action, from_sid, to_sid, detail,
-                                          actor_tid, actor_name)
-                VALUES (?,?,?,?,?,?,?,?)""",
+                                          actor_tid, actor_name, methodology_version)
+                VALUES (?,?,?,?,?,?,?,?,?)""",
             (fact_id, client_id, action, from_sid, to_sid, detail or "",
-             actor_tid, actor_name or ""))
+             actor_tid, actor_name or "", get_methodology_version(conn)))
     except sqlite3.OperationalError:
         pass
 
@@ -328,7 +329,8 @@ def record_activity(conn: sqlite3.Connection, fact_id: int, client_id: Optional[
 def fact_activity_log(conn: sqlite3.Connection, client_id: str, limit: int = 500) -> List[dict]:
     """Сквозной журнал действий над карточками клиента (change-log для админки)."""
     return [dict(r) for r in conn.execute(
-        """SELECT id, fact_id, action, from_sid, to_sid, detail, actor_tid, actor_name, at
+        """SELECT id, fact_id, action, from_sid, to_sid, detail, actor_tid, actor_name,
+                  methodology_version, at
             FROM fact_activity WHERE client_id = ? ORDER BY at DESC, id DESC LIMIT ?""",
         (client_id, int(limit)))]
 
@@ -481,8 +483,12 @@ def add_fact(conn: sqlite3.Connection, *, client_id: str, subsection_id: str,
          evidence_snippet, rationale, created_by, 1 if must_have else 0,
          "client" if must_have else "", created_by_tid, state),
     )
-    conn.commit()
     fact_id = cur.lastrowid
+    # сквозной журнал: создание логируем ЦЕНТРАЛЬНО (покрывает и ручной ввод, и все
+    # ingest-пути — LLM report / YouTube / audio / от клиента). Актор — из created_by.
+    record_activity(conn, fact_id, client_id, "created", actor_name=created_by or "",
+                    actor_tid=created_by_tid, to_sid=subsection_id, detail=state)
+    conn.commit()
 
     # авто-закрытие work-item только для реально попавшего в матрицу факта (active),
     # не для черновика (review) — черновик работу ещё не закрывает.
