@@ -87,6 +87,24 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "facts", "sort_order", "INTEGER")
     # факт характеризует спикера, но говорит про ДРУГУЮ компанию (Вайзер про GetTaxi) — тег
     _add_column_if_missing(conn, "facts", "about_company", "TEXT DEFAULT ''")
+    # раскладка по методологии: placement_locked=1 → ручной перенос экспертом, авто-реклассификация
+    # его НЕ трогает; reclassified_at → когда факт в последний раз размещён прогоном методологии.
+    _add_column_if_missing(conn, "facts", "placement_locked", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "facts", "reclassified_at", "TIMESTAMP")
+    # история переездов раскладки (для будущего админ-интерфейса; в UI пока не показываем)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fact_placement_history (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            fact_id      INTEGER NOT NULL,
+            client_id    TEXT,
+            from_sid     TEXT,
+            to_sid       TEXT NOT NULL,
+            method       TEXT NOT NULL,          -- 'manual' | 'reclassify'
+            moved_by     TEXT NOT NULL DEFAULT '',
+            moved_by_tid INTEGER,
+            at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     # llm-5: ingest_audit table for LLM Report Ingest provenance
     conn.execute("""
         CREATE TABLE IF NOT EXISTS ingest_audit (

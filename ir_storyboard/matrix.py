@@ -263,27 +263,55 @@ def active_facts_for_reclassify(conn: sqlite3.Connection,
                   c.subsection_id AS subsection_id, f.about_company AS about_company
              FROM facts f JOIN cells c ON c.id = f.cell_id
             WHERE c.client_id = ? AND f.state = 'active'
+              AND COALESCE(f.placement_locked, 0) = 0
             ORDER BY f.id""",
         (client_id,),
     ))
 
 
 def move_fact_to_subsection(conn: sqlite3.Connection, fact_id: int,
-                            client_id: str, subsection_id: str) -> bool:
+                            client_id: str, subsection_id: str, *,
+                            method: str = "manual", moved_by: str = "",
+                            moved_by_tid: Optional[int] = None) -> bool:
     """Переезд факта в другую ячейку (той же компании): cell_id → новая (client, subsection).
     Текст факта не трогается (инвариант неизменности). Возвращает False, если факт не
-    принадлежит компании (защита от кросс-клиентского переезда)."""
+    принадлежит компании (защита от кросс-клиентского переезда).
+
+    method='manual' (ручной перенос экспертом) → ставит placement_locked=1: последующие прогоны
+    методологии этот факт НЕ трогают (экспертное решение выигрывает). method='reclassify'
+    (применение прогона) → ставит reclassified_at. В обоих случаях пишем запись в
+    fact_placement_history (для будущего админ-интерфейса)."""
     row = conn.execute(
-        "SELECT c.client_id AS cid FROM facts f JOIN cells c ON c.id = f.cell_id "
-        "WHERE f.id = ?",
+        "SELECT c.client_id AS cid, c.subsection_id AS from_sid "
+        "FROM facts f JOIN cells c ON c.id = f.cell_id WHERE f.id = ?",
         (fact_id,),
     ).fetchone()
     if not row or row["cid"] != client_id:
         return False
+    from_sid = row["from_sid"]
     cell_id = get_or_create_cell(conn, client_id, subsection_id)
-    conn.execute("UPDATE facts SET cell_id = ? WHERE id = ?", (cell_id, fact_id))
+    if method == "manual":
+        conn.execute("UPDATE facts SET cell_id = ?, placement_locked = 1 WHERE id = ?",
+                     (cell_id, fact_id))
+    else:  # reclassify
+        conn.execute("UPDATE facts SET cell_id = ?, reclassified_at = CURRENT_TIMESTAMP WHERE id = ?",
+                     (cell_id, fact_id))
+    conn.execute(
+        """INSERT INTO fact_placement_history (fact_id, client_id, from_sid, to_sid, method,
+                                               moved_by, moved_by_tid)
+            VALUES (?,?,?,?,?,?,?)""",
+        (fact_id, client_id, from_sid, subsection_id, method, moved_by or "", moved_by_tid))
     conn.commit()
     return True
+
+
+def fact_placement_history(conn: sqlite3.Connection, client_id: str,
+                           limit: int = 500) -> List[dict]:
+    """История переездов раскладки клиента (для будущего админ-интерфейса)."""
+    return [dict(r) for r in conn.execute(
+        """SELECT id, fact_id, from_sid, to_sid, method, moved_by, moved_by_tid, at
+            FROM fact_placement_history WHERE client_id = ? ORDER BY at DESC, id DESC LIMIT ?""",
+        (client_id, int(limit)))]
 
 
 # ---------- sources ----------

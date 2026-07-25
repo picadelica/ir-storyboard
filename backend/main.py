@@ -1137,8 +1137,10 @@ class FactMoveIn(BaseModel):
 
 
 @app.post("/api/facts/{fact_id}/move", response_model=FactOut)
-def move_fact_ep(fact_id: int, body: FactMoveIn, conn=Depends(get_conn)):
-    """Перенести факт в другой раздел (подсекцию) той же компании. Текст не трогается."""
+def move_fact_ep(fact_id: int, body: FactMoveIn, conn=Depends(get_conn),
+                 user: Optional[dict] = Depends(current_user)):
+    """Перенести факт в другой раздел (подсекцию) той же компании. Текст не трогается.
+    Ручной перенос ЛОЧИТ факт (placement_locked) — авто-реклассификация его больше не трогает."""
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
     cid = matrix.fact_client_id(conn, fact_id)
@@ -1146,8 +1148,21 @@ def move_fact_ep(fact_id: int, body: FactMoveIn, conn=Depends(get_conn)):
         raise HTTPException(404, "fact has no client")
     if body.to_sid not in set(matrix.get_subsection_descriptions(conn).keys()):
         raise HTTPException(422, f"unknown subsection: {body.to_sid}")
-    matrix.move_fact_to_subsection(conn, fact_id, cid, body.to_sid)
+    matrix.move_fact_to_subsection(conn, fact_id, cid, body.to_sid, method="manual",
+                                   moved_by=(user.get("name") if user else "") or "",
+                                   moved_by_tid=(user.get("tid") if user else None))
     return _row_to_fact(matrix.get_fact(conn, fact_id))
+
+
+@app.get("/api/clients/{client_id}/placement-history")
+def placement_history_ep(client_id: str, conn=Depends(get_conn),
+                         user: Optional[dict] = Depends(current_user)):
+    """История переездов раскладки (ручные/реклассификация) — для будущего админ-интерфейса.
+    Пока не в UI. Доступ: владелец компании или админ."""
+    _check_client(client_id, conn)
+    if not _is_owner_or_admin(conn, client_id, user):
+        raise HTTPException(403, "История доступна владельцу компании или админу")
+    return {"history": matrix.fact_placement_history(conn, client_id)}
 
 
 @app.delete("/api/facts/{fact_id}")
@@ -2985,10 +3000,13 @@ def apply_methodology_reclassify(client_id: str, body: ReclassifyApplyIn,
     if not _is_owner_or_admin(conn, client_id, user):
         raise HTTPException(403, "Применяет владелец компании или админ")
     valid = set(matrix.get_subsection_descriptions(conn).keys())
+    by = (user.get("name") if user else "") or ""
+    tid = user.get("tid") if user else None
     applied = 0
     for m in body.moves:
         if m.to_sid in valid and matrix.move_fact_to_subsection(
-                conn, m.fact_id, client_id, m.to_sid):
+                conn, m.fact_id, client_id, m.to_sid, method="reclassify",
+                moved_by=by, moved_by_tid=tid):
             applied += 1
     return {"applied": applied, "requested": len(body.moves)}
 
