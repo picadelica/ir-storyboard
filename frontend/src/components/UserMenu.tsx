@@ -44,6 +44,31 @@ export default function UserMenu({ clientId, canSeeUsers }: { clientId?: string;
       {open && (
         <div className="absolute right-0 mt-2 w-52 bg-white border border-ink-line rounded-xl py-1 z-50 shadow-sm">
           <div className="px-3 py-2 text-[13px] text-ink truncate border-b border-ink-line">{name}</div>
+          {me.data?.is_real_admin && (
+            /* режим работы супер-админа: админ ↔ обычный эксперт (черновики, без админ-прав).
+               Хранится в cookie ir_act_as — бэкенд уважает режим в гейтах. */
+            <div className="px-3 py-2 border-b border-ink-line flex items-center gap-2">
+              <span className="text-[11px] text-ink-mute">Режим:</span>
+              <div className="flex items-center rounded-lg border border-ink-line overflow-hidden text-[11px]">
+                {([["admin", "Админ"], ["expert", "Эксперт"]] as const).map(([mode, label]) => {
+                  const active = mode === "expert" ? !me.data?.is_admin : !!me.data?.is_admin;
+                  return (
+                    <button key={mode}
+                      onClick={() => {
+                        document.cookie = mode === "expert"
+                          ? "ir_act_as=expert; path=/; max-age=31536000"
+                          : "ir_act_as=; path=/; max-age=0";
+                        qc.invalidateQueries();   // роль поменялась → перечитать всё
+                      }}
+                      title={mode === "expert" ? "работать как обычный эксперт (правки — черновиками, без админ-прав)" : "полные права супер-админа"}
+                      className={`px-2 py-1 transition ${active ? "bg-ink text-white" : "text-ink-mute hover:text-ink"}`}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {me.data?.is_admin && clientId ? (
             <button
               onClick={() => { setOpen(false); nav(`/clients/${clientId}/admin`); }}

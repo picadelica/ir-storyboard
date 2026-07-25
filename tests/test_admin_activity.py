@@ -63,3 +63,22 @@ def test_global_log_and_filters(ctx):
     # фильтр по действию
     created = client.get("/api/admin/activity", params={"action": "created"}).json()["activity"]
     assert len(created) == 2
+
+
+def test_act_as_expert_drops_admin_privilege(tmp_path, monkeypatch):
+    """Режим «работаю как эксперт»: админ-привилегия отключается (правки → черновик),
+    владение своими компаниями сохраняется."""
+    from backend import auth as bauth
+    from backend.main import _is_owner_or_admin
+    monkeypatch.setattr(bauth, "AUTHGW_URL", "http://gw")     # auth.enabled() → True
+    monkeypatch.setattr(bauth, "SESSION_SECRET", "s")
+    monkeypatch.setenv("IR_ADMIN_TIDS", "42")
+    c = db.connect(tmp_path / "role.db"); db.init_schema(c); matrix.seed_layers(c)
+    matrix.upsert_client(c, "own", "Own"); matrix.upsert_client(c, "other", "Other")
+    matrix.set_client_owner(c, "own", 42)
+
+    admin = {"tid": 42, "name": "Админ"}
+    expert = {"tid": 42, "name": "Админ", "act_as_expert": True}
+    assert _is_owner_or_admin(c, "other", admin) is True       # админ — везде владелец
+    assert _is_owner_or_admin(c, "other", expert) is False     # эксперт-режим → черновик
+    assert _is_owner_or_admin(c, "own", expert) is True        # своя компания — владелец остаётся

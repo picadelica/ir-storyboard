@@ -90,9 +90,13 @@ def auth_logout(response: Response):
 
 @app.get("/api/auth/me")
 def auth_me(request: Request):
+    # is_admin — ЭФФЕКТИВНАЯ роль (учитывает режим «работаю как эксперт»);
+    # is_real_admin — настоящая (для показа переключателя режима).
+    expert_mode = request.cookies.get("ir_act_as") == "expert"
     # локально/без auth — «dev» с правами админа, чтобы разработка не упиралась в роли
     if not auth.enabled():
-        return {"name": "dev", "tid": 0, "auth": False, "is_admin": True}
+        return {"name": "dev", "tid": 0, "auth": False,
+                "is_admin": not expert_mode, "is_real_admin": True}
     data = auth.verify_session(request.cookies.get(auth.COOKIE, ""))
     if not data:
         raise HTTPException(401, "not authenticated")
@@ -104,7 +108,9 @@ def auth_me(request: Request):
             matrix.upsert_user(conn, tid, data.get("name", ""))
         finally:
             conn.close()
-    return {**data, "auth": True, "is_admin": auth.is_admin(tid)}
+    real = auth.is_admin(tid)
+    return {**data, "auth": True,
+            "is_admin": real and not expert_mode, "is_real_admin": real}
 
 
 # ---------- DB dependency ----------
@@ -489,11 +495,19 @@ class PortfolioRow(BaseModel):
     mine: bool = False
 
 
+ACT_AS_COOKIE = "ir_act_as"   # ='expert' → супер-админ работает как обычный эксперт
+
+
 def current_user(request: Request) -> Optional[dict]:
-    """Session {tid, name} of the logged-in user, or None when auth is disabled."""
+    """Session {tid, name} of the logged-in user, or None when auth is disabled.
+    Куки ir_act_as=expert добавляет act_as_expert=True — админ-привилегия отключена
+    (черновики, гейты — как у обычного эксперта)."""
     if not auth.enabled():
         return None
-    return auth.verify_session(request.cookies.get(auth.COOKIE, ""))
+    u = auth.verify_session(request.cookies.get(auth.COOKIE, ""))
+    if u is not None and request.cookies.get(ACT_AS_COOKIE) == "expert":
+        u["act_as_expert"] = True
+    return u
 
 
 def current_tid(request: Request) -> Optional[int]:
@@ -504,13 +518,16 @@ def current_tid(request: Request) -> Optional[int]:
 
 def _is_owner_or_admin(conn, client_id: str, user: Optional[dict]) -> bool:
     """Правки идут «как владелец» (сразу active) при: локальном dev (auth off),
-    супер-админе или владельце данных этой компании. Иначе контрибьютор → черновик."""
+    супер-админе или владельце данных этой компании. Иначе контрибьютор → черновик.
+    Режим «работаю как эксперт» (act_as_expert) отключает админ-привилегию —
+    владение своими компаниями при этом сохраняется (это настоящая роль)."""
     if not auth.enabled():
         return True
     if not user:
         return False
     tid = user.get("tid")
-    return bool(auth.is_admin(tid) or matrix.client_owner_tid(conn, client_id) == tid)
+    admin_ok = auth.is_admin(tid) and not user.get("act_as_expert")
+    return bool(admin_ok or matrix.client_owner_tid(conn, client_id) == tid)
 
 
 # NB: must precede /api/clients/{client_id} so "portfolio" isn't read as an id.
@@ -552,7 +569,7 @@ def users_overview_ep(conn=Depends(get_conn),
         tid = (user or {}).get("tid")
         if tid is None:
             raise HTTPException(401, "not authenticated")
-        if not auth.is_admin(tid):
+        if not auth.is_admin(tid) or (user or {}).get("act_as_expert"):
             owned = [r["id"] for r in conn.execute(
                 "SELECT id FROM clients WHERE owner_tid = ?", (tid,))]
             if not owned:
@@ -573,7 +590,8 @@ def _require_owner_or_admin(client_id: str, request: Request, conn) -> sqlite3.R
         tid = current_tid(request)
         if tid is None:
             raise HTTPException(401, "not authenticated")
-        if not (auth.is_admin(tid) or row["owner_tid"] == tid):
+        admin_ok = auth.is_admin(tid) and request.cookies.get(ACT_AS_COOKIE) != "expert"
+        if not (admin_ok or row["owner_tid"] == tid):
             raise HTTPException(403, "требуются права владельца данных или админа")
     return row
 
@@ -1201,7 +1219,7 @@ def admin_activity_ep(client_id: Optional[str] = None, actor_tid: Optional[int] 
         tid = (user or {}).get("tid")
         if tid is None:
             raise HTTPException(401, "not authenticated")
-        if not auth.is_admin(tid):
+        if not auth.is_admin(tid) or (user or {}).get("act_as_expert"):
             raise HTTPException(403, "только для супер-админа")
     return {"activity": matrix.activity_log_global(
         conn, client_id=client_id, actor_tid=actor_tid, action=action,

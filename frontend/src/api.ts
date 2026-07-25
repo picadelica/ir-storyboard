@@ -65,7 +65,7 @@ export const api = {
   layers: () => call<Layer[]>("/layers"),
   channels: () => call<string[]>("/channels"),
 
-  authMe: () => call<{ name: string; tid: number; auth: boolean; is_admin?: boolean }>("/auth/me"),
+  authMe: () => call<{ name: string; tid: number; auth: boolean; is_admin?: boolean; is_real_admin?: boolean }>("/auth/me"),
 
   // «Пользователи системы» — кто есть кто (роль + активность). Админ/владельцы.
   usersOverview: (): Promise<UserOverview[]> => call<UserOverview[]>("/users/overview"),
