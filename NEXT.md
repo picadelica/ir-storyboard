@@ -9,6 +9,19 @@
 **Прод:** 216.57.108.107 (Caddy :80, Basic Auth; `/` health открыт), `deploy_ir_storyboard` зелёный.
 Тесты: `pytest -m "not network"` → **323 passed** (сетевой `test_youtube_e2e` deselected).
 
+## Сквозной журнал действий над карточками — ЗАДЕПЛОЕНО НА ПРОД (2026-07-25, коммит e027192)
+
+Системная дыра: работа аналитиков (перенос/склейка/переименование/правка/теги) не
+атрибутировалась → «Пользователи» показывали нули у всех.
+- Таблица `fact_activity` (fact_id, client_id, action, from/to_sid, detail, actor_tid/name, at);
+  `matrix.record_activity` навешан на ВСЕ мутирующие эндпоинты (created/moved/edited/merged/
+  speaker_renamed/title/speaker/must_have/about_company/approved/rejected/restored/deleted) — автор
+  из сессии. Placement-история свёрнута сюда (reader читает action='moved').
+- `users_overview.actions` (всего действий); UsersView: «N действий над карточками». Change-log:
+  `GET /clients/{id}/activity` (владелец/админ) — для будущей админки.
+- ⚠️ Задним числом прошлую неделю НЕ восстановить (следов не было) — атрибуция копится с выката.
+  Сейчас у всех 0, дальше растёт.
+
 ## Версионирование методологии + гард L2 — ЗАДЕПЛОЕНО НА ПРОД (2026-07-25, коммит 883b85a)
 
 Лок оказался чересчур → заменён версионированием (надёжнее, при смене методологии всё переоценивается):
