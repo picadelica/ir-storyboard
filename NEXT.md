@@ -9,6 +9,17 @@
 **Прод:** 216.57.108.107 (Caddy :80, Basic Auth; `/` health открыт), `deploy_ir_storyboard` зелёный.
 Тесты: `pytest -m "not network"` → **323 passed** (сетевой `test_youtube_e2e` deselected).
 
+## Чистка + полная история для админки — ЗАДЕПЛОЕНО НА ПРОД (2026-07-25, коммит 9975668)
+
+Итоговая модель хранения: **карточка (`facts`) = текущее состояние** (about_company,
+assigned_methodology_version+assigned_by, авторы, must_have…), **`fact_activity` = ВСЕ события**
+(единственная точка правды по истории). Снесены огрызки: таблица fact_placement_history и колонка
+placement_locked. Новое: `fact_activity.methodology_version` — версия методологии В МОМЕНТ действия;
+'created' логируется центрально в `matrix.add_fact` (покрывает все ingest-пути, актор из created_by,
+detail=active/review). Админка сможет восстановить полную историю карточки: кто/когда/что
+(created/moved/edited/merged/speaker_renamed/approved/…) + при какой версии методологии, включая
+системные действия (reclassify-переносы detail='reclassify', ingest-создания без актора).
+
 ## Сквозной журнал действий над карточками — ЗАДЕПЛОЕНО НА ПРОД (2026-07-25, коммит e027192)
 
 Системная дыра: работа аналитиков (перенос/склейка/переименование/правка/теги) не
