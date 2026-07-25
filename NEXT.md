@@ -9,17 +9,20 @@
 **Прод:** 216.57.108.107 (Caddy :80, Basic Auth; `/` health открыт), `deploy_ir_storyboard` зелёный.
 Тесты: `pytest -m "not network"` → **323 passed** (сетевой `test_youtube_e2e` deselected).
 
-## Лок раскладки по методологии — ЗАДЕПЛОЕНО НА ПРОД (2026-07-25, коммит 443a494)
+## Версионирование методологии + гард L2 — ЗАДЕПЛОЕНО НА ПРОД (2026-07-25, коммит 883b85a)
 
-- **Ручной перенос карточки экспертом ЛОЧИТ её** (`facts.placement_locked=1`): повторные прогоны
-  «Применить новую методологию» такие факты НЕ трогают (экспертное решение выигрывает).
-  `active_facts_for_reclassify` их исключает.
-- **Применение реклассификации** ставит `facts.reclassified_at` (метка «размещён прогоном»), НЕ лочит
-  (при следующей смене методологии можно двигать).
-- **История переездов** — таблица `fact_placement_history` (fact_id, from/to_sid, method
-  ['manual'|'reclassify'], moved_by[_tid], at). В UI НЕ показываем.
-- **Для будущего АДМИН-ИНТЕРФЕЙСА** (ещё не делали): `GET /clients/{id}/placement-history`
-  (владелец/админ) уже отдаёт эту историю — там и покажем change-log раскладки.
+Лок оказался чересчур → заменён версионированием (надёжнее, при смене методологии всё переоценивается):
+- `app_meta.methodology_version` (bump при правке описаний, `PATCH /methodology/{sid}`).
+- `facts.assigned_methodology_version` + `assigned_by` ('system'|'expert'). Перенос ставит текущую
+  версию + автора (ручной→expert, reclassify→system). `placement_locked` — vestigial (старые ручные
+  переносы мигрированы в assigned_by='expert').
+- **reclassify не показывает** факты, уже отнесённые к ТЕКУЩЕЙ версии; bump версии → все переоцениваются.
+- **ГАРД:** `matrix.clamp_about_company_to_l2` — факт с тегом `about_company` НЕ опускается ниже L2
+  (в L3-8 только текущая компания). Применён в reclassify-превью. Проверено: факт в 4.2 с тегом → 2.2.
+  ХВОСТ (по желанию): тот же «чья компания» гард в ingest-классификаторе (при первичном разборе
+  about_company ещё не задан — нужен LLM-детект) и в слияниях (сейчас merge сохраняет cell keep'а).
+- **История переездов** — `fact_placement_history` (method manual|reclassify, from/to, автор, время);
+  `GET /clients/{id}/placement-history` (владелец/админ) — **для будущего АДМИН-ИНТЕРФЕЙСА**. В UI не показываем.
 Локальный dev: backend `uvicorn backend.main:app --port 8080` (DB `data/matrix.db`, gitignored,
 это НЕ прод — прод-копия в `data/afisha.db` у другого проекта); фронт — preview `ir-storyboard-dev`
 на :5180 (прокси /api→:8080). Прод-БД читать по ssh: `ssh root@216.57.108.107` →
