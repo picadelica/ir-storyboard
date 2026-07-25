@@ -4,10 +4,22 @@
 
 ---
 
-**Последнее обновление:** 2026-07-22
+**Последнее обновление:** 2026-07-25
 **Ветка:** `feat/v2` (всё запушено, дерево чистое)
 **Прод:** 216.57.108.107 (Caddy :80, Basic Auth; `/` health открыт), `deploy_ir_storyboard` зелёный.
-Тесты: `pytest -m "not network"` → **314 passed** (сетевой `test_youtube_e2e` deselected).
+Тесты: `pytest -m "not network"` → **323 passed** (сетевой `test_youtube_e2e` deselected).
+
+## Лок раскладки по методологии — ЗАДЕПЛОЕНО НА ПРОД (2026-07-25, коммит 443a494)
+
+- **Ручной перенос карточки экспертом ЛОЧИТ её** (`facts.placement_locked=1`): повторные прогоны
+  «Применить новую методологию» такие факты НЕ трогают (экспертное решение выигрывает).
+  `active_facts_for_reclassify` их исключает.
+- **Применение реклассификации** ставит `facts.reclassified_at` (метка «размещён прогоном»), НЕ лочит
+  (при следующей смене методологии можно двигать).
+- **История переездов** — таблица `fact_placement_history` (fact_id, from/to_sid, method
+  ['manual'|'reclassify'], moved_by[_tid], at). В UI НЕ показываем.
+- **Для будущего АДМИН-ИНТЕРФЕЙСА** (ещё не делали): `GET /clients/{id}/placement-history`
+  (владелец/админ) уже отдаёт эту историю — там и покажем change-log раскладки.
 Локальный dev: backend `uvicorn backend.main:app --port 8080` (DB `data/matrix.db`, gitignored,
 это НЕ прод — прод-копия в `data/afisha.db` у другого проекта); фронт — preview `ir-storyboard-dev`
 на :5180 (прокси /api→:8080). Прод-БД читать по ssh: `ssh root@216.57.108.107` →
