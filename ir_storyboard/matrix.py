@@ -256,16 +256,18 @@ def ensure_full_grid(conn: sqlite3.Connection, client_id: str) -> None:
 
 def active_facts_for_reclassify(conn: sqlite3.Connection,
                                 client_id: str) -> List[sqlite3.Row]:
-    """Active facts (in the matrix) with their current subsection — вход переклассификации
-    новой методологией (переосмысление раскладки)."""
+    """Active facts (in the matrix) с текущей подсекцией — вход переклассификации новой
+    методологией. Исключаем факты, уже отнесённые к ТЕКУЩЕЙ версии методологии (не показываем
+    повторно; при смене версии все переоцениваются заново)."""
+    ver = get_methodology_version(conn)
     return list(conn.execute(
         """SELECT f.id AS id, f.text AS text, f.title AS title,
                   c.subsection_id AS subsection_id, f.about_company AS about_company
              FROM facts f JOIN cells c ON c.id = f.cell_id
             WHERE c.client_id = ? AND f.state = 'active'
-              AND COALESCE(f.placement_locked, 0) = 0
+              AND COALESCE(f.assigned_methodology_version, 0) <> ?
             ORDER BY f.id""",
-        (client_id,),
+        (client_id, ver),
     ))
 
 
@@ -290,12 +292,14 @@ def move_fact_to_subsection(conn: sqlite3.Connection, fact_id: int,
         return False
     from_sid = row["from_sid"]
     cell_id = get_or_create_cell(conn, client_id, subsection_id)
-    if method == "manual":
-        conn.execute("UPDATE facts SET cell_id = ?, placement_locked = 1 WHERE id = ?",
-                     (cell_id, fact_id))
-    else:  # reclassify
-        conn.execute("UPDATE facts SET cell_id = ?, reclassified_at = CURRENT_TIMESTAMP WHERE id = ?",
-                     (cell_id, fact_id))
+    ver = get_methodology_version(conn)
+    assigned_by = "expert" if method == "manual" else "system"
+    # отнесли карточку к текущей версии методологии + кем; reclassify для reclassify-переноса.
+    conn.execute(
+        "UPDATE facts SET cell_id = ?, assigned_methodology_version = ?, assigned_by = ?, "
+        "reclassified_at = CASE WHEN ?='system' THEN CURRENT_TIMESTAMP ELSE reclassified_at END "
+        "WHERE id = ?",
+        (cell_id, ver, assigned_by, assigned_by, fact_id))
     conn.execute(
         """INSERT INTO fact_placement_history (fact_id, client_id, from_sid, to_sid, method,
                                                moved_by, moved_by_tid)
@@ -303,6 +307,41 @@ def move_fact_to_subsection(conn: sqlite3.Connection, fact_id: int,
         (fact_id, client_id, from_sid, subsection_id, method, moved_by or "", moved_by_tid))
     conn.commit()
     return True
+
+
+def get_methodology_version(conn: sqlite3.Connection) -> int:
+    """Текущая версия методологии (bump при правке описаний). Дефолт 1."""
+    r = conn.execute("SELECT value FROM app_meta WHERE key='methodology_version'").fetchone()
+    try:
+        return int(r["value"]) if r else 1
+    except (TypeError, ValueError):
+        return 1
+
+
+def bump_methodology_version(conn: sqlite3.Connection) -> int:
+    """Инкремент версии методологии (правка описаний → факты «устаревают» → reclassify снова
+    их предложит). Возвращает новую версию."""
+    ver = get_methodology_version(conn) + 1
+    conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('methodology_version', ?)",
+                 (str(ver),))
+    conn.commit()
+    return ver
+
+
+# слои 1-2 = история фаундера (личная/профессиональная); L3-8 = текущая компания.
+_L12_SUBSECTIONS = {"1.1", "1.2", "1.3", "2.1", "2.2", "2.3"}
+
+
+def clamp_about_company_to_l2(about_company: str, proposed_sid: Optional[str],
+                              current_sid: str) -> Optional[str]:
+    """Жёсткий гард: факт про ДРУГУЮ компанию (about_company задан) не должен опускаться ниже
+    L2 (в L3-8 — только текущая компания). Если предложено L3+ — оставляем в L1-2: текущую
+    ячейку, если она уже L1-2, иначе 2.1 (профессиональный путь)."""
+    if not (about_company or "").strip():
+        return proposed_sid
+    if proposed_sid and proposed_sid in _L12_SUBSECTIONS:
+        return proposed_sid
+    return current_sid if current_sid in _L12_SUBSECTIONS else "2.1"
 
 
 def fact_placement_history(conn: sqlite3.Connection, client_id: str,

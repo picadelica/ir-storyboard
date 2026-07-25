@@ -732,6 +732,7 @@ def update_methodology(subsection_id: str, body: MethodologyUpdateIn,
         matrix.update_subsection_description(conn, subsection_id, body.description)
     except ValueError as e:
         raise HTTPException(404, str(e))
+    matrix.bump_methodology_version(conn)   # методология изменилась → факты переоценятся при reclassify
     row = conn.execute(
         """SELECT s.id AS subsection_id, s.name AS subsection_name,
                   s.sort_order, COALESCE(s.description, '') AS description,
@@ -2957,6 +2958,8 @@ def _compute_methodology_moves(conn, client_id: str) -> dict:
     moves = []
     for r, cand in zip(rows, cands):
         to_sid = cand.suggested_subsection_id
+        # жёсткий гард: факт про другую компанию не опускаем ниже L2 (даже если LLM промахнулся)
+        to_sid = matrix.clamp_about_company_to_l2(r["about_company"] or "", to_sid, r["subsection_id"])
         if to_sid and to_sid in valid and to_sid != r["subsection_id"]:
             moves.append({
                 "fact_id": r["id"],

@@ -87,10 +87,16 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "facts", "sort_order", "INTEGER")
     # факт характеризует спикера, но говорит про ДРУГУЮ компанию (Вайзер про GetTaxi) — тег
     _add_column_if_missing(conn, "facts", "about_company", "TEXT DEFAULT ''")
-    # раскладка по методологии: placement_locked=1 → ручной перенос экспертом, авто-реклассификация
-    # его НЕ трогает; reclassified_at → когда факт в последний раз размещён прогоном методологии.
-    _add_column_if_missing(conn, "facts", "placement_locked", "INTEGER NOT NULL DEFAULT 0")
+    # раскладка по методологии (версионирование вместо жёсткого лока):
+    #  assigned_methodology_version — к какой версии методологии карточка отнесена;
+    #  assigned_by — 'system' (прогон) | 'expert' (ручной перенос) | '' (ещё не относили).
+    # Reclassify не показывает факты, уже отнесённые к ТЕКУЩЕЙ версии; при смене версии — переоценка.
+    _add_column_if_missing(conn, "facts", "placement_locked", "INTEGER NOT NULL DEFAULT 0")  # vestigial
     _add_column_if_missing(conn, "facts", "reclassified_at", "TIMESTAMP")
+    _add_column_if_missing(conn, "facts", "assigned_methodology_version", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "facts", "assigned_by", "TEXT NOT NULL DEFAULT ''")
+    # NB: инициализация methodology_version и перенос старого placement_locked → см. после
+    # создания app_meta (ниже, рядом с _migrate_matrix_v2_once) — app_meta создаётся позже.
     # история переездов раскладки (для будущего админ-интерфейса; в UI пока не показываем)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS fact_placement_history (
@@ -303,6 +309,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
     """)
     conn.commit()
+    # версия методологии (см. facts.assigned_methodology_version) — app_meta уже создан
+    conn.execute("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('methodology_version', '1')")
+    # one-time: старый placement_locked=1 (ручные переносы до перехода на версии) → assigned_by='expert'
+    if not conn.execute("SELECT 1 FROM app_meta WHERE key='lock_to_assigned_v1'").fetchone():
+        conn.execute("UPDATE facts SET assigned_by='expert', assigned_methodology_version=1 "
+                     "WHERE placement_locked=1 AND assigned_by=''")
+        conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('lock_to_assigned_v1', '1')")
+        conn.commit()
     _migrate_red_to_grey_once(conn)
     _migrate_matrix_v2_once(conn)
 
