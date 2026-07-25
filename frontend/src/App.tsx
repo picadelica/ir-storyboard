@@ -22,6 +22,7 @@ import IngestAudio from "./components/IngestAudio";
 import IngestClientFacts from "./components/IngestClientFacts";
 import MethodologyView from "./components/MethodologyView";
 import UsersView from "./components/UsersView";
+import AdminView from "./components/AdminView";
 import SearchBox from "./components/SearchBox";
 import PlanView from "./components/PlanView";
 import BriefComposer from "./components/BriefComposer";
@@ -160,6 +161,7 @@ function ClientPage() {
             <MethodologyView key={clientId} clientId={clientId!} />
           )}
           {activeTab === "users" && <UsersView />}
+          {activeTab === "admin" && <AdminView />}
           {activeTab === "plan" && (
             <PlanView clientId={clientId!} quarter={quarter} layers={layers.data} />
           )}

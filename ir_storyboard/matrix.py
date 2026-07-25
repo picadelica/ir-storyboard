@@ -335,6 +335,33 @@ def fact_activity_log(conn: sqlite3.Connection, client_id: str, limit: int = 500
         (client_id, int(limit)))]
 
 
+def activity_log_global(conn: sqlite3.Connection, *, client_id: Optional[str] = None,
+                        actor_tid: Optional[int] = None, action: Optional[str] = None,
+                        limit: int = 200) -> List[dict]:
+    """Глобальный журнал действий (админка): по всем компаниям, с фильтрами
+    компания/пользователь/действие. С выдержкой карточки (title/text) и именем компании."""
+    where, params = [], []
+    if client_id:
+        where.append("a.client_id = ?"); params.append(client_id)
+    if actor_tid is not None:
+        where.append("a.actor_tid = ?"); params.append(actor_tid)
+    if action:
+        where.append("a.action = ?"); params.append(action)
+    wsql = ("WHERE " + " AND ".join(where)) if where else ""
+    params.append(int(limit))
+    return [dict(r) for r in conn.execute(
+        f"""SELECT a.id, a.fact_id, a.client_id, COALESCE(cl.name, a.client_id) AS client_name,
+                   a.action, a.from_sid, a.to_sid, a.detail,
+                   a.actor_tid, a.actor_name, a.methodology_version, a.at,
+                   COALESCE(f.title, '') AS fact_title,
+                   COALESCE(substr(f.text, 1, 160), '') AS fact_text
+             FROM fact_activity a
+             LEFT JOIN clients cl ON cl.id = a.client_id
+             LEFT JOIN facts f ON f.id = a.fact_id
+             {wsql}
+            ORDER BY a.at DESC, a.id DESC LIMIT ?""", params)]
+
+
 def user_activity_counts(conn: sqlite3.Connection) -> Dict[int, int]:
     """Сколько действий над карточками сделал каждый пользователь (по actor_tid)."""
     return {r["actor_tid"]: r["n"] for r in conn.execute(

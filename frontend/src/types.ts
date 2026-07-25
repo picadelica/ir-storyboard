@@ -76,6 +76,24 @@ export interface UserOverview {
   is_admin: boolean;
 }
 
+// админка: запись глобального журнала действий над карточками
+export interface AdminActivityEntry {
+  id: number;
+  fact_id: number;
+  client_id: string | null;
+  client_name: string;
+  action: string;           // created|moved|edited|merged|speaker_renamed|…
+  from_sid: string | null;
+  to_sid: string | null;
+  detail: string;
+  actor_tid: number | null;
+  actor_name: string;
+  methodology_version: number | null;
+  at: string;
+  fact_title: string;
+  fact_text: string;        // выдержка (карточка могла быть удалена — тогда пусто)
+}
+
 export interface TonePreset {
   id: string;
   label: string;

@@ -1191,6 +1191,23 @@ def activity_log_ep(client_id: str, conn=Depends(get_conn),
     return {"activity": matrix.fact_activity_log(conn, client_id)}
 
 
+@app.get("/api/admin/activity")
+def admin_activity_ep(client_id: Optional[str] = None, actor_tid: Optional[int] = None,
+                      action: Optional[str] = None, limit: int = 200,
+                      conn=Depends(get_conn), user: Optional[dict] = Depends(current_user)):
+    """Админка: глобальный журнал действий над карточками (все компании) с фильтрами.
+    Только супер-админ; локально без auth — открыто."""
+    if auth.enabled():
+        tid = (user or {}).get("tid")
+        if tid is None:
+            raise HTTPException(401, "not authenticated")
+        if not auth.is_admin(tid):
+            raise HTTPException(403, "только для супер-админа")
+    return {"activity": matrix.activity_log_global(
+        conn, client_id=client_id, actor_tid=actor_tid, action=action,
+        limit=max(1, min(int(limit), 1000)))}
+
+
 @app.delete("/api/facts/{fact_id}")
 def delete_fact(fact_id: int, conn=Depends(get_conn),
                 user: Optional[dict] = Depends(current_user)):

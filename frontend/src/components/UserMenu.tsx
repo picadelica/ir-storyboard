@@ -44,15 +44,23 @@ export default function UserMenu({ clientId, canSeeUsers }: { clientId?: string;
       {open && (
         <div className="absolute right-0 mt-2 w-52 bg-white border border-ink-line rounded-xl py-1 z-50 shadow-sm">
           <div className="px-3 py-2 text-[13px] text-ink truncate border-b border-ink-line">{name}</div>
-          {canSeeUsers && clientId && (
+          {me.data?.is_admin && clientId ? (
+            <button
+              onClick={() => { setOpen(false); nav(`/clients/${clientId}/admin`); }}
+              className="w-full text-left px-3 py-2 text-[13px] text-ink-mute hover:bg-ink/[0.04] hover:text-ink transition flex items-center gap-2"
+              title="Админка: журнал действий + пользователи"
+            >
+              <span>🛠</span> Админка
+            </button>
+          ) : canSeeUsers && clientId ? (
             <button
               onClick={() => { setOpen(false); nav(`/clients/${clientId}/users`); }}
               className="w-full text-left px-3 py-2 text-[13px] text-ink-mute hover:bg-ink/[0.04] hover:text-ink transition flex items-center gap-2"
-              title="Пользователи системы (пока здесь — до отдельного админ-интерфейса)"
+              title="Пользователи системы"
             >
               <span>👥</span> Пользователи системы
             </button>
-          )}
+          ) : null}
           <button
             onClick={logout}
             className="w-full text-left px-3 py-2 text-[13px] text-ink-mute hover:bg-ink/[0.04] hover:text-ink transition"

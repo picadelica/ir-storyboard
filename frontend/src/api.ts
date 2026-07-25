@@ -6,7 +6,7 @@ import type {
   AboutProposal, AboutAutofillResult, FounderDiscoverResult, FounderProfilesResult,
   BriefTemplate, BriefComposeResult,
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
-  ReclassifyResult, UserOverview, SearchResult, FounderMatch, MentionedCompany,
+  ReclassifyResult, UserOverview, SearchResult, FounderMatch, MentionedCompany, AdminActivityEntry,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport, Dossier,
@@ -147,6 +147,17 @@ export const api = {
   reorderFacts: (clientId: string, sid: string, orderedIds: number[]): Promise<{ ordered: number }> =>
     call<{ ordered: number }>(`/clients/${clientId}/cells/${sid}/facts/reorder`,
       { method: "POST", body: JSON.stringify({ ordered_ids: orderedIds }) }),
+
+  // админка: глобальный журнал действий (только супер-админ)
+  adminActivity: (f: { clientId?: string; actorTid?: number; action?: string; limit?: number } = {}): Promise<{ activity: AdminActivityEntry[] }> => {
+    const p = new URLSearchParams();
+    if (f.clientId) p.set("client_id", f.clientId);
+    if (f.actorTid != null) p.set("actor_tid", String(f.actorTid));
+    if (f.action) p.set("action", f.action);
+    if (f.limit) p.set("limit", String(f.limit));
+    const qs = p.toString();
+    return call<{ activity: AdminActivityEntry[] }>(`/admin/activity${qs ? `?${qs}` : ""}`);
+  },
 
   search: (q: string, scope: "client" | "all", clientId?: string): Promise<SearchResult> =>
     call<SearchResult>(`/search?q=${encodeURIComponent(q)}&scope=${scope}` +
