@@ -97,18 +97,33 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "facts", "assigned_by", "TEXT NOT NULL DEFAULT ''")
     # NB: инициализация methodology_version и перенос старого placement_locked → см. после
     # создания app_meta (ниже, рядом с _migrate_matrix_v2_once) — app_meta создаётся позже.
-    # история переездов раскладки (для будущего админ-интерфейса; в UI пока не показываем)
+    # СКВОЗНОЙ журнал действий над карточками — атрибутируем всё пользователю (кто что сделал).
+    # Питает активность в «Пользователях» + change-log для будущей админки + историю карточки.
+    # action: created|moved|edited|merged|speaker_renamed|title|speaker|must_have|about_company|
+    #         approved|deleted|restored. from_sid/to_sid — для moved; detail — краткое описание.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fact_activity (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            fact_id     INTEGER NOT NULL,
+            client_id   TEXT,
+            action      TEXT NOT NULL,
+            from_sid    TEXT,
+            to_sid      TEXT,
+            detail      TEXT NOT NULL DEFAULT '',
+            actor_tid   INTEGER,
+            actor_name  TEXT NOT NULL DEFAULT '',
+            at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_activity_actor ON fact_activity(actor_tid)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_activity_client ON fact_activity(client_id)")
+    # старая узкая таблица переездов (введена ранее в эту сессию) — свёрнута в fact_activity; оставляем vestigial
     conn.execute("""
         CREATE TABLE IF NOT EXISTS fact_placement_history (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            fact_id      INTEGER NOT NULL,
-            client_id    TEXT,
-            from_sid     TEXT,
-            to_sid       TEXT NOT NULL,
-            method       TEXT NOT NULL,          -- 'manual' | 'reclassify'
-            moved_by     TEXT NOT NULL DEFAULT '',
-            moved_by_tid INTEGER,
-            at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            fact_id      INTEGER NOT NULL, client_id TEXT, from_sid TEXT, to_sid TEXT NOT NULL,
+            method TEXT NOT NULL, moved_by TEXT NOT NULL DEFAULT '', moved_by_tid INTEGER,
+            at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
     # llm-5: ingest_audit table for LLM Report Ingest provenance

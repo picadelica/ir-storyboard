@@ -81,9 +81,12 @@ function UserRow({ u }: { u: UserOverview }) {
       </div>
       <div className="shrink-0 text-right text-xs text-ink-mute space-y-0.5">
         <div>
-          <span className="text-ink font-medium">{u.facts_created}</span> внёс
+          <span className="text-ink font-medium">{u.actions}</span> действий над карточками
+        </div>
+        <div>
+          {u.facts_created > 0 && <><span className="text-ink font-medium">{u.facts_created}</span> внёс</>}
           {u.facts_approved > 0 && (
-            <> · <span className="text-ink font-medium">{u.facts_approved}</span> одобрил</>
+            <>{u.facts_created > 0 ? " · " : ""}<span className="text-ink font-medium">{u.facts_approved}</span> одобрил</>
           )}
         </div>
         <div>был {fmtWhen(u.last_seen)}</div>

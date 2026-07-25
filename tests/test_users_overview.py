@@ -46,3 +46,20 @@ def test_contributor_scope_for_owner(conn):
     scope = contributors | {1}
     tids = {u["tid"] for u in matrix.users_overview(conn, only_tids=scope)}
     assert tids == {1, 2} and 3 not in tids
+
+
+def test_activity_log_counts_toward_user_overview(conn):
+    matrix.upsert_user(conn, 5, "Аналитик", "")
+    a = matrix.add_fact(conn, client_id="co", subsection_id="2.1", text="x", flag="green")
+    # перенос от имени юзера 5 → запись в журнал + счётчик активности
+    matrix.move_fact_to_subsection(conn, a, "co", "3.1", method="manual",
+                                   moved_by="Аналитик", moved_by_tid=5)
+    matrix.record_activity(conn, a, "co", "merged", actor_name="Аналитик", actor_tid=5)
+    conn.commit()
+    assert matrix.user_activity_counts(conn).get(5) == 2
+    ov = {u["tid"]: u for u in matrix.users_overview(conn)}
+    assert ov[5]["actions"] == 2
+    # журнал отдаёт действия; перенос виден и как placement-history
+    assert len(matrix.fact_activity_log(conn, "co")) == 2
+    ph = matrix.fact_placement_history(conn, "co")
+    assert len(ph) == 1 and ph[0]["from_sid"] == "2.1" and ph[0]["to_sid"] == "3.1"

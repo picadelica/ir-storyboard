@@ -72,6 +72,7 @@ export interface UserOverview {
   owned_clients: string[];
   facts_created: number;
   facts_approved: number;
+  actions: number;          // всего действий над карточками (переносы/склейки/правки/…)
   is_admin: boolean;
 }
 

@@ -190,6 +190,7 @@ def users_overview(conn: sqlite3.Connection,
         "SELECT tid, name, username, first_seen, last_seen FROM users "
         "ORDER BY name COLLATE NOCASE"
     ).fetchall()
+    activity = user_activity_counts(conn)   # реальная активность из журнала (переносы/склейки/правки)
     out: List[Dict[str, Any]] = []
     for u in users:
         tid = u["tid"]
@@ -206,6 +207,7 @@ def users_overview(conn: sqlite3.Connection,
             "tid": tid, "name": u["name"], "username": u["username"],
             "first_seen": u["first_seen"], "last_seen": u["last_seen"],
             "owned_clients": owned, "facts_created": created, "facts_approved": approved,
+            "actions": int(activity.get(tid, 0)),   # всего действий над карточками
         })
     return out
 
@@ -300,13 +302,42 @@ def move_fact_to_subsection(conn: sqlite3.Connection, fact_id: int,
         "reclassified_at = CASE WHEN ?='system' THEN CURRENT_TIMESTAMP ELSE reclassified_at END "
         "WHERE id = ?",
         (cell_id, ver, assigned_by, assigned_by, fact_id))
-    conn.execute(
-        """INSERT INTO fact_placement_history (fact_id, client_id, from_sid, to_sid, method,
-                                               moved_by, moved_by_tid)
-            VALUES (?,?,?,?,?,?,?)""",
-        (fact_id, client_id, from_sid, subsection_id, method, moved_by or "", moved_by_tid))
+    record_activity(conn, fact_id, client_id, "moved", actor_name=moved_by, actor_tid=moved_by_tid,
+                    from_sid=from_sid, to_sid=subsection_id, detail=method)
     conn.commit()
     return True
+
+
+def record_activity(conn: sqlite3.Connection, fact_id: int, client_id: Optional[str],
+                    action: str, *, actor_name: str = "", actor_tid: Optional[int] = None,
+                    from_sid: Optional[str] = None, to_sid: Optional[str] = None,
+                    detail: str = "") -> None:
+    """Записать действие над карточкой в сквозной журнал (кто/что/когда). Не коммитит —
+    коммит на стороне вызывающей мутации (или явно). Тихо игнорирует, если таблицы нет."""
+    try:
+        conn.execute(
+            """INSERT INTO fact_activity (fact_id, client_id, action, from_sid, to_sid, detail,
+                                          actor_tid, actor_name)
+                VALUES (?,?,?,?,?,?,?,?)""",
+            (fact_id, client_id, action, from_sid, to_sid, detail or "",
+             actor_tid, actor_name or ""))
+    except sqlite3.OperationalError:
+        pass
+
+
+def fact_activity_log(conn: sqlite3.Connection, client_id: str, limit: int = 500) -> List[dict]:
+    """Сквозной журнал действий над карточками клиента (change-log для админки)."""
+    return [dict(r) for r in conn.execute(
+        """SELECT id, fact_id, action, from_sid, to_sid, detail, actor_tid, actor_name, at
+            FROM fact_activity WHERE client_id = ? ORDER BY at DESC, id DESC LIMIT ?""",
+        (client_id, int(limit)))]
+
+
+def user_activity_counts(conn: sqlite3.Connection) -> Dict[int, int]:
+    """Сколько действий над карточками сделал каждый пользователь (по actor_tid)."""
+    return {r["actor_tid"]: r["n"] for r in conn.execute(
+        "SELECT actor_tid, COUNT(*) n FROM fact_activity WHERE actor_tid IS NOT NULL "
+        "GROUP BY actor_tid") if r["actor_tid"] is not None}
 
 
 def get_methodology_version(conn: sqlite3.Connection) -> int:
@@ -346,10 +377,12 @@ def clamp_about_company_to_l2(about_company: str, proposed_sid: Optional[str],
 
 def fact_placement_history(conn: sqlite3.Connection, client_id: str,
                            limit: int = 500) -> List[dict]:
-    """История переездов раскладки клиента (для будущего админ-интерфейса)."""
+    """История переездов раскладки клиента (подмножество журнала — action='moved')."""
     return [dict(r) for r in conn.execute(
-        """SELECT id, fact_id, from_sid, to_sid, method, moved_by, moved_by_tid, at
-            FROM fact_placement_history WHERE client_id = ? ORDER BY at DESC, id DESC LIMIT ?""",
+        """SELECT id, fact_id, from_sid, to_sid, detail AS method,
+                  actor_name AS moved_by, actor_tid AS moved_by_tid, at
+            FROM fact_activity WHERE client_id = ? AND action = 'moved'
+            ORDER BY at DESC, id DESC LIMIT ?""",
         (client_id, int(limit)))]
 
 

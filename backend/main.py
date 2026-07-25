@@ -1084,6 +1084,18 @@ def reorder_cell_facts(client_id: str, subsection_id: str, body: ReorderIn,
     return {"ordered": n}
 
 
+def _log_activity(conn, fact_id: int, action: str, user: Optional[dict], *,
+                  client_id: Optional[str] = None, detail: str = ""):
+    """Записать действие над карточкой в сквозной журнал (кто/что) + коммит. Мутации карточки
+    коммитятся сами, поэтому лог коммитим отдельно."""
+    if client_id is None:
+        client_id = matrix.fact_client_id(conn, fact_id)
+    matrix.record_activity(conn, fact_id, client_id, action,
+                           actor_name=(user.get("name") if user else "") or "",
+                           actor_tid=(user.get("tid") if user else None), detail=detail)
+    conn.commit()
+
+
 @app.post("/api/clients/{client_id}/cells/{subsection_id}/facts",
           response_model=FactOut)
 def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
@@ -1117,12 +1129,14 @@ def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
     if f.source_url and not archive_url and f.channel in ("online_research", "online_interview", "archival"):
         enqueue_save(f.source_url, src_id, db.connect)
 
+    _log_activity(conn, fid, "created", user, client_id=client_id, detail=subsection_id)
     row = matrix.get_fact(conn, fid)
     return _row_to_fact(row)
 
 
 @app.patch("/api/facts/{fact_id}", response_model=FactOut)
-def update_fact(fact_id: int, u: FactUpdate, conn=Depends(get_conn)):
+def update_fact(fact_id: int, u: FactUpdate, conn=Depends(get_conn),
+                user: Optional[dict] = Depends(current_user)):
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
     try:
@@ -1130,6 +1144,7 @@ def update_fact(fact_id: int, u: FactUpdate, conn=Depends(get_conn)):
                            confidence=u.confidence, rationale=u.rationale)
     except ValueError as e:
         raise HTTPException(422, str(e))
+    _log_activity(conn, fact_id, "edited", user, detail=(u.flag or ""))
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -1166,11 +1181,24 @@ def placement_history_ep(client_id: str, conn=Depends(get_conn),
     return {"history": matrix.fact_placement_history(conn, client_id)}
 
 
+@app.get("/api/clients/{client_id}/activity")
+def activity_log_ep(client_id: str, conn=Depends(get_conn),
+                    user: Optional[dict] = Depends(current_user)):
+    """Сквозной журнал действий над карточками (change-log). Владелец/админ. Для будущей админки."""
+    _check_client(client_id, conn)
+    if not _is_owner_or_admin(conn, client_id, user):
+        raise HTTPException(403, "Журнал доступен владельцу компании или админу")
+    return {"activity": matrix.fact_activity_log(conn, client_id)}
+
+
 @app.delete("/api/facts/{fact_id}")
-def delete_fact(fact_id: int, conn=Depends(get_conn)):
+def delete_fact(fact_id: int, conn=Depends(get_conn),
+                user: Optional[dict] = Depends(current_user)):
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
+    cid = matrix.fact_client_id(conn, fact_id)   # до удаления
     matrix.delete_fact(conn, fact_id)
+    _log_activity(conn, fact_id, "deleted", user, client_id=cid)
     return {"ok": True}
 
 
@@ -1290,7 +1318,8 @@ class SpeakerIn(BaseModel):
 
 
 @app.post("/api/facts/{fact_id}/speaker", response_model=FactOut)
-def set_speaker(fact_id: int, body: SpeakerIn, conn=Depends(get_conn)):
+def set_speaker(fact_id: int, body: SpeakerIn, conn=Depends(get_conn),
+                user: Optional[dict] = Depends(current_user)):
     """Attribute a fact to a specific founder (entities row). Validates the entity
     belongs to the same client."""
     row = matrix.get_fact(conn, fact_id)
@@ -1301,6 +1330,7 @@ def set_speaker(fact_id: int, body: SpeakerIn, conn=Depends(get_conn)):
         if ent is None or ent["client_id"] != row["client_id"]:
             raise HTTPException(400, "entity not found for this client")
     matrix.set_fact_speaker(conn, fact_id, body.entity_id)
+    _log_activity(conn, fact_id, "speaker", user)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -1310,7 +1340,8 @@ class MustHaveIn(BaseModel):
 
 
 @app.post("/api/facts/{fact_id}/must-have", response_model=FactOut)
-def set_must_have(fact_id: int, body: MustHaveIn, conn=Depends(get_conn)):
+def set_must_have(fact_id: int, body: MustHaveIn, conn=Depends(get_conn),
+                  user: Optional[dict] = Depends(current_user)):
     """Set the must-have origin: 'client' (blue — mandatory in briefs), 'expert'
     (purple — important) or '' (none). Accepts legacy {must_have: bool} too."""
     if matrix.get_fact(conn, fact_id) is None:
@@ -1319,6 +1350,7 @@ def set_must_have(fact_id: int, body: MustHaveIn, conn=Depends(get_conn)):
     if source not in ("", "client", "expert"):
         raise HTTPException(400, "source must be '', 'client' or 'expert'")
     matrix.set_fact_must_have(conn, fact_id, source)
+    _log_activity(conn, fact_id, "must_have", user, detail=source)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -1327,11 +1359,13 @@ class TitleIn(BaseModel):
 
 
 @app.post("/api/facts/{fact_id}/title", response_model=FactOut)
-def set_title(fact_id: int, body: TitleIn, conn=Depends(get_conn)):
+def set_title(fact_id: int, body: TitleIn, conn=Depends(get_conn),
+              user: Optional[dict] = Depends(current_user)):
     """Set the short 2-3 word card title (analyst edit)."""
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
     matrix.set_fact_title(conn, fact_id, body.title)
+    _log_activity(conn, fact_id, "title", user, detail=(body.title or "")[:60])
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -1340,11 +1374,13 @@ class AboutCompanyIn(BaseModel):
 
 
 @app.post("/api/facts/{fact_id}/about-company", response_model=FactOut)
-def set_about_company(fact_id: int, body: AboutCompanyIn, conn=Depends(get_conn)):
+def set_about_company(fact_id: int, body: AboutCompanyIn, conn=Depends(get_conn),
+                      user: Optional[dict] = Depends(current_user)):
     """Тег «факт про другую компанию» (характеризует спикера — напр. Вайзер про GetTaxi)."""
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
     matrix.set_fact_about_company(conn, fact_id, body.about_company)
+    _log_activity(conn, fact_id, "about_company", user, detail=(body.about_company or "")[:60])
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -1407,18 +1443,22 @@ def export_matrix_format(client_id: str, conn=Depends(get_conn)):
 
 
 @app.post("/api/facts/{fact_id}/reject", response_model=FactOut)
-def reject_fact(fact_id: int, conn=Depends(get_conn)):
+def reject_fact(fact_id: int, conn=Depends(get_conn),
+                user: Optional[dict] = Depends(current_user)):
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
     matrix.set_fact_state(conn, fact_id, "rejected")
+    _log_activity(conn, fact_id, "rejected", user)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
 @app.post("/api/facts/{fact_id}/restore", response_model=FactOut)
-def restore_fact(fact_id: int, conn=Depends(get_conn)):
+def restore_fact(fact_id: int, conn=Depends(get_conn),
+                 user: Optional[dict] = Depends(current_user)):
     if matrix.get_fact(conn, fact_id) is None:
         raise HTTPException(404, "fact not found")
     matrix.set_fact_state(conn, fact_id, "active")
+    _log_activity(conn, fact_id, "restored", user)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -1451,6 +1491,7 @@ def promote_fact(fact_id: int, conn=Depends(get_conn),
     matrix.approve_fact(conn, fact_id,
                         approved_by=(user.get("name") if user else "dev"),
                         approved_by_tid=(user.get("tid") if user else None))
+    _log_activity(conn, fact_id, "approved", user, client_id=cid)
     return _row_to_fact(matrix.get_fact(conn, fact_id))
 
 
@@ -1538,7 +1579,8 @@ def find_unattributed(client_id: str, conn=Depends(get_conn)):
 
 
 @app.post("/api/facts/{fact_id}/attribute", response_model=FactOut)
-def attribute_fact_ep(fact_id: int, body: AttributeIn, conn=Depends(get_conn)):
+def attribute_fact_ep(fact_id: int, body: AttributeIn, conn=Depends(get_conn),
+                      user: Optional[dict] = Depends(current_user)):
     """Replace a fact's generic "Фаундер …" wording with a concrete name: creates a
     NEW fact (immutability) carrying body.text + speaker, rejects the original."""
     old = matrix.get_fact(conn, fact_id)
@@ -1554,6 +1596,7 @@ def attribute_fact_ep(fact_id: int, body: AttributeIn, conn=Depends(get_conn)):
         entity_id = matrix.add_entity(conn, client_id=old["client_id"], kind="founder",
                                       name=body.new_founder_name.strip(), confirmed=True)
     new_id = matrix.attribute_fact(conn, fact_id, entity_id, body.text)
+    _log_activity(conn, new_id, "speaker_renamed", user, client_id=old["client_id"])
     return _row_to_fact(matrix.get_fact(conn, new_id))
 
 
@@ -1574,6 +1617,8 @@ def merge_facts_ep(body: MergeIn, conn=Depends(get_conn),
         raise HTTPException(404, "keep fact not found")
     result_id = matrix.merge_facts(conn, body.keep_id, body.merge_ids, body.merged_text,
                                    merged_by=(user.get("name") if user else "dev"))
+    _log_activity(conn, result_id, "merged", user,
+                  detail=f"+{len(body.merge_ids)}")
     return _row_to_fact(matrix.get_fact(conn, result_id))
 
 
