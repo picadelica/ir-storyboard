@@ -199,10 +199,12 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   // упомянутые (внешние) компании клиента — тег «про компанию» выбирается ИЗ ЭТОГО списка
   // (не свободный текст → без бардака), их логотип помечает карточку факта.
   const mentioned = useQuery({ queryKey: ["mentioned-companies", clientId], queryFn: () => api.mentionedCompanies(clientId) });
-  // тег «про компанию» = ДРУГАЯ компания. Базовую (саму компанию клиента) из выбора исключаем —
-  // тег, равный базовой, бессмыслен и путает классификатор (бэкенд его тоже нормализует в пустой).
-  const baseCompanyName = (client.data?.name || "").trim().toLowerCase();
-  const mentionedList = (mentioned.data ?? []).filter(m => m.name.trim().toLowerCase() !== baseCompanyName);
+  // тег «про компанию» двусторонний: ДРУГАЯ компания → факт про прошлое фаундера (L1/L2);
+  // ТЕКУЩАЯ (is_current, авто-запись) → осознанный пин «держать в L3-8, не в L1/L2».
+  const mentionedList = mentioned.data ?? [];   // включая текущую компанию (первой)
+  const currentCompany = mentionedList.find(m => m.is_current);
+  const currentCompanyName = (currentCompany?.name || client.data?.name || "").trim().toLowerCase();
+  const isCurrentTag = (name?: string) => !!name && name.trim().toLowerCase() === currentCompanyName;
   const companyByName = (name?: string) =>
     mentionedList.find(m => m.name.trim().toLowerCase() === (name || "").trim().toLowerCase());
   const [addingCompany, setAddingCompany] = useState("");   // имя новой компании в форме добавления
@@ -310,12 +312,12 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                           Выбор ИЗ списка упомянутых компаний (не свободный текст) + добавить новую. */}
                       {allowAboutCompany && (
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[11px] text-ink-mute" title="если факт про ДРУГУЮ компанию (не про эту)">🏢 про компанию:</span>
+                          <span className="text-[11px] text-ink-mute" title="про какую компанию факт: другую (→ история фаундера, L1/L2) или текущую (пин: держать в L3-8)">🏢 про компанию:</span>
                           <select value={draftAbout} onChange={e => setDraftAbout(e.target.value)}
                             className="text-xs border border-ink-line rounded px-1.5 py-1 bg-white max-w-[12rem]">
-                            <option value="">— эта компания —</option>
-                            {mentionedList.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-                            {draftAbout && draftAbout.trim().toLowerCase() !== baseCompanyName && !companyByName(draftAbout) && <option value={draftAbout}>{draftAbout}</option>}
+                            <option value="">— не указано (решит LLM) —</option>
+                            {mentionedList.map(m => <option key={m.id} value={m.name}>{m.is_current ? `📌 ${m.name} (текущая)` : m.name}</option>)}
+                            {draftAbout && !companyByName(draftAbout) && <option value={draftAbout}>{draftAbout}</option>}
                           </select>
                           <input value={addingCompany} onChange={e => setAddingCompany(e.target.value)}
                             onKeyDown={e => { if (e.key === "Enter" && addingCompany.trim()) { e.preventDefault(); addMentioned.mutate(addingCompany.trim()); } }}
@@ -433,15 +435,23 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                               </button>
                             )
                           )}
-                          {/* компания — справа, без слова «про». Тег, равный базовой компании,
-                              не показываем (бессмыслен: факт и так про неё). */}
-                          {allowAboutCompany && f.about_company && f.about_company.trim().toLowerCase() !== baseCompanyName && (
-                            <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
-                              title="про какую компанию (клик — изменить в форме)"
-                              className="ml-auto flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink min-w-0">
-                              <CompanyFavicon name={f.about_company} logo={companyByName(f.about_company)?.logo} />
-                              <span className="font-medium text-ink truncate">{f.about_company}</span>
-                            </button>
+                          {/* компания — справа, без слова «про». Текущая (пин) → компактный 📌
+                              (лаконично, имя и так = компания клиента); другая → чип с фавиконом. */}
+                          {allowAboutCompany && f.about_company && (
+                            isCurrentTag(f.about_company) ? (
+                              <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
+                                title="закреплено за текущей компанией — не уйдёт в L1/L2 (клик — изменить)"
+                                className="ml-auto flex items-center gap-1 text-[11px] text-ink-mute/70 hover:text-ink shrink-0">
+                                <span>📌</span><span className="hidden sm:inline">текущая</span>
+                              </button>
+                            ) : (
+                              <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
+                                title="про какую компанию (клик — изменить в форме)"
+                                className="ml-auto flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink min-w-0">
+                                <CompanyFavicon name={f.about_company} logo={companyByName(f.about_company)?.logo} />
+                                <span className="font-medium text-ink truncate">{f.about_company}</span>
+                              </button>
+                            )
                           )}
                         </div>
                       )}

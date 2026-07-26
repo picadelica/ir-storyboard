@@ -57,12 +57,12 @@ def test_compute_methodology_moves(conn, monkeypatch):
     assert any(f["id"] == a for f in matrix.facts_for_cell(conn, "co", "1.1"))
 
 
-def test_about_base_company_ignored(conn, monkeypatch):
-    """Тег «про компанию» == БАЗОВАЯ компания → нормализуется в пустой: НЕ клампится в L1/L2
-    (в отличие от тега про ДРУГУЮ компанию), и в промпт уходит без ложной подсказки."""
-    matrix.upsert_client(conn, "co", "Accumulator")
+def test_about_company_tag_two_way(conn, monkeypatch):
+    """Тег «про компанию» двусторонний: = ТЕКУЩАЯ компания → пин в L3-8 (в промпт не шлём,
+    гард не пускает в L1/L2); = ДРУГАЯ → в L1/L2. Текущая заводится авто при upsert_client."""
+    matrix.upsert_client(conn, "co", "Accumulator")                # авто: is_current «Accumulator»
     base = matrix.add_fact(conn, client_id="co", subsection_id="6.3", text="про базовую", flag="green")
-    matrix.set_fact_about_company(conn, base, "Accumulator")        # = базовая
+    matrix.set_fact_about_company(conn, base, "Accumulator")        # = текущая
     other = matrix.add_fact(conn, client_id="co", subsection_id="6.3", text="про Gett", flag="green")
     matrix.set_fact_about_company(conn, other, "Gett")              # ДРУГАЯ
 
@@ -74,10 +74,24 @@ def test_about_base_company_ignored(conn, monkeypatch):
     monkeypatch.setattr(main, "reclassify_facts", fake_reclassify)
     res = main._compute_methodology_moves(conn, "co")
     to = {m["fact_id"]: m["to_sid"] for m in res["moves"]}
-    assert to.get(base) == "4.2"          # базовый тег проигнорирован → НЕ клампится, остаётся L4
+    assert to.get(base) == "4.2"          # текущая + LLM дал L4 → остаётся L4 (пин не мешает)
     assert to.get(other) == "2.1"         # другой компании → гард увёл в L2
-    # в reclassify базовый тег ушёл пустым, другой — как есть
+    # в reclassify тег текущей ушёл пустым (без ложной подсказки), другой — как есть
     assert seen["about"] == ["", "Gett"]
+
+
+def test_current_company_tag_pins_out_of_l12(conn, monkeypatch):
+    """Факт с тегом ТЕКУЩЕЙ компании: если LLM тянет в L1/L2 — гард удерживает (не двигаем)."""
+    matrix.upsert_client(conn, "co", "Accumulator")
+    f = matrix.add_fact(conn, client_id="co", subsection_id="5.1", text="revenue up", flag="green")
+    matrix.set_fact_about_company(conn, f, "Accumulator")          # = текущая
+    def fake(texts, descriptions=None, client_notes=None, **kw):
+        return [FactCandidate(text=t, suggested_subsection_id="2.1",  # LLM ошибочно тянет в L2
+                              suggested_flag="green", confidence=0.9, rationale="t") for t in texts]
+    monkeypatch.setattr(main, "reclassify_facts", fake)
+    res = main._compute_methodology_moves(conn, "co")
+    # переезда в L2 нет — факт остаётся в 5.1
+    assert not any(m["fact_id"] == f for m in res["moves"])
 
 
 def test_reclassify_facts_no_key_fallback(conn):

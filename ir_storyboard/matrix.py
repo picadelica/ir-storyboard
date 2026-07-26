@@ -54,6 +54,9 @@ def upsert_client(conn: sqlite3.Connection, client_id: str, name: str,
          founder_name, founder_handle, json.dumps(aliases or []), notes, tone_preset),
     )
     conn.commit()
+    # текущая компания сразу в списке упомянутых (is_current) — чтобы её можно было
+    # осознанно ставить тегом «про компанию» (сигнал «держать в L3-8»), а карточку не чистить.
+    ensure_current_company(conn, client_id, name)
 
 
 # ---------- methodology (per-subsection description + per-client tone) ----------
@@ -392,16 +395,28 @@ def bump_methodology_version(conn: sqlite3.Connection) -> int:
 _L12_SUBSECTIONS = {"1.1", "1.2", "1.3", "2.1", "2.2", "2.3"}
 
 
-def clamp_about_company_to_l2(about_company: str, proposed_sid: Optional[str],
-                              current_sid: str) -> Optional[str]:
-    """Жёсткий гард: факт про ДРУГУЮ компанию (about_company задан) не должен опускаться ниже
-    L2 (в L3-8 — только текущая компания). Если предложено L3+ — оставляем в L1-2: текущую
-    ячейку, если она уже L1-2, иначе 2.1 (профессиональный путь)."""
+def clamp_company_tag(about_company: str, is_current: bool, proposed_sid: Optional[str],
+                      current_sid: str) -> Optional[str]:
+    """Двусторонний гард по тегу «про компанию» (осознанно проставленному экспертом):
+    - тег пуст → не трогаем (решает LLM);
+    - тег = ТЕКУЩАЯ компания (is_current) → факт точно про неё → держим в L3-8, НЕ пускаем
+      в L1/L2 (если LLM предложил L1/L2 — оставляем текущую ячейку факта);
+    - тег = ДРУГАЯ компания → это про прошлое фаундера → держим в L1/L2 (иначе 2.1)."""
     if not (about_company or "").strip():
         return proposed_sid
+    if is_current:
+        if proposed_sid and proposed_sid not in _L12_SUBSECTIONS:
+            return proposed_sid                # L3-8 — норм, факт про текущую и остаётся глубже
+        return current_sid                     # LLM тянет в L1/L2 → не двигаем туда
     if proposed_sid and proposed_sid in _L12_SUBSECTIONS:
         return proposed_sid
     return current_sid if current_sid in _L12_SUBSECTIONS else "2.1"
+
+
+def clamp_about_company_to_l2(about_company: str, proposed_sid: Optional[str],
+                              current_sid: str) -> Optional[str]:
+    """Совместимость: тег про ДРУГУЮ компанию (не текущую) → см. clamp_company_tag."""
+    return clamp_company_tag(about_company, False, proposed_sid, current_sid)
 
 
 def fact_placement_history(conn: sqlite3.Connection, client_id: str,
@@ -805,19 +820,62 @@ def delete_entity(conn: sqlite3.Connection, entity_id: int) -> None:
 
 
 def list_mentioned_companies(conn: sqlite3.Connection, client_id: str) -> List[dict]:
-    """Внешние компании, упомянутые под клиентом (не клиенты сами по себе)."""
+    """Упомянутые компании клиента. Первой — сама текущая компания (is_current=1, заводится
+    автоматически при создании клиента), затем внешние (прошлые компании фаундера, конкуренты)."""
     return [dict(r) for r in conn.execute(
-        """SELECT id, client_id, name, logo, note, sort_order FROM mentioned_companies
-            WHERE client_id=? ORDER BY sort_order, name COLLATE NOCASE""", (client_id,))]
+        """SELECT id, client_id, name, logo, note, sort_order,
+                  COALESCE(is_current,0) AS is_current FROM mentioned_companies
+            WHERE client_id=? ORDER BY is_current DESC, sort_order, name COLLATE NOCASE""",
+        (client_id,))]
 
 
 def add_mentioned_company(conn: sqlite3.Connection, client_id: str, name: str,
-                          logo: str = "", note: str = "") -> int:
+                          logo: str = "", note: str = "", is_current: int = 0) -> int:
     cur = conn.execute(
-        "INSERT INTO mentioned_companies (client_id, name, logo, note) VALUES (?,?,?,?)",
-        (client_id, (name or "").strip(), (logo or "").strip(), (note or "").strip()))
+        "INSERT INTO mentioned_companies (client_id, name, logo, note, is_current) VALUES (?,?,?,?,?)",
+        (client_id, (name or "").strip(), (logo or "").strip(), (note or "").strip(), 1 if is_current else 0))
     conn.commit()
     return cur.lastrowid
+
+
+CURRENT_COMPANY_NOTE = "текущая компания"
+
+
+def current_company_name(conn: sqlite3.Connection, client_id: str) -> str:
+    """Имя текущей компании клиента — из записи is_current в mentioned_companies
+    (заводится авто при создании), с фоллбеком на clients.name."""
+    row = conn.execute(
+        "SELECT name FROM mentioned_companies WHERE client_id=? AND is_current=1 LIMIT 1",
+        (client_id,)).fetchone()
+    if row and (row["name"] or "").strip():
+        return row["name"].strip()
+    crow = conn.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
+    return (crow["name"] if crow else client_id) or client_id
+
+
+def ensure_current_company(conn: sqlite3.Connection, client_id: str, name: str) -> None:
+    """Идемпотентно: у клиента ровно одна запись «текущая компания» (is_current=1) в списке
+    упомянутых. Если уже есть — синхронизируем имя (на случай переименования клиента). Если
+    аналитик уже завёл запись с именем клиента — помечаем её текущей. Иначе — заводим новую.
+    Тег «про компанию», равный этой записи → сигнал «точно про текущую → держать в L3-8»."""
+    name = (name or "").strip()
+    cur = conn.execute(
+        "SELECT id FROM mentioned_companies WHERE client_id=? AND is_current=1 LIMIT 1",
+        (client_id,)).fetchone()
+    if cur:
+        conn.execute("UPDATE mentioned_companies SET name=? WHERE id=?", (name, cur["id"]))
+        conn.commit()
+        return
+    match = conn.execute(
+        "SELECT id FROM mentioned_companies WHERE client_id=? AND lower(trim(name))=lower(?) LIMIT 1",
+        (client_id, name)).fetchone()
+    if match:
+        conn.execute(
+            "UPDATE mentioned_companies SET is_current=1, note=CASE WHEN trim(note)='' THEN ? ELSE note END WHERE id=?",
+            (CURRENT_COMPANY_NOTE, match["id"]))
+        conn.commit()
+        return
+    add_mentioned_company(conn, client_id, name, note=CURRENT_COMPANY_NOTE, is_current=1)
 
 
 def update_mentioned_company(conn: sqlite3.Connection, mc_id: int, **fields) -> None:

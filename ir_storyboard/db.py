@@ -274,6 +274,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
             created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # is_current: сама текущая компания клиента (заводится авто при создании). Тег «про
+    # компанию», равный ей → сигнал классификатору «держать факт в L3-8, не в L1/L2».
+    _add_column_if_missing(conn, "mentioned_companies", "is_current", "INTEGER NOT NULL DEFAULT 0")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entity_facts (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -330,6 +333,21 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
     _migrate_red_to_grey_once(conn)
     _migrate_matrix_v2_once(conn)
+    _migrate_current_company_once(conn)
+
+
+def _migrate_current_company_once(conn: sqlite3.Connection) -> None:
+    """One-time (guard `current_company_backfill_v1`): у каждого существующего клиента —
+    запись «текущая компания» (is_current=1) в mentioned_companies. Если аналитик уже внёс
+    запись с именем клиента (как в Accumulator) — помечаем её текущей, а не плодим дубль.
+    Новые клиенты получают её через matrix.upsert_client → ensure_current_company."""
+    if conn.execute("SELECT 1 FROM app_meta WHERE key='current_company_backfill_v1'").fetchone():
+        return
+    from . import matrix
+    for row in conn.execute("SELECT id, name FROM clients").fetchall():
+        matrix.ensure_current_company(conn, row["id"], row["name"])
+    conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('current_company_backfill_v1','1')")
+    conn.commit()
 
 
 def _migrate_matrix_v2_once(conn: sqlite3.Connection) -> None:

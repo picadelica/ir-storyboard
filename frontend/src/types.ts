@@ -599,6 +599,7 @@ export interface MentionedCompany {
   logo: string;
   note: string;
   sort_order: number;
+  is_current?: boolean;   // сама текущая компания клиента (авто-запись; тег = «держать факт в L3-8»)
 }
 
 // тот же фаундер (по имени) в другой компании — для предложения влить профиль

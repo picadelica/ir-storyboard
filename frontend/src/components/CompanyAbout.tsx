@@ -654,48 +654,64 @@ function MentionedCompaniesBlock({ clientId }: { clientId: string }) {
 }
 
 function MentionedCard({ m, onChanged, onRemove }: { m: MentionedCompany; onChanged: () => void; onRemove: () => void }) {
+  const isCurrent = !!m.is_current;   // текущая компания: контекст/имя защищены, правится только логотип
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(m.name);
   const [note, setNote] = useState(m.note || "");
   const [logo, setLogo] = useState(m.logo || "");
   const [imgBad, setImgBad] = useState(false);
   const save = useMutation({
-    mutationFn: () => api.patchMentionedCompany(m.id, { name: name.trim() || m.name, note: note.trim(), logo: logo.trim() }),
+    mutationFn: () => api.patchMentionedCompany(m.id,
+      isCurrent ? { logo: logo.trim() }
+                : { name: name.trim() || m.name, note: note.trim(), logo: logo.trim() }),
     onSuccess: () => { setEditing(false); setImgBad(false); onChanged(); },
   });
   const initials = m.name.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "—";
   const inp = "w-full text-xs border border-ink-line rounded px-2 py-1";
   return (
-    <div className="relative flex items-center gap-2 border border-ink-line rounded-lg px-2 py-1.5 group">
+    <div className={`relative flex items-center gap-2 border rounded-lg px-2 py-1.5 group ${isCurrent ? "border-ink/40 bg-slate-50" : "border-ink-line"}`}>
       {m.logo && !imgBad
         ? <img src={m.logo} alt="" onError={() => setImgBad(true)} className="w-7 h-7 rounded object-cover shrink-0" />
         : <span className="w-7 h-7 rounded grid place-items-center text-[10px] font-semibold text-white select-none shrink-0"
             style={{ background: monoColor(m.name) }}>{initials}</span>}
       <div className="min-w-0">
-        <div className="text-xs font-medium text-ink leading-tight">{m.name}</div>
+        <div className="text-xs font-medium text-ink leading-tight flex items-center gap-1">
+          <span className="truncate">{m.name}</span>
+          {isCurrent && <span className="text-[8px] px-1 py-px rounded bg-ink text-white shrink-0 leading-none">текущая</span>}
+        </div>
         {m.note && <div className="text-[10px] text-ink-mute leading-tight truncate max-w-[13rem]">{m.note}</div>}
       </div>
-      <button onClick={() => { setName(m.name); setNote(m.note || ""); setLogo(m.logo || ""); setEditing(v => !v); }} title="править"
+      <button onClick={() => { setName(m.name); setNote(m.note || ""); setLogo(m.logo || ""); setEditing(v => !v); }}
+        title={isCurrent ? "изменить логотип" : "править"}
         className="text-[10px] text-ink-mute/50 hover:text-ink ml-1">✎</button>
-      <button onClick={onRemove} title="убрать"
-        className="text-[13px] text-ink-mute/50 hover:text-red-600 opacity-0 group-hover:opacity-100">×</button>
+      {!isCurrent && (
+        <button onClick={onRemove} title="убрать"
+          className="text-[13px] text-ink-mute/50 hover:text-red-600 opacity-0 group-hover:opacity-100">×</button>
+      )}
       {editing && (
         <div className="absolute left-0 top-11 z-10 bg-white border border-ink-line rounded-lg shadow-lg p-2.5 w-64 space-y-1.5">
-          <div>
-            <div className="text-[10px] text-ink-mute mb-0.5">Название (эксперты косячат — можно поправить):</div>
-            <input autoFocus value={name} onChange={e => setName(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") save.mutate(); }} className={inp} />
-          </div>
-          <div>
-            <div className="text-[10px] text-ink-mute mb-0.5">Контекст:</div>
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="напр. прошлая компания фаундера" className={inp} />
-          </div>
+          {!isCurrent ? (
+            <>
+              <div>
+                <div className="text-[10px] text-ink-mute mb-0.5">Название (эксперты косячат — можно поправить):</div>
+                <input autoFocus value={name} onChange={e => setName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") save.mutate(); }} className={inp} />
+              </div>
+              <div>
+                <div className="text-[10px] text-ink-mute mb-0.5">Контекст:</div>
+                <input value={note} onChange={e => setNote(e.target.value)} placeholder="напр. прошлая компания фаундера" className={inp} />
+              </div>
+            </>
+          ) : (
+            <div className="text-[10px] text-ink-mute">Текущая компания клиента — правится только логотип.</div>
+          )}
           <div>
             <div className="text-[10px] text-ink-mute mb-0.5">Логотип (ссылка, пусто = буквенный):</div>
-            <input value={logo} onChange={e => setLogo(e.target.value)} placeholder="https://…/logo.png" className={inp} />
+            <input autoFocus={isCurrent} value={logo} onChange={e => setLogo(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") save.mutate(); }} placeholder="https://…/logo.png" className={inp} />
           </div>
           <div className="flex gap-2 items-center pt-0.5">
-            <button onClick={() => save.mutate()} disabled={save.isPending || !name.trim()}
+            <button onClick={() => save.mutate()} disabled={save.isPending || (!isCurrent && !name.trim())}
               className="text-[11px] px-2 py-0.5 rounded bg-ink text-white disabled:bg-slate-300">сохранить</button>
             <button onClick={() => setEditing(false)} className="text-[11px] text-ink-mute hover:text-ink ml-auto">отмена</button>
           </div>

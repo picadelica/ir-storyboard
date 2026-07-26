@@ -1835,6 +1835,7 @@ class MentionedCompanyOut(BaseModel):
     logo: str = ""
     note: str = ""
     sort_order: int = 0
+    is_current: bool = False
 
 
 @app.get("/api/clients/{client_id}/mentioned-companies", response_model=List[MentionedCompanyOut])
@@ -1850,12 +1851,19 @@ def add_mentioned_company_ep(client_id: str, body: MentionedCompanyIn, conn=Depe
 
 @app.patch("/api/mentioned-companies/{mc_id}", response_model=dict)
 def patch_mentioned_company_ep(mc_id: int, body: MentionedCompanyPatch, conn=Depends(get_conn)):
-    matrix.update_mentioned_company(conn, mc_id, **body.model_dump(exclude_none=True))
+    row = conn.execute("SELECT is_current FROM mentioned_companies WHERE id=?", (mc_id,)).fetchone()
+    data = body.model_dump(exclude_none=True)
+    if row and row["is_current"]:
+        data = {k: v for k, v in data.items() if k == "logo"}  # текущая компания: правится только логотип
+    matrix.update_mentioned_company(conn, mc_id, **data)
     return {"ok": True}
 
 
 @app.delete("/api/mentioned-companies/{mc_id}")
 def delete_mentioned_company_ep(mc_id: int, conn=Depends(get_conn)):
+    row = conn.execute("SELECT is_current FROM mentioned_companies WHERE id=?", (mc_id,)).fetchone()
+    if row and row["is_current"]:
+        raise HTTPException(400, "Текущую компанию нельзя убрать из списка упомянутых")
     matrix.delete_mentioned_company(conn, mc_id)
     return {"ok": True}
 
@@ -3030,21 +3038,23 @@ def _compute_methodology_moves(conn, client_id: str) -> dict:
     valid = set(descriptions.keys())
     crow = conn.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
     base_company = crow["name"] if crow else client_id
-    # тег «про компанию», равный БАЗОВОЙ компании, бессмыслен (факт и так про неё) и путает
-    # классификатор → трактуем как пустой. about[i] — нормализованный тег для факта i.
-    def _about(r):
-        a = (r["about_company"] or "").strip()
-        return "" if a.lower() == (base_company or "").strip().lower() else a
-    about = [_about(r) for r in rows]
+    current_name = matrix.current_company_name(conn, client_id).strip().lower()
+    # тег «про компанию» двусторонний: = ТЕКУЩАЯ компания → «точно про неё, держим в L3-8»
+    # (в промпт не шлём — иначе ложная подсказка «про другую»; гард удержит глубже); = ДРУГАЯ
+    # компания → «про прошлое фаундера, в L1/L2». _is_cur(r) — признак текущей для факта.
+    def _is_cur(r):
+        a = (r["about_company"] or "").strip().lower()
+        return bool(a) and a == current_name and current_name != ""
+    about = ["" if _is_cur(r) else (r["about_company"] or "").strip() for r in rows]
     cands = reclassify_facts(
         [r["text"] for r in rows], descriptions, client_notes,
         about_companies=about, base_company=base_company,
     )
     moves = []
-    for r, cand, ab in zip(rows, cands, about):
+    for r, cand in zip(rows, cands):
         to_sid = cand.suggested_subsection_id
-        # жёсткий гард: факт про ДРУГУЮ компанию не опускаем ниже L2 (даже если LLM промахнулся)
-        to_sid = matrix.clamp_about_company_to_l2(ab, to_sid, r["subsection_id"])
+        # гард по тегу: другая компания → не ниже L2; текущая → не в L1/L2 (даже если LLM промахнулся)
+        to_sid = matrix.clamp_company_tag(r["about_company"] or "", _is_cur(r), to_sid, r["subsection_id"])
         if to_sid and to_sid in valid and to_sid != r["subsection_id"]:
             moves.append({
                 "fact_id": r["id"],

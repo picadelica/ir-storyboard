@@ -56,3 +56,17 @@ def test_about_company_never_below_l2():
     assert clamp("Gett", "1.3", "2.1") == "1.3"        # предложено L1 → ок
     # без тега — не трогаем
     assert clamp("", "4.2", "2.1") == "4.2"
+
+
+def test_clamp_company_tag_two_way():
+    clamp = matrix.clamp_company_tag
+    # ДРУГАЯ компания (is_current=False) → не ниже L2
+    assert clamp("Gett", False, "4.2", "6.1") == "2.1"
+    assert clamp("Gett", False, "1.3", "2.1") == "1.3"
+    # ТЕКУЩАЯ компания (is_current=True) → НЕ в L1/L2: L3-8 пропускаем, L1/L2 → держим текущую
+    assert clamp("Acc", True, "4.2", "5.1") == "4.2"   # L4 — ок
+    assert clamp("Acc", True, "2.1", "5.1") == "5.1"   # LLM тянет в L2 → остаёмся в 5.1
+    assert clamp("Acc", True, "1.1", "6.3") == "6.3"
+    # пустой тег — не трогаем ни в ту, ни в другую сторону
+    assert clamp("", True, "1.1", "6.3") == "1.1"
+    assert clamp("", False, "4.2", "2.1") == "4.2"
