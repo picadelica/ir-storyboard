@@ -315,7 +315,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                             className="text-xs border border-ink-line rounded px-1.5 py-1 bg-white max-w-[12rem]">
                             <option value="">— эта компания —</option>
                             {mentionedList.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-                            {draftAbout && !companyByName(draftAbout) && <option value={draftAbout}>{draftAbout}</option>}
+                            {draftAbout && draftAbout.trim().toLowerCase() !== baseCompanyName && !companyByName(draftAbout) && <option value={draftAbout}>{draftAbout}</option>}
                           </select>
                           <input value={addingCompany} onChange={e => setAddingCompany(e.target.value)}
                             onKeyDown={e => { if (e.key === "Enter" && addingCompany.trim()) { e.preventDefault(); addMentioned.mutate(addingCompany.trim()); } }}
@@ -433,8 +433,9 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                               </button>
                             )
                           )}
-                          {/* компания — справа, без слова «про» */}
-                          {allowAboutCompany && f.about_company && (
+                          {/* компания — справа, без слова «про». Тег, равный базовой компании,
+                              не показываем (бессмыслен: факт и так про неё). */}
+                          {allowAboutCompany && f.about_company && f.about_company.trim().toLowerCase() !== baseCompanyName && (
                             <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
                               title="про какую компанию (клик — изменить в форме)"
                               className="ml-auto flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink min-w-0">
