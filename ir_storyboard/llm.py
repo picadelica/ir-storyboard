@@ -918,6 +918,13 @@ CRITICAL — whose company is the fact about? This is the #1 source of mistakes:
   investor relations in PREVIOUS companies.
 - The layers L3–L8 (community, clients, product, vision, PEST) are about the BASE company
   «BASE_COMPANY_PLACEHOLDER» ONLY.
+- L1 = the founder as a PERSON (childhood, values, fears/dreams/identity). L2 = the founder's
+  professional history BEFORE / OUTSIDE the base company.
+- MIRROR RULE (do not violate): a fact ABOUT THE BASE COMPANY «BASE_COMPANY_PLACEHOLDER» —
+  its team, clients, product, market, vision, PEST context, growth, events — must go to L3–L8,
+  NEVER to L1 or L2. L1/L2 receive ONLY facts about the founder personally or the founder's
+  pre-/other-company history. If a fact describes what the BASE company does/builds/achieves,
+  it is L3–L8 even if it also mentions the founder.
 - So: if a fact is about a DIFFERENT company/project (e.g. the founder's earlier startup),
   it almost always belongs in L2.x — NOT in L3–L8, even if the wording looks product/team/
   investor-ish. First decide WHICH company the fact is about, THEN pick the subsection.

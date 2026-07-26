@@ -401,45 +401,45 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                       {f.title && <div className="text-[15px] font-semibold text-ink leading-tight mb-0.5">{f.title}</div>}
                       <div className="text-sm leading-snug whitespace-pre-wrap text-ink" style={{ textAlign: "justify" }}>{f.text}</div>
 
-                      {/* спикер: если назначен — компактный чип 🗣 Имя (клик → правка), без
-                          постоянного выпадающего списка. Не назначен — тихая кнопка. Список
-                          показываем только когда карточка в режиме правки спикера. */}
-                      {founders.length > 0 && (
-                        editSpeakerIds.has(f.id) ? (
-                          <div className="mt-1.5 flex items-center gap-1.5">
-                            <span className="text-[11px] text-ink-mute" title="кто из фаундеров это говорит/чей факт">🗣</span>
-                            <select autoFocus value={f.speaker_entity_id ?? ""}
-                              onChange={e => { setSpeaker.mutate({ id: f.id, entityId: e.target.value ? Number(e.target.value) : null }); closeSpeaker(f.id); }}
-                              className="text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white max-w-[15rem] text-ink">
-                              <option value="">— не указан —</option>
-                              {founders.map(fo => <option key={fo.id} value={fo.id}>{fo.name}</option>)}
-                            </select>
-                            <button onClick={() => closeSpeaker(f.id)} className="text-[11px] text-ink-mute hover:text-ink">✕</button>
-                          </div>
-                        ) : f.speaker_name ? (
-                          <button onClick={() => openSpeaker(f.id)} title="сменить спикера"
-                            className="mt-1.5 flex w-fit items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
-                            <span>🗣</span><span className="font-medium text-ink">{f.speaker_name}</span>
-                          </button>
-                        ) : (
-                          <button onClick={() => openSpeaker(f.id)} title="указать, кто говорит"
-                            className="mt-1.5 flex w-fit items-center gap-1 text-[11px] text-ink-mute/60 hover:text-ink">
-                            <span>🗣</span><span>указать спикера</span>
-                          </button>
-                        )
-                      )}
-
-                      {/* тег «про какую компанию» — на ВСЕХ карточках (все слои). Когда задан —
-                          чип с фавиконом отдельной строкой (не налазит на спикера/автора); клик →
-                          форма редактирования (там select из списка + «+ новая»). Пусто → ничего. */}
-                      {allowAboutCompany && f.about_company && (
-                        <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
-                          title="про какую компанию (клик — изменить в форме)"
-                          className="mt-1 flex w-fit items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
-                          <span>про:</span>
-                          <CompanyFavicon name={f.about_company} logo={companyByName(f.about_company)?.logo} />
-                          <span className="font-medium text-ink">{f.about_company}</span>
-                        </button>
+                      {/* одна строка: слева — спикер (кто говорит), справа — компания без слова
+                          «про» (фавикон+имя). Оба клик → правка (спикер инлайн, компания → форма). */}
+                      {(founders.length > 0 || (allowAboutCompany && f.about_company)) && (
+                        <div className="mt-1.5 flex items-center gap-2">
+                          {/* спикер — слева */}
+                          {founders.length > 0 && (
+                            editSpeakerIds.has(f.id) ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] text-ink-mute" title="кто из фаундеров это говорит/чей факт">🗣</span>
+                                <select autoFocus value={f.speaker_entity_id ?? ""}
+                                  onChange={e => { setSpeaker.mutate({ id: f.id, entityId: e.target.value ? Number(e.target.value) : null }); closeSpeaker(f.id); }}
+                                  className="text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white max-w-[13rem] text-ink">
+                                  <option value="">— не указан —</option>
+                                  {founders.map(fo => <option key={fo.id} value={fo.id}>{fo.name}</option>)}
+                                </select>
+                                <button onClick={() => closeSpeaker(f.id)} className="text-[11px] text-ink-mute hover:text-ink">✕</button>
+                              </div>
+                            ) : f.speaker_name ? (
+                              <button onClick={() => openSpeaker(f.id)} title="сменить спикера"
+                                className="flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink min-w-0">
+                                <span className="shrink-0">🗣</span><span className="font-medium text-ink truncate">{f.speaker_name}</span>
+                              </button>
+                            ) : (
+                              <button onClick={() => openSpeaker(f.id)} title="указать, кто говорит"
+                                className="flex items-center gap-1 text-[11px] text-ink-mute/60 hover:text-ink">
+                                <span>🗣</span><span>указать спикера</span>
+                              </button>
+                            )
+                          )}
+                          {/* компания — справа, без слова «про» */}
+                          {allowAboutCompany && f.about_company && (
+                            <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
+                              title="про какую компанию (клик — изменить в форме)"
+                              className="ml-auto flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink min-w-0">
+                              <CompanyFavicon name={f.about_company} logo={companyByName(f.about_company)?.logo} />
+                              <span className="font-medium text-ink truncate">{f.about_company}</span>
+                            </button>
+                          )}
+                        </div>
                       )}
 
                       {/* risk / gap — kept in the text body */}
