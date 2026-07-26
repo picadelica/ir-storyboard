@@ -3030,16 +3030,21 @@ def _compute_methodology_moves(conn, client_id: str) -> dict:
     valid = set(descriptions.keys())
     crow = conn.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
     base_company = crow["name"] if crow else client_id
+    # тег «про компанию», равный БАЗОВОЙ компании, бессмыслен (факт и так про неё) и путает
+    # классификатор → трактуем как пустой. about[i] — нормализованный тег для факта i.
+    def _about(r):
+        a = (r["about_company"] or "").strip()
+        return "" if a.lower() == (base_company or "").strip().lower() else a
+    about = [_about(r) for r in rows]
     cands = reclassify_facts(
         [r["text"] for r in rows], descriptions, client_notes,
-        about_companies=[(r["about_company"] or "") for r in rows],
-        base_company=base_company,
+        about_companies=about, base_company=base_company,
     )
     moves = []
-    for r, cand in zip(rows, cands):
+    for r, cand, ab in zip(rows, cands, about):
         to_sid = cand.suggested_subsection_id
-        # жёсткий гард: факт про другую компанию не опускаем ниже L2 (даже если LLM промахнулся)
-        to_sid = matrix.clamp_about_company_to_l2(r["about_company"] or "", to_sid, r["subsection_id"])
+        # жёсткий гард: факт про ДРУГУЮ компанию не опускаем ниже L2 (даже если LLM промахнулся)
+        to_sid = matrix.clamp_about_company_to_l2(ab, to_sid, r["subsection_id"])
         if to_sid and to_sid in valid and to_sid != r["subsection_id"]:
             moves.append({
                 "fact_id": r["id"],

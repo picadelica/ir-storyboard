@@ -199,7 +199,10 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   // упомянутые (внешние) компании клиента — тег «про компанию» выбирается ИЗ ЭТОГО списка
   // (не свободный текст → без бардака), их логотип помечает карточку факта.
   const mentioned = useQuery({ queryKey: ["mentioned-companies", clientId], queryFn: () => api.mentionedCompanies(clientId) });
-  const mentionedList = mentioned.data ?? [];
+  // тег «про компанию» = ДРУГАЯ компания. Базовую (саму компанию клиента) из выбора исключаем —
+  // тег, равный базовой, бессмыслен и путает классификатор (бэкенд его тоже нормализует в пустой).
+  const baseCompanyName = (client.data?.name || "").trim().toLowerCase();
+  const mentionedList = (mentioned.data ?? []).filter(m => m.name.trim().toLowerCase() !== baseCompanyName);
   const companyByName = (name?: string) =>
     mentionedList.find(m => m.name.trim().toLowerCase() === (name || "").trim().toLowerCase());
   const [addingCompany, setAddingCompany] = useState("");   // имя новой компании в форме добавления
@@ -460,29 +463,27 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                         </div>
                       )}
 
-                      {/* провенанс: кто внёс/собрал · кто подтвердил · когда.
+                      {/* лаконичный general view: провенанс (кто/когда) + источник — всё за (i).
                           Сентинелы пайплайна (merge/attribute/…) — не пользователи, не показываем как автора. */}
-                      {(() => {
-                        const SENT = new Set(["merge", "attribute", "dev", "stub", "import", "seed", ""]);
-                        const isJoint = kids.length > 0 || f.created_by === "merge" || !!f.merged_by;
-                        const author = isJoint
-                          ? (f.merged_by && !SENT.has(f.merged_by) ? `собрал ${f.merged_by}` : "собрано")
-                          : (f.created_by && !SENT.has(f.created_by) ? `внёс ${f.created_by}` : "");
-                        const parts: string[] = [];
-                        if (author) parts.push(author);
-                        if (f.approved_by) parts.push(`подтвердил ${f.approved_by}`);
-                        if (f.captured_at) parts.push(f.captured_at.slice(0, 10));
-                        if (!parts.length) return null;
-                        return (
-                          <div className="mt-1.5 text-[10px] text-ink-mute/70 flex flex-wrap gap-x-2 gap-y-0.5">
-                            {parts.map((p, i) => <span key={i}>{i ? "· " : ""}{p}</span>)}
-                          </div>
-                        );
-                      })()}
-
-                      {/* footer (source + merged-from links) — collapsed behind the info icon */}
                       {infoIds.has(f.id) && (
                         <div className="mt-2 pt-2 border-t border-ink-line/60">
+                          {(() => {
+                            const SENT = new Set(["merge", "attribute", "dev", "stub", "import", "seed", ""]);
+                            const isJoint = kids.length > 0 || f.created_by === "merge" || !!f.merged_by;
+                            const author = isJoint
+                              ? (f.merged_by && !SENT.has(f.merged_by) ? `собрал ${f.merged_by}` : "собрано")
+                              : (f.created_by && !SENT.has(f.created_by) ? `внёс ${f.created_by}` : "");
+                            const parts: string[] = [];
+                            if (author) parts.push(author);
+                            if (f.approved_by) parts.push(`подтвердил ${f.approved_by}`);
+                            if (f.captured_at) parts.push(f.captured_at.slice(0, 10));
+                            if (!parts.length) return null;
+                            return (
+                              <div className="mb-1.5 text-[10px] text-ink-mute/70 flex flex-wrap gap-x-2 gap-y-0.5">
+                                {parts.map((p, i) => <span key={i}>{i ? "· " : ""}{p}</span>)}
+                              </div>
+                            );
+                          })()}
                           {kids.length > 0 && (() => {
                             // Скрытые «дети» бывают двух природ — НЕ путать:
                             //  • переименование спикера (attribute_fact): тот же факт, где «Фаундер» заменён

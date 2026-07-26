@@ -57,6 +57,29 @@ def test_compute_methodology_moves(conn, monkeypatch):
     assert any(f["id"] == a for f in matrix.facts_for_cell(conn, "co", "1.1"))
 
 
+def test_about_base_company_ignored(conn, monkeypatch):
+    """Тег «про компанию» == БАЗОВАЯ компания → нормализуется в пустой: НЕ клампится в L1/L2
+    (в отличие от тега про ДРУГУЮ компанию), и в промпт уходит без ложной подсказки."""
+    matrix.upsert_client(conn, "co", "Accumulator")
+    base = matrix.add_fact(conn, client_id="co", subsection_id="6.3", text="про базовую", flag="green")
+    matrix.set_fact_about_company(conn, base, "Accumulator")        # = базовая
+    other = matrix.add_fact(conn, client_id="co", subsection_id="6.3", text="про Gett", flag="green")
+    matrix.set_fact_about_company(conn, other, "Gett")              # ДРУГАЯ
+
+    seen = {}
+    def fake_reclassify(texts, descriptions=None, client_notes=None, about_companies=None, **kw):
+        seen["about"] = list(about_companies or [])
+        return [FactCandidate(text=t, suggested_subsection_id="4.2",   # LLM предлагает L4
+                              suggested_flag="green", confidence=0.9, rationale="t") for t in texts]
+    monkeypatch.setattr(main, "reclassify_facts", fake_reclassify)
+    res = main._compute_methodology_moves(conn, "co")
+    to = {m["fact_id"]: m["to_sid"] for m in res["moves"]}
+    assert to.get(base) == "4.2"          # базовый тег проигнорирован → НЕ клампится, остаётся L4
+    assert to.get(other) == "2.1"         # другой компании → гард увёл в L2
+    # в reclassify базовый тег ушёл пустым, другой — как есть
+    assert seen["about"] == ["", "Gett"]
+
+
 def test_reclassify_facts_no_key_fallback(conn):
     # без ANTHROPIC_API_KEY generate_json → None → keyword-стаб, без падения
     out = reclassify_facts(["some fact text about revenue growth"], {}, {})
