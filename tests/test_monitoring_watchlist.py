@@ -393,3 +393,35 @@ def test_missing_date_is_resolved_only_for_survivors(conn):
     assert kept["published_at"] == "2026-07-09" and kept["duration_sec"] == 1800
     assert dropped["published_at"] == "", "за отсеянным в сеть не ходим"
     assert len(asked) == 1
+
+
+def test_reassess_updates_verdicts_without_touching_state(conn):
+    """Переоценка меняет вердикт и причину у собранных находок, но не их состояние:
+    что аналитик уже скрыл или разобрал — его решение, а не модели."""
+    from ir_storyboard import watchlist
+
+    item_id = watchlist.add_item(conn, "test_founder", "youtube_channel", {"url": CHANNEL})
+    with patch("ir_storyboard.watchlist.fetch_channel_entries", return_value=_entries()), \
+         patch("ir_storyboard.llm.generate_json", return_value=None):
+        watchlist.check_item(conn, item_id)
+
+    cands = watchlist.list_candidates(conn, "test_founder", state=None)
+    watchlist.set_candidate_state(conn, cands[0]["id"], "dismissed")
+
+    seen = {}
+
+    def _fake(items, speaker_names=None, company_name="", model=None):
+        seen["items"] = items
+        return [{"relevance": "unlikely", "note": "это карточка спикера, а не выступление"}
+                for _ in items]
+
+    with patch("ir_storyboard.llm.assess_candidate_relevance", _fake):
+        res = watchlist.reassess_candidates(conn, "test_founder")
+
+    assert res["checked"] == 1, "скрытые находки не переоцениваем"
+    assert all(i.get("url") for i in seen["items"]), "ссылка обязана уходить в оценку формы"
+    left = watchlist.list_candidates(conn, "test_founder", state=None)
+    by_id = {c["id"]: c for c in left}
+    assert by_id[cands[0]["id"]]["state"] == "dismissed"
+    rest = [c for c in left if c["id"] != cands[0]["id"]][0]
+    assert rest["relevance"] == "unlikely" and "карточка спикера" in rest["relevance_note"]

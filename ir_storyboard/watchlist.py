@@ -397,7 +397,7 @@ def _assess_and_store(conn: sqlite3.Connection, client_id: str, item: dict,
     crow = conn.execute("SELECT name FROM clients WHERE id = ?", (client_id,)).fetchone()
     verdicts = assess_candidate_relevance(
         [{"title": e.get("title", ""), "description": e.get("description", ""),
-          "channel": e.get("channel", "")} for e in fresh],
+          "channel": e.get("channel", ""), "url": e.get("url", "")} for e in fresh],
         speaker_names=names,
         company_name=(crow["name"] if crow else "") or "",
     )
@@ -430,6 +430,54 @@ def _fetch_published_at(url: str) -> Optional[tuple[str, Optional[int]]]:
         return ((meta.upload_date or "")[:10], meta.duration_sec or None)
     except Exception:
         return None
+
+
+def reassess_candidates(conn: sqlite3.Connection, client_id: str,
+                        states: tuple = ("new",)) -> dict:
+    """Пересчитать релевантность уже собранных находок (после правки промпта).
+
+    Судим по тому, что сохранено: заголовок и ссылка (описание из выдачи мы не храним —
+    это осознанно, снимок чужого текста нам не нужен). Домен при этом сам по себе
+    сильный сигнал о форме, так что переоценка осмысленна. Дальше — обычная запись
+    вердикта; состояние кандидата (`dismissed`/`ingested`) не трогаем.
+    """
+    from .llm import assess_candidate_relevance
+
+    placeholders = ",".join("?" * len(states))
+    rows = [dict(r) for r in conn.execute(
+        f"""SELECT c.id, c.title, c.url, c.norm_url, c.relevance, c.watchlist_item_id
+              FROM monitor_candidates c
+             WHERE c.client_id = ? AND c.state IN ({placeholders})""",
+        (client_id, *states))]
+    if not rows:
+        return {"client_id": client_id, "checked": 0, "changed": 0}
+
+    crow = conn.execute("SELECT name FROM clients WHERE id = ?", (client_id,)).fetchone()
+    company = (crow["name"] if crow else "") or ""
+    changed = 0
+    by_item: dict[Any, list[dict]] = {}
+    for r in rows:
+        by_item.setdefault(r["watchlist_item_id"], []).append(r)
+
+    for item_id, group in by_item.items():
+        item = get_item(conn, item_id) or {}
+        names = speaker_names(conn, client_id, item.get("speaker_entity_id"))
+        for start in range(0, len(group), 20):
+            chunk = group[start:start + 20]
+            verdicts = assess_candidate_relevance(
+                [{"title": r["title"], "url": r["norm_url"] or r["url"],
+                  "description": "", "channel": ""} for r in chunk],
+                speaker_names=names, company_name=company,
+            )
+            for r, v in zip(chunk, verdicts):
+                new_rel = v.get("relevance", "unclear")
+                if new_rel != r["relevance"]:
+                    changed += 1
+                conn.execute(
+                    "UPDATE monitor_candidates SET relevance = ?, relevance_note = ? WHERE id = ?",
+                    (new_rel, (v.get("note", "") or "")[:300], r["id"]))
+    conn.commit()
+    return {"client_id": client_id, "checked": len(rows), "changed": changed}
 
 
 def check_client(conn: sqlite3.Connection, client_id: str, *, limit: int = 15) -> dict:
