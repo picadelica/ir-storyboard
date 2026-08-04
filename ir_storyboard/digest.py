@@ -55,6 +55,25 @@ def load_cached_transcript(conn: sqlite3.Connection, url: str) -> Optional[dict]
     }
 
 
+def episode_order_key(conn: sqlite3.Connection, client_id: str, norm_url: str) -> str:
+    """Чем упорядочивать эфиры спикера: дата выступления, иначе дата разбора.
+
+    Дату выступления знаем не всегда (в старых прогонах мета пустая). Показывать
+    вместо неё дату разбора нельзя — это разные вещи, — но упорядочить по ней можно:
+    архив всё равно разбирают позже свежего эфира редко, а «сегодня» как ключ
+    отправляло бы каждый эфир без даты в конец очереди.
+    """
+    known = episode_date(conn, client_id, norm_url)
+    if known:
+        return known
+    row = conn.execute(
+        """SELECT MIN(parsed_at) AS first_seen FROM ingest_audit
+            WHERE client_id = ? AND source_artifact = ?""",
+        (client_id, norm_url),
+    ).fetchone()
+    return (row["first_seen"] or "")[:10] if row else ""
+
+
 def episode_date(conn: sqlite3.Connection, client_id: str, norm_url: str) -> str:
     """Дата выступления — из превью ингеста этого эпизода (сети не требует)."""
     rows = conn.execute(
@@ -164,7 +183,7 @@ def previous_digests(conn: sqlite3.Connection, speaker_entity_id: int,
     Ключ сортировки — дата выступления, а при её отсутствии время сборки обзора:
     оба формата ISO, поэтому сравниваются как строки.
     """
-    key = "COALESCE(NULLIF(episode_date,''), created_at)"
+    key = "COALESCE(NULLIF(order_key,''), NULLIF(episode_date,''), created_at)"
     sql = f"SELECT * FROM digests WHERE speaker_entity_id = ? AND norm_url != ?"
     args: list[Any] = [speaker_entity_id, exclude_norm_url]
     if before_key:
@@ -232,10 +251,10 @@ def build_and_store(conn: sqlite3.Connection, client_id: str, url: str,
     sname = speaker_name(conn, speaker)
 
     now = datetime.now(timezone.utc).isoformat()
+    order_key = episode_order_key(conn, client_id, norm) or now[:10]
     payload = llm.build_episode_digest(cached["segments"], meta=meta,
                                        speaker_name=sname, company_name=company)
-    prev = previous_digests(conn, speaker, exclude_norm_url=norm,
-                            before_key=date or now)
+    prev = previous_digests(conn, speaker, exclude_norm_url=norm, before_key=order_key)
     payload["comparison"] = (llm.compare_with_previous_digests(payload, prev, speaker_name=sname)
                              if prev else None)
     payload = validate_quotes(payload, cached["segments"])
@@ -244,11 +263,11 @@ def build_and_store(conn: sqlite3.Connection, client_id: str, url: str,
     conn.execute(
         """INSERT OR REPLACE INTO digests
              (id, client_id, norm_url, source_id, speaker_entity_id, episode_date,
-              title, payload, model, created_at)
+              order_key, title, payload, model, created_at)
            VALUES ((SELECT id FROM digests WHERE norm_url = ? AND speaker_entity_id = ?),
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (norm, speaker,
-         client_id, norm, (src["id"] if src else None), speaker, date,
+         client_id, norm, (src["id"] if src else None), speaker, date, order_key,
          meta.get("title", ""), json.dumps(payload, ensure_ascii=False),
          _digest_model(), now),
     )

@@ -228,6 +228,20 @@ def test_later_episode_is_not_treated_as_previous(conn, tmp_path):
     assert [p["main_motif"] for p in prev] == ["2026-01-10"], "поздний эфир не «прошлый»"
 
 
+def test_order_key_falls_back_to_ingest_date(conn, tmp_path):
+    """Даты выступления нет (у старых прогонов пустая мета) → упорядочиваем по дате
+    разбора, но аналитику её НЕ показываем как дату эфира."""
+    from ir_storyboard import digest
+
+    _transcribed(conn, tmp_path)
+    conn.execute("UPDATE ingest_audit SET preview_json='{}', parsed_at='2026-03-05T10:00:00+00:00' "
+                 "WHERE client_id='test_founder'")
+    conn.commit()
+    norm = digest.norm_candidate_url(URL)
+    assert digest.episode_date(conn, "test_founder", norm) == ""
+    assert digest.episode_order_key(conn, "test_founder", norm) == "2026-03-05"
+
+
 def test_first_episode_has_no_comparison(conn, tmp_path):
     from ir_storyboard import digest, matrix
 

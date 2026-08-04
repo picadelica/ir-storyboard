@@ -385,6 +385,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_digests_speaker ON digests(speaker_entity_id, created_at)")
+    # order_key — чем упорядочиваем эфиры спикера. Дата выступления известна не всегда
+    # (у старых прогонов в превью пустая мета), тогда берём дату разбора. Отдельно от
+    # episode_date: ту показываем аналитику и врать в ней нельзя, эта — только сортировка.
+    _add_column_if_missing(conn, "digests", "order_key", "TEXT NOT NULL DEFAULT ''")
     # app-wide one-time migration flags (key/value). Keeps one-shot data fixes from
     # re-running on every startup (which would clobber later manual edits).
     conn.execute("""
