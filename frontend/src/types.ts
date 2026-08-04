@@ -777,7 +777,7 @@ export interface WatchlistItem {
   id: number;
   client_id: string;
   kind: WatchlistKind;
-  config: { url?: string; feed_url?: string; query?: string };
+  config: { url?: string; feed_url?: string; query?: string; window?: string };
   label: string;
   speaker_entity_id: number | null;
   speaker_name?: string | null;

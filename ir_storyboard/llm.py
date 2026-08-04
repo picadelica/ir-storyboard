@@ -73,6 +73,7 @@ class SearchHit:
     title: str
     url: str
     snippet: str
+    published: str = ""   # 'YYYY-MM-DD', если провайдер сообщил дату публикации
 
 
 # ─────────────────────────── keyword stub ──────────────────────────────────
@@ -134,7 +135,7 @@ def stub_classify(text: str) -> FactCandidate:
     )
 
 
-def stub_web_search(query: str, max_hits: int = 5) -> List[SearchHit]:
+def stub_web_search(query: str, max_hits: int = 5, *, since: str = "") -> List[SearchHit]:
     return []
 
 
@@ -350,19 +351,30 @@ def _try_init_tavily() -> None:
 
     _tavily = TavilyClient(api_key=api_key)
 
-    def _search_real(query: str, max_hits: int = 5) -> List[SearchHit]:
+    def _search_real(query: str, max_hits: int = 5, *, since: str = "") -> List[SearchHit]:
+        """since='YYYY-MM-DD' сужает выдачу до материалов не старше этой даты
+        (мониторингу нужно «что появилось с прошлой проверки», а не весь архив)."""
+        kwargs = {"query": query, "max_results": max_hits, "search_depth": "basic"}
+        if since:
+            kwargs["start_date"] = since
         try:
-            result = _tavily.search(query=query, max_results=max_hits, search_depth="basic")
-            return [
-                SearchHit(
-                    title=item.get("title", ""),
-                    url=item.get("url", ""),
-                    snippet=(item.get("content") or "")[:400],
-                )
-                for item in result.get("results", [])
-            ]
+            result = _tavily.search(**kwargs)
+        except TypeError:      # старый клиент без start_date — ищем без окна
+            try:
+                result = _tavily.search(query=query, max_results=max_hits, search_depth="basic")
+            except Exception:
+                return []
         except Exception:
             return []
+        return [
+            SearchHit(
+                title=item.get("title", ""),
+                url=item.get("url", ""),
+                snippet=(item.get("content") or "")[:400],
+                published=(item.get("published_date") or "")[:10],
+            )
+            for item in result.get("results", [])
+        ]
 
     web_search = _search_real
 

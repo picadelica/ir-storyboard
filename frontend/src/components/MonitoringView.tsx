@@ -21,6 +21,14 @@ const KIND_LABEL: Record<WatchlistKind, string> = {
   search_query: "поиск",
 };
 
+const WINDOW_LABEL: Record<string, string> = {
+  auto: "год, дальше только новое",
+  all: "за всё время",
+  year: "год",
+  quarter: "квартал",
+  month: "месяц",
+};
+
 /** Русские числительные: 1 находка, 2 находки, 5 находок. */
 function plural(n: number, one: string, few: string, many: string): string {
   const mod10 = n % 10, mod100 = n % 100;
@@ -255,6 +263,7 @@ export default function MonitoringView({ clientId }: Props) {
                       {it.last_checked_at
                         ? `проверен ${new Date(it.last_checked_at).toLocaleString()}`
                         : "ещё не проверялся"}
+                      {it.kind === "search_query" && ` · глубина: ${WINDOW_LABEL[it.config.window || "auto"] ?? it.config.window}`}
                       {it.status === "paused" && " · на паузе"}
                     </div>
                     {it.last_error && (
@@ -321,6 +330,7 @@ function AddSourceForm({ clientId, founders, onDone, onError }: {
   const [kind, setKind] = useState<WatchlistKind>("youtube_channel");
   const [value, setValue] = useState("");
   const [speaker, setSpeaker] = useState<number | "">("");
+  const [window, setWindow] = useState("auto");
   const [busy, setBusy] = useState(false);
 
   const placeholder = kind === "youtube_channel"
@@ -333,7 +343,7 @@ function AddSourceForm({ clientId, founders, onDone, onError }: {
     const config: Record<string, string> =
       kind === "youtube_channel" ? { url: value.trim() }
       : kind === "rss" ? { feed_url: value.trim() }
-      : { query: value.trim() };
+      : { query: value.trim(), window };
     setBusy(true);
     api.addWatchlistItem({
       client_id: clientId, kind, config,
@@ -368,6 +378,17 @@ function AddSourceForm({ clientId, founders, onDone, onError }: {
                   className="text-sm px-2 py-1.5 border border-ink-line rounded">
             <option value="">чей источник (необяз.)</option>
             {founders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        )}
+        {kind === "search_query" && (
+          <select value={window} onChange={e => setWindow(e.target.value)}
+                  title="Насколько глубоко искать в прошлое"
+                  className="text-sm px-2 py-1.5 border border-ink-line rounded">
+            <option value="auto">сначала за год, потом только новое</option>
+            <option value="all">за всё время</option>
+            <option value="year">только за год</option>
+            <option value="quarter">только за квартал</option>
+            <option value="month">только за месяц</option>
           </select>
         )}
         <button onClick={submit} disabled={busy || !value.trim()}

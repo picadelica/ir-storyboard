@@ -303,3 +303,59 @@ def test_api_rejects_unknown_client_and_bad_kind(api):
         "client_id": "test_founder", "kind": "telepathy", "config": {}}).status_code == 400
     assert api.post("/api/monitoring/watchlist", json={
         "client_id": "test_founder", "kind": "rss", "config": {}}).status_code == 400
+
+
+# ── окно поиска ──────────────────────────────────────────────────────────────
+
+def test_search_window_backfills_then_narrows(conn):
+    """Первый обход поиска берёт год (архив тоже материал), дальше — только прирост
+    с прошлой проверки, с нахлёстом на отставание поисковых индексов."""
+    from datetime import date
+
+    from ir_storyboard import watchlist
+
+    today = date(2026, 8, 4)
+    item = {"kind": "search_query", "config": {"query": "David Liberman"},
+            "last_checked_at": None}
+    assert watchlist.search_window_since(item, today) == "2025-08-04"
+
+    item["last_checked_at"] = "2026-07-30T09:00:00+00:00"
+    assert watchlist.search_window_since(item, today) == "2026-07-23"   # −7 дней нахлёста
+
+    item["config"]["window"] = "all"
+    assert watchlist.search_window_since(item, today) == ""
+    item["config"]["window"] = "month"
+    assert watchlist.search_window_since(item, today) == "2026-07-04"
+
+
+def test_search_source_passes_window_to_provider(conn):
+    """Окно доезжает до провайдера, а дата публикации из выдачи — в кандидата."""
+    from ir_storyboard import watchlist
+    from ir_storyboard.llm import SearchHit
+
+    item_id = watchlist.add_item(conn, "test_founder", "search_query",
+                                 {"query": "Иван Петров интервью"})
+    seen = {}
+
+    def _fake_search(query, max_hits=5, since=""):
+        seen["query"], seen["since"] = query, since
+        return [SearchHit(title="Иван Петров о найме", url="https://podcast.example/e1",
+                          snippet="разговор", published="2026-07-15")]
+
+    with patch("ir_storyboard.llm.web_search", _fake_search), \
+         patch("ir_storyboard.llm.generate_json", return_value=None):
+        res = watchlist.check_item(conn, item_id)
+
+    assert res["new"] == 1
+    assert seen["query"] == "Иван Петров интервью"
+    assert seen["since"], "первый обход должен идти с нижней границей, а не по всему вебу"
+    cand = watchlist.list_candidates(conn, "test_founder")[0]
+    assert cand["published_at"] == "2026-07-15"
+    assert cand["relevance"] == "likely"
+
+
+def test_bad_window_rejected(conn):
+    from ir_storyboard import watchlist
+    with pytest.raises(ValueError):
+        watchlist.add_item(conn, "test_founder", "search_query",
+                           {"query": "x", "window": "с прошлого вторника"})

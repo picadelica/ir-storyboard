@@ -15,7 +15,7 @@ import json
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 
@@ -90,6 +90,10 @@ def add_item(conn: sqlite3.Connection, client_id: str, kind: str, config: dict,
     elif kind == "search_query":
         if not str(cfg.get("query", "")).strip():
             raise ValueError("нужен поисковый запрос")
+        window = str(cfg.get("window") or "auto").strip().lower()
+        if window not in WINDOWS and window != "auto":
+            raise ValueError("окно поиска: auto | all | year | quarter | month")
+        cfg["window"] = window
 
     cur = conn.execute(
         """INSERT INTO watchlist_items
@@ -260,20 +264,53 @@ def parse_rss(body: bytes, limit: int = 15) -> list[dict]:
     return out
 
 
-def fetch_search_entries(query: str, limit: int = 10) -> list[dict]:
+def fetch_search_entries(query: str, limit: int = 10, since: str = "") -> list[dict]:
     """Поиск по имени спикера — тот же web_search, что в канале online_research
-    (Tavily при ключе, детерминистский стаб без него)."""
+    (Tavily при ключе, детерминистский стаб без него). since='YYYY-MM-DD' — нижняя
+    граница выдачи."""
     from .llm import web_search
-    hits = web_search(query, max_hits=limit) or []
+    hits = web_search(query, max_hits=limit, since=since) or []
     return [{
         "url": h.url,
         "title": h.title or "",
-        "published_at": "",
+        "published_at": getattr(h, "published", "") or "",
         "duration_sec": None,
         "thumb_url": "",
         "description": (h.snippet or "")[:600],
         "channel": "",
     } for h in hits if getattr(h, "url", "")]
+
+
+# Окно поиска. Первый обход источника должен зачерпнуть архив — выступление
+# двухлетней давности для матрицы такой же материал, как вчерашнее, если мы его
+# ещё не разбирали. Дальше нужен только прирост, иначе каждый прогон возвращает
+# одно и то же. Нахлёст — потому что поисковые индексы отстают на несколько дней.
+BACKFILL_DAYS = 365
+OVERLAP_DAYS = 7
+WINDOWS = {"all": 0, "year": 365, "quarter": 92, "month": 31}
+
+
+def search_window_since(item: dict, today: Optional[date] = None) -> str:
+    """Нижняя граница поиска для источника: '' = без ограничения.
+
+    config.window: 'auto' (по умолчанию) | 'all' | 'year' | 'quarter' | 'month'.
+    В 'auto' первый обход берёт год, последующие — «с прошлой проверки минус нахлёст».
+    """
+    cfg = item.get("config") or {}
+    window = str(cfg.get("window") or "auto").strip().lower()
+    today = today or datetime.now(timezone.utc).date()
+
+    if window in WINDOWS:
+        days = WINDOWS[window]
+        return "" if days == 0 else (today - timedelta(days=days)).isoformat()
+
+    last = (item.get("last_checked_at") or "")[:10]
+    if not last:
+        return (today - timedelta(days=BACKFILL_DAYS)).isoformat()
+    try:
+        return (date.fromisoformat(last) - timedelta(days=OVERLAP_DAYS)).isoformat()
+    except ValueError:
+        return (today - timedelta(days=BACKFILL_DAYS)).isoformat()
 
 
 def _entries_for_item(item: dict, limit: int) -> list[dict]:
@@ -283,7 +320,8 @@ def _entries_for_item(item: dict, limit: int) -> list[dict]:
     if kind == "rss":
         return fetch_rss_entries(str(cfg.get("feed_url", "")), limit=limit)
     if kind == "search_query":
-        return fetch_search_entries(str(cfg.get("query", "")), limit=limit)
+        return fetch_search_entries(str(cfg.get("query", "")), limit=limit,
+                                    since=search_window_since(item))
     raise ValueError(f"unknown kind: {kind}")
 
 
