@@ -204,6 +204,30 @@ def test_unknown_episode_date_stays_empty(conn, tmp_path):
     assert prev and prev[0]["date"] == "", "пустую дату не подменяем датой записи обзора"
 
 
+def test_later_episode_is_not_treated_as_previous(conn, tmp_path):
+    """В «прошлые выступления» не попадает эфир, который состоялся ПОЗЖЕ.
+
+    Аналитик разбирает архив не по порядку; без отсечки по дате «что изменилось»
+    считалось задом наперёд (поймано на живом прогоне G2).
+    """
+    from ir_storyboard import digest, matrix
+
+    eid = matrix.add_entity(conn, client_id="test_founder", kind="founder", name="Иван Петров")
+    for url, date in [("https://www.youtube.com/watch?v=older1", "2026-01-10"),
+                      ("https://www.youtube.com/watch?v=newer1", "2026-09-10")]:
+        conn.execute(
+            """INSERT INTO digests (client_id, norm_url, speaker_entity_id, episode_date,
+                                    title, payload, model, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'test', '2026-08-04T10:00:00+00:00')""",
+            ("test_founder", url, eid, date, f"эфир {date}",
+             json.dumps({"main_motif": date, "key_moments": []}, ensure_ascii=False)),
+        )
+    conn.commit()
+
+    prev = digest.previous_digests(conn, eid, exclude_norm_url=URL, before_key="2026-06-01")
+    assert [p["main_motif"] for p in prev] == ["2026-01-10"], "поздний эфир не «прошлый»"
+
+
 def test_first_episode_has_no_comparison(conn, tmp_path):
     from ir_storyboard import digest, matrix
 

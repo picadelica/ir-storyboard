@@ -155,14 +155,24 @@ def _row_to_digest(row: sqlite3.Row) -> dict:
 
 
 def previous_digests(conn: sqlite3.Connection, speaker_entity_id: int,
-                     exclude_norm_url: str = "") -> list[dict]:
-    """Прошлые обзоры этого спикера по возрастанию даты — вход для сравнения."""
-    rows = conn.execute(
-        """SELECT * FROM digests
-            WHERE speaker_entity_id = ? AND norm_url != ?
-            ORDER BY COALESCE(NULLIF(episode_date,''), created_at) ASC""",
-        (speaker_entity_id, exclude_norm_url),
-    ).fetchall()
+                     exclude_norm_url: str = "", before_key: str = "") -> list[dict]:
+    """Обзоры этого спикера СТРОГО ДО указанного момента, по возрастанию даты.
+
+    before_key — дата разбираемого выступления (или момент сборки обзора, если даты
+    нет). Без этой отсечки в «прошлые» попадали и более поздние эфиры: аналитик
+    разбирает архив не по порядку, и тогда «что изменилось» считалось задом наперёд.
+    Ключ сортировки — дата выступления, а при её отсутствии время сборки обзора:
+    оба формата ISO, поэтому сравниваются как строки.
+    """
+    key = "COALESCE(NULLIF(episode_date,''), created_at)"
+    sql = f"SELECT * FROM digests WHERE speaker_entity_id = ? AND norm_url != ?"
+    args: list[Any] = [speaker_entity_id, exclude_norm_url]
+    if before_key:
+        # <= а не <: если даты совпали (два эфира в один день), порядок неизвестен —
+        # лучше показать сравнение, чем молча его потерять. Себя исключает norm_url.
+        sql += f" AND {key} <= ?"
+        args.append(before_key)
+    rows = conn.execute(f"{sql} ORDER BY {key} ASC", args).fetchall()
     out = []
     for r in rows[-_MAX_PREVIOUS:]:
         d = _row_to_digest(r)
@@ -221,15 +231,16 @@ def build_and_store(conn: sqlite3.Connection, client_id: str, url: str,
     meta = {**cached["meta"], "upload_date": date}
     sname = speaker_name(conn, speaker)
 
+    now = datetime.now(timezone.utc).isoformat()
     payload = llm.build_episode_digest(cached["segments"], meta=meta,
                                        speaker_name=sname, company_name=company)
-    prev = previous_digests(conn, speaker, exclude_norm_url=norm)
+    prev = previous_digests(conn, speaker, exclude_norm_url=norm,
+                            before_key=date or now)
     payload["comparison"] = (llm.compare_with_previous_digests(payload, prev, speaker_name=sname)
                              if prev else None)
     payload = validate_quotes(payload, cached["segments"])
 
     src = conn.execute("SELECT id FROM sources WHERE url = ?", (norm,)).fetchone()
-    now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """INSERT OR REPLACE INTO digests
              (id, client_id, norm_url, source_id, speaker_entity_id, episode_date,
