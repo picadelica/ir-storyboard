@@ -21,12 +21,21 @@ const KIND_LABEL: Record<WatchlistKind, string> = {
   search_query: "поиск",
 };
 
+/** Русские числительные: 1 находка, 2 находки, 5 находок. */
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
 /** Мониторинг: что смотрим за клиентом и что нашлось. Разбор — обычный ингест. */
 export default function MonitoringView({ clientId }: Props) {
   const qc = useQueryClient();
   const nav = useNavigate();
   const [error, setError] = useState("");
   const [showSources, setShowSources] = useState(false);
+  const [showFiltered, setShowFiltered] = useState(false);
 
   const candidates = useQuery<MonitorCandidate[]>({
     queryKey: ["monitor-candidates", clientId],
@@ -73,6 +82,10 @@ export default function MonitoringView({ clientId }: Props) {
   });
 
   const list = candidates.data ?? [];
+  // Отсеянное фильтром не мешается в очереди, но и не пропадает: аналитик должен
+  // иметь возможность проверить, что фильтр не выбросил лишнего.
+  const queue = list.filter(c => c.relevance !== "unlikely");
+  const filteredOut = list.filter(c => c.relevance === "unlikely");
   const activeCount = (items.data ?? []).filter(i => i.status === "active").length;
 
   return (
@@ -101,8 +114,8 @@ export default function MonitoringView({ clientId }: Props) {
       )}
       {checkMut.data && !checkMut.isPending && (
         <div className="text-xs text-ink-mute">
-          Проверено источников: {checkMut.data.items_checked ?? 1} · найдено {checkMut.data.found} ·
-          новых {checkMut.data.new}
+          Проверено источников: {checkMut.data.items_checked ?? 1} · просмотрено {checkMut.data.found} ·
+          новых для нас {checkMut.data.new} (сколько из них дошло до очереди — ниже)
           {(checkMut.data.errors ?? []).length > 0 && (
             <span className="text-flag-red"> · с ошибкой: {(checkMut.data.errors ?? []).length}</span>
           )}
@@ -113,20 +126,23 @@ export default function MonitoringView({ clientId }: Props) {
       <section className="space-y-3">
         <div className="flex items-baseline gap-2">
           <h3 className="text-sm font-medium">Новые выступления</h3>
-          <span className="text-xs text-ink-mute">{list.length}</span>
+          <span className="text-xs text-ink-mute">{queue.length}</span>
         </div>
 
         {candidates.isLoading && <div className="text-sm text-ink-mute">Загружаем…</div>}
-        {!candidates.isLoading && list.length === 0 && (
+        {!candidates.isLoading && queue.length === 0 && (
           <div className="text-sm text-ink-mute border border-dashed border-ink-line rounded p-4">
             {activeCount === 0
               ? "Пока не за чем следить — добавьте канал, фид или поиск по имени спикера ниже."
-              : "Новых выступлений нет. Как появятся — окажутся здесь."}
+              : filteredOut.length > 0
+                ? `Новых выступлений нет: ${filteredOut.length} ${plural(filteredOut.length,
+                    "находка отсеяна", "находки отсеяны", "находок отсеяно")} как чужие.`
+                : "Новых выступлений нет. Как появятся — окажутся здесь."}
           </div>
         )}
 
         <ul className="space-y-2">
-          {list.map(c => {
+          {queue.map(c => {
             const rel = RELEVANCE_STYLE[c.relevance] ?? RELEVANCE_STYLE.unclear;
             return (
               <li key={c.id} className="border border-ink-line rounded p-3 flex gap-3">
@@ -173,6 +189,33 @@ export default function MonitoringView({ clientId }: Props) {
             );
           })}
         </ul>
+
+        {/* Отсеянное — свёрнуто. Не прячем совсем: если фильтр ошибётся, аналитик
+            должен это увидеть и вытащить находку руками. */}
+        {filteredOut.length > 0 && (
+          <div>
+            <button onClick={() => setShowFiltered(v => !v)}
+                    className="text-xs text-ink-mute hover:text-ink">
+              {showFiltered ? "▾" : "▸"} Отсеяно как чужое ({filteredOut.length})
+            </button>
+            {showFiltered && (
+              <ul className="mt-2 space-y-1.5">
+                {filteredOut.map(c => (
+                  <li key={c.id} className="text-xs flex items-baseline gap-2 border-l-2 border-ink-line pl-3">
+                    <a href={c.url} target="_blank" rel="noreferrer"
+                       className="text-ink-mute hover:text-ink hover:underline break-words">
+                      {c.title || c.norm_url}
+                    </a>
+                    <span className="text-ink-mute shrink-0">·</span>
+                    <span className="text-ink-mute italic min-w-0 flex-1">{c.relevance_note}</span>
+                    <button onClick={() => ingestMut.mutate(c.id)}
+                            className="text-blue-600 hover:underline shrink-0">всё-таки разобрать</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </section>
 
       {/* ── предложения из уже разобранного ── */}
