@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -33,6 +34,13 @@ def _rows(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict]:
 
 def clone(conn: sqlite3.Connection, src: str, dst: str, name: str) -> dict:
     counts: dict[str, int] = {}
+
+    # 0. Чистим то, что restore_client не покрывает (он сносит только матрицу),
+    #    иначе повторный прогон с --force удвоит сущности и компании.
+    conn.execute("DELETE FROM entity_facts WHERE entity_id IN "
+                 "(SELECT id FROM entities WHERE client_id=?)", (dst,))
+    conn.execute("DELETE FROM entities WHERE client_id=?", (dst,))
+    conn.execute("DELETE FROM mentioned_companies WHERE client_id=?", (dst,))
 
     # 1. Сущности — первыми: на них ссылаются факты (speaker_entity_id).
     entity_map: dict[int, int] = {}
@@ -60,12 +68,26 @@ def clone(conn: sqlite3.Connection, src: str, dst: str, name: str) -> dict:
     #    аккуратная работа с общими sources).
     snap = backup.snapshot_client(conn, src)
     snap["client_id"] = dst
+
+    # id прогонов ингеста — TEXT PRIMARY KEY (UUID) и восстанавливаются как есть,
+    # поэтому копии нужны свои: иначе UNIQUE-конфликт с прогонами оригинала.
+    # Ссылку facts.ingest_audit_id переклеиваем на новые id.
+    audit_map: dict[str, str] = {}
+    for row in snap["tables"].get("ingest_audit", []):
+        old = row.get("id")
+        if old:
+            audit_map[old] = str(uuid.uuid4())
+            row["id"] = audit_map[old]
+
     for table, rows in snap["tables"].items():
         for row in rows:
             if "client_id" in row:
                 row["client_id"] = dst
-            if table == "facts" and row.get("speaker_entity_id"):
-                row["speaker_entity_id"] = entity_map.get(row["speaker_entity_id"])
+            if table == "facts":
+                if row.get("speaker_entity_id"):
+                    row["speaker_entity_id"] = entity_map.get(row["speaker_entity_id"])
+                if row.get("ingest_audit_id"):
+                    row["ingest_audit_id"] = audit_map.get(row["ingest_audit_id"])
     snap["tables"]["clients"] = [{**snap["tables"]["clients"][0], "id": dst, "name": name}]
 
     restored = backup.restore_client(conn, dst, snap)
