@@ -359,3 +359,37 @@ def test_bad_window_rejected(conn):
     with pytest.raises(ValueError):
         watchlist.add_item(conn, "test_founder", "search_query",
                            {"query": "x", "window": "с прошлого вторника"})
+
+
+def test_missing_date_is_resolved_only_for_survivors(conn):
+    """Дату дотягиваем метаданными лишь у находок, прошедших фильтр: за отсеянное
+    платить секундой сети незачем."""
+    from ir_storyboard import watchlist
+    from ir_storyboard.llm import SearchHit
+
+    item_id = watchlist.add_item(conn, "test_founder", "search_query",
+                                 {"query": "Иван Петров"})
+    hits = [SearchHit(title="Иван Петров: интервью", url="https://youtu.be/keepme", snippet="s"),
+            SearchHit(title="Обзор рынка без гостей", url="https://youtu.be/dropme", snippet="s")]
+    asked: list[str] = []
+
+    def _meta(url):
+        asked.append(url)
+        from ir_storyboard.ingest.loaders.youtube_url import YouTubeVideoMeta
+        return YouTubeVideoMeta(video_id="keepme", canonical_url=url, title="t",
+                                channel_name="c", channel_url="", duration_sec=1800,
+                                upload_date="2026-07-09", description="", language="en")
+
+    verdicts = {"results": [{"relevance": "likely", "note": "нужный человек"},
+                            {"relevance": "unlikely", "note": "чужая тема"}]}
+    with patch("ir_storyboard.llm.web_search", lambda q, max_hits=5, since="": hits), \
+         patch("ir_storyboard.llm.generate_json", return_value=verdicts), \
+         patch("ir_storyboard.ingest.loaders.youtube_url.fetch_metadata", side_effect=_meta):
+        watchlist.check_item(conn, item_id)
+
+    by_url = {c["norm_url"]: c for c in watchlist.list_candidates(conn, "test_founder", state=None)}
+    kept = by_url["https://www.youtube.com/watch?v=keepme"]
+    dropped = by_url["https://www.youtube.com/watch?v=dropme"]
+    assert kept["published_at"] == "2026-07-09" and kept["duration_sec"] == 1800
+    assert dropped["published_at"] == "", "за отсеянным в сеть не ходим"
+    assert len(asked) == 1

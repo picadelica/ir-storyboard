@@ -402,11 +402,34 @@ def _assess_and_store(conn: sqlite3.Connection, client_id: str, item: dict,
         company_name=(crow["name"] if crow else "") or "",
     )
     for e, v in zip(fresh, verdicts):
+        relevance = v.get("relevance", "unclear")
         conn.execute(
             "UPDATE monitor_candidates SET relevance = ?, relevance_note = ? WHERE id = ?",
-            (v.get("relevance", "unclear"), (v.get("note", "") or "")[:300], e["id"]),
+            (relevance, (v.get("note", "") or "")[:300], e["id"]),
         )
+        # Дату знают не все источники (веб-поиск отдаёт её редко), а без даты аналитик
+        # не видит, свежее это выступление или трёхлетней давности. Для ютубовских
+        # ссылок дотягиваем метаданными — но только для тех, что прошли фильтр:
+        # платить секундой сети за отсеянное незачем.
+        if relevance != "unlikely" and not (e.get("published_at") or ""):
+            date_str = _fetch_published_at(e.get("url", ""))
+            if date_str:
+                conn.execute("UPDATE monitor_candidates SET published_at = ?, duration_sec = "
+                             "COALESCE(duration_sec, ?) WHERE id = ?",
+                             (date_str[0], date_str[1], e["id"]))
     conn.commit()
+
+
+def _fetch_published_at(url: str) -> Optional[tuple[str, Optional[int]]]:
+    """(дата, длительность) для YouTube-ссылки. Любая осечка — молча None."""
+    if not re.search(r"(youtube\.com/watch|youtu\.be/|youtube\.com/shorts/)", url or ""):
+        return None
+    try:
+        from .ingest.loaders.youtube_url import fetch_metadata, normalize_url
+        meta = fetch_metadata(normalize_url(url))
+        return ((meta.upload_date or "")[:10], meta.duration_sec or None)
+    except Exception:
+        return None
 
 
 def check_client(conn: sqlite3.Connection, client_id: str, *, limit: int = 15) -> dict:
