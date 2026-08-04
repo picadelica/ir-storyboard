@@ -50,6 +50,10 @@ _AUTH_PUBLIC = {"/api/health"}
 @app.on_event("startup")
 def _start_auth_poller():
     auth.start_poller()
+    # Мониторинг: свой цикл внутри приложения (MONITORING_INTERVAL_MIN, 0 = выключен).
+    # Системный cron на сервере не заводим — деплой пересоздаёт контейнер.
+    from ir_storyboard.watchlist import start_scheduler
+    start_scheduler()
 
 
 @app.middleware("http")
@@ -114,15 +118,10 @@ def auth_me(request: Request):
 
 
 # ---------- DB dependency ----------
-
-def get_conn() -> sqlite3.Connection:
-    conn = db.connect()
-    db.init_schema(conn)
-    matrix.seed_layers(conn)
-    try:
-        yield conn
-    finally:
-        conn.close()
+# Живёт в backend/deps.py, чтобы роутеры (backend/routers/*) могли брать ту же самую
+# функцию без кругового импорта main. Имя здесь сохранено: тесты и эндпоинты ниже
+# ссылаются на backend.main.get_conn — это тот же объект, dependency_overrides работает.
+from backend.deps import get_conn  # noqa: E402
 
 
 # ---------- pydantic schemas ----------
@@ -3826,3 +3825,12 @@ def _archive_artifact(src: Path, client_id: str, audit_id: str) -> Optional[Path
         return dest
     except Exception:
         return src
+
+
+# ── routers ───────────────────────────────────────────────────────────────────
+# Новые контуры живут отдельными роутерами (backend/routers/*), main.py их только
+# подключает. Импорт в самом конце — к этому моменту get_conn/_start_llm_job уже
+# определены, поэтому роутеру есть на что ссылаться.
+from backend.routers import monitoring as _monitoring_router  # noqa: E402
+
+app.include_router(_monitoring_router.router)

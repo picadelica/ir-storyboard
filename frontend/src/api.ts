@@ -11,6 +11,8 @@ import type {
   PunchList, ResearchResult, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport, Dossier,
   YouTubeCommitOut, YouTubeHistoryRow, YouTubeJobOut, YouTubePreviewResult,
+  WatchlistItem, WatchlistKind, WatchlistSuggestion, MonitorCandidate, CheckResult,
+  EpisodeDigest, DigestJobResult, DuplicateHint,
 } from "./types";
 
 const API_BASE = "/api";
@@ -545,4 +547,45 @@ export const api = {
   // поиск профилей + фото по конкретному фаундеру
   findFounderProfiles: (clientId: string, name: string): Promise<FounderProfilesResult> =>
     runJob<FounderProfilesResult>(`/clients/${clientId}/founders/profiles/start`, { name }),
+
+  // ── Мониторинг: что смотрим, что нашлось, обзор эпизода ──────────────────
+  watchlist: (clientId: string): Promise<WatchlistItem[]> =>
+    call<WatchlistItem[]>(`/monitoring/watchlist?client_id=${encodeURIComponent(clientId)}`),
+  addWatchlistItem: (body: {
+    client_id: string; kind: WatchlistKind;
+    config: Record<string, string>; label?: string; speaker_entity_id?: number | null;
+  }): Promise<WatchlistItem> =>
+    call<WatchlistItem>("/monitoring/watchlist", { method: "POST", body: JSON.stringify(body) }),
+  pauseWatchlistItem: (id: number, on: boolean): Promise<WatchlistItem> =>
+    call<WatchlistItem>(`/monitoring/watchlist/${id}/${on ? "pause" : "resume"}`, { method: "POST" }),
+  deleteWatchlistItem: (id: number): Promise<{ ok: boolean }> =>
+    call(`/monitoring/watchlist/${id}`, { method: "DELETE" }),
+  watchlistSuggestions: (clientId: string): Promise<WatchlistSuggestion[]> =>
+    call<WatchlistSuggestion[]>(
+      `/monitoring/watchlist/suggestions?client_id=${encodeURIComponent(clientId)}`),
+  // обход источников: сеть + дешёвый фильтр по метаданным — идёт job-ом
+  checkMonitoring: (body: { client_id?: string; item_id?: number }): Promise<CheckResult> =>
+    runJob<CheckResult>("/monitoring/check", body),
+  monitorCandidates: (clientId: string, state = "new"): Promise<MonitorCandidate[]> =>
+    call<MonitorCandidate[]>(
+      `/monitoring/candidates?client_id=${encodeURIComponent(clientId)}&state=${state}`),
+  dismissCandidate: (id: number): Promise<MonitorCandidate> =>
+    call<MonitorCandidate>(`/monitoring/candidates/${id}/dismiss`, { method: "POST" }),
+  // «Разобрать» — отдаёт URL обычному ингесту, сам ничего не разбирает
+  startCandidateIngest: (id: number): Promise<{ candidate: MonitorCandidate; client_id: string; url: string }> =>
+    call(`/monitoring/candidates/${id}/ingest`, { method: "POST" }),
+  episodeDigests: (params: { client_id?: string; url?: string; speaker_entity_id?: number | null; source_id?: number }): Promise<EpisodeDigest[]> => {
+    const qs = new URLSearchParams();
+    if (params.client_id) qs.set("client_id", params.client_id);
+    if (params.url) qs.set("url", params.url);
+    if (params.speaker_entity_id) qs.set("speaker_entity_id", String(params.speaker_entity_id));
+    if (params.source_id) qs.set("source_id", String(params.source_id));
+    return call<EpisodeDigest[]>(`/monitoring/digests?${qs.toString()}`);
+  },
+  buildEpisodeDigest: (body: { client_id: string; url: string; speaker_entity_id?: number | null; force?: boolean }): Promise<DigestJobResult> =>
+    runJob<DigestJobResult>("/monitoring/digests/start", body),
+  duplicateHints: (clientId: string, items: { subsection_id: string; text: string }[]): Promise<DuplicateHint[]> =>
+    call<DuplicateHint[]>("/monitoring/duplicate-hints", {
+      method: "POST", body: JSON.stringify({ client_id: clientId, items }),
+    }),
 };

@@ -16,6 +16,7 @@ import ScorecardView from "./components/ScorecardView";
 import FactAuditView from "./components/FactAuditView";
 import WorkView from "./components/WorkView";
 import ResearchView from "./components/ResearchView";
+import MonitoringView from "./components/MonitoringView";
 import IngestLLMReport from "./components/IngestLLMReport";
 import IngestYouTube from "./components/IngestYouTube";
 import IngestAudio from "./components/IngestAudio";
@@ -145,6 +146,9 @@ function ClientPage() {
           {activeTab === "research" && (
             <ResearchView clientId={clientId!} />
           )}
+          {activeTab === "monitoring" && (
+            <MonitoringView key={clientId} clientId={clientId!} />
+          )}
           {activeTab === "ingest" && (
             <IngestLLMReport clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
@@ -253,6 +257,7 @@ const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
       { id: "audio", label: "Audio" },
       { id: "client-facts", label: "От клиента" },
       { id: "research", label: "Research" },
+      { id: "monitoring", label: "Мониторинг" },
       { id: "work", label: "Work" },
     ],
   },

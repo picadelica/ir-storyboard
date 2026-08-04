@@ -1412,3 +1412,253 @@ def extract_facts_from_research_text(
             continue
 
     return results
+
+
+# ─────────────────── Мониторинг: релевантность кандидата ─────────────────────
+
+_RELEVANCE_SYSTEM = """\
+Ты помогаешь аналитику IR-агентства отсеивать находки ПЕРЕД дорогой транскрипцией.
+Ты видишь ТОЛЬКО метаданные (заголовок, описание, канал) — расшифровки нет и не будет.
+
+Задача: для каждой находки решить, есть ли шанс, что это выступление/интервью/подкаст
+НУЖНОГО человека или про НУЖНУЮ компанию.
+
+relevance:
+- "likely"   — прямо назван нужный человек или его компания, и это похоже на речь этого
+               человека (интервью, подкаст, доклад, эфир);
+- "unclear"  — тема близка, но не видно, говорит ли нужный человек (обзор рынка, чужой
+               доклад с упоминанием, новость);
+- "unlikely" — совпадение имени случайное (другой человек, другая отрасль) или это явно
+               не выступление (реклама, нарезка, музыка).
+
+note: ОДНО предложение по-русски, почему так. Не выдумывай фактов, которых нет в метаданных.
+
+Верни ТОЛЬКО JSON, без markdown:
+{"results":[{"relevance":"likely|unclear|unlikely","note":"одно предложение"}]}
+Ровно один объект на каждую находку, в том же порядке."""
+
+
+def assess_candidate_relevance(items: List[dict], speaker_names: Optional[List[str]] = None,
+                               company_name: str = "",
+                               model: Optional[str] = None) -> List[dict]:
+    """Дешёвый фильтр находок мониторинга по метаданным: [{relevance, note}] на каждую.
+
+    Стаб (нет ключа / модель не ответила): имя спикера встречается в заголовке → likely,
+    иначе unclear. Пропустить лишнее дешевле, чем потерять реальное выступление.
+    """
+    if not items:
+        return []
+    names = [n for n in (speaker_names or []) if (n or "").strip()]
+
+    def _stub_one(it: dict) -> dict:
+        hay = f"{it.get('title', '')} {it.get('channel', '')}".lower()
+        for n in names:
+            if n.lower() in hay:
+                return {"relevance": "likely", "note": f"в заголовке есть «{n}»"}
+        if company_name and company_name.lower() in hay:
+            return {"relevance": "likely", "note": f"в заголовке есть «{company_name}»"}
+        return {"relevance": "unclear", "note": "по метаданным не видно, кто говорит"}
+
+    who = ", ".join(f"«{n}»" for n in names) or "(имена спикеров не заданы)"
+    lines = []
+    for i, it in enumerate(items, 1):
+        lines.append(
+            f"{i}. ЗАГОЛОВОК: {(it.get('title') or '')[:300]}\n"
+            f"   КАНАЛ: {(it.get('channel') or '')[:120]}\n"
+            f"   ОПИСАНИЕ: {(it.get('description') or '')[:400]}"
+        )
+    user = (f"НУЖНЫЕ ЛЮДИ: {who}\n"
+            f"КОМПАНИЯ: «{company_name or '—'}»\n\n"
+            "НАХОДКИ:\n" + "\n".join(lines))
+
+    data = generate_json(_RELEVANCE_SYSTEM, user,
+                         max_tokens=min(4096, 90 * len(items) + 256),
+                         model=model or os.environ.get("LLM_MONITORING_MODEL", ""))
+    results = data.get("results") if isinstance(data, dict) else None
+    if not results:
+        return [_stub_one(it) for it in items]
+    out: List[dict] = []
+    for i, it in enumerate(items):
+        item = results[i] if i < len(results) and isinstance(results[i], dict) else None
+        if not item:
+            out.append(_stub_one(it))
+            continue
+        rel = item.get("relevance")
+        if rel not in ("likely", "unclear", "unlikely"):
+            rel = "unclear"
+        out.append({"relevance": rel, "note": (item.get("note") or "").strip()})
+    return out
+
+
+# ─────────────────── Мониторинг: обзор эпизода ───────────────────────────────
+
+_DIGEST_SYSTEM = """\
+Ты — аналитик IR-агентства. Тебе дана расшифровка выступления (интервью/подкаст/доклад).
+Сделай КОРОТКИЙ обзор для коллеги, который сейчас будет разбирать это выступление на факты.
+Обзор — не пересказ и не отчёт: это ориентировка «о чём тут говорили и на что смотреть».
+
+Верни ТОЛЬКО JSON, без markdown:
+{"main_motif": "1-2 предложения: главный мотив выступления",
+ "blocks": [{"theme": "короткая тема", "start_sec": 0, "end_sec": 0,
+             "gist": "1-2 предложения, о чём этот кусок"}],
+ "key_moments": [{"quote": "ДОСЛОВНАЯ цитата из расшифровки",
+                  "timecode_sec": 0, "note": "почему это важно"}],
+ "indirect": ["что читается между строк — по одному пункту"]}
+
+Жёсткие правила:
+- quote — ДОСЛОВНО из расшифровки, без переписывания и без склейки далёких фрагментов.
+  Лучше короткая точная цитата, чем длинная приглаженная.
+- blocks — 3-7 штук, по порядку, с реальными таймкодами из расшифровки.
+- key_moments — 2-6 штук: то, что аналитик пожалеет, если пропустит.
+- indirect — 0-4 пункта: осторожные наблюдения (уклонился от темы, оговорка, смена тона).
+  Не выдумывай: если между строк ничего нет, верни пустой список.
+- Пиши по-русски, без канцелярита и без оценок «отлично/плохо»."""
+
+
+def build_episode_digest(segments: List[dict], meta: Optional[dict] = None,
+                         speaker_name: str = "", company_name: str = "",
+                         model: Optional[str] = None) -> dict:
+    """Обзор эпизода по расшифровке: {main_motif, blocks, key_moments, indirect}.
+
+    segments — [{text, start, end}] в секундах. Любая неудача → пустой каркас
+    (обзор не обязателен: аналитик работает с фактами, как работал).
+    """
+    meta = meta or {}
+    if not segments:
+        return {"main_motif": "", "blocks": [], "key_moments": [], "indirect": []}
+
+    lines: List[str] = []
+    budget = 60000
+    for s in segments:
+        line = f"[{int(s.get('start') or 0)}] {(s.get('text') or '').strip()}"
+        if not line.strip():
+            continue
+        budget -= len(line)
+        if budget <= 0:
+            lines.append("… (расшифровка обрезана)")
+            break
+        lines.append(line)
+    user = (
+        f"ВЫСТУПЛЕНИЕ: {meta.get('title', '')}\n"
+        f"ПЛОЩАДКА: {meta.get('channel_name', '')}\n"
+        f"ДАТА: {meta.get('upload_date', '')}\n"
+        f"СПИКЕР: {speaker_name or '—'}   КОМПАНИЯ: {company_name or '—'}\n\n"
+        "РАСШИФРОВКА (в квадратных скобках — секунда начала реплики):\n"
+        + "\n".join(lines)
+    )
+    data = generate_json(_DIGEST_SYSTEM, user, max_tokens=4096,
+                         model=model or os.environ.get("LLM_DIGEST_MODEL", ""))
+    if not isinstance(data, dict):
+        return {"main_motif": "", "blocks": [], "key_moments": [], "indirect": []}
+
+    def _num(v) -> float:
+        try:
+            return max(0.0, float(v))
+        except (TypeError, ValueError):
+            return 0.0
+
+    blocks = [{
+        "theme": (b.get("theme") or "").strip()[:120],
+        "start_sec": _num(b.get("start_sec")),
+        "end_sec": _num(b.get("end_sec")),
+        "gist": (b.get("gist") or "").strip()[:400],
+    } for b in (data.get("blocks") or []) if isinstance(b, dict) and (b.get("theme") or b.get("gist"))]
+    moments = [{
+        "quote": (m.get("quote") or "").strip()[:600],
+        "timecode_sec": _num(m.get("timecode_sec")),
+        "note": (m.get("note") or "").strip()[:300],
+    } for m in (data.get("key_moments") or []) if isinstance(m, dict) and (m.get("quote") or "").strip()]
+    indirect = [str(x).strip()[:300] for x in (data.get("indirect") or []) if str(x).strip()]
+    return {
+        "main_motif": (data.get("main_motif") or "").strip()[:600],
+        "blocks": blocks[:8],
+        "key_moments": moments[:8],
+        "indirect": indirect[:4],
+    }
+
+
+_COMPARISON_SYSTEM = """\
+Ты — аналитик IR-агентства. У тебя есть обзоры ПРОШЛЫХ выступлений одного спикера
+(по возрастанию даты) и обзор НОВОГО выступления. Скажи коллеге, что изменилось.
+
+Верни ТОЛЬКО JSON, без markdown:
+{"text": "3-6 предложений прозы для аналитика",
+ "details": [{"topic": "тема", "kind": "shifted|reversed|new|gone_quiet|rhetoric_drift",
+              "was": {"quote": "", "date": ""}, "now": {"quote": "", "timecode_sec": 0},
+              "note": "одно предложение"}]}
+
+Что считается сдвигом (kind):
+- shifted   — та же тема, изменилось СОДЕРЖАНИЕ позиции (условия, сроки, оценка);
+- reversed  — позиция сменилась на противоположную;
+- new       — тема, которой в прошлых выступлениях не было вовсе;
+- gone_quiet — тема звучала в ДВУХ И БОЛЕЕ прошлых выступлениях и полностью пропала сейчас;
+- rhetoric_drift — содержание то же, изменились формулировки/примеры/тон.
+
+Жёсткие правила:
+- Смена риторики при неизменном содержании — это rhetoric_drift, и в text она попадает
+  ТОЛЬКО если повторяется от выступления к выступлению. Иначе живёт в details молча.
+- Не повторяй сдвиги, которые уже перечислены в блоке «УЖЕ ЗАФИКСИРОВАНО» — они известны.
+  Новое упоминание старой темы засчитывается, только если позиция сдвинулась ДАЛЬШЕ.
+- Цитаты дословные: в was — из прошлого обзора (с датой), в now — из нового (с таймкодом).
+- Ничего не выдумывать. Нет содержательных сдвигов — верни пустой details и text,
+  честно говорящий, что позиция держится прежней.
+- Пиши по-русски, спокойно, без выводов «это хорошо/плохо»."""
+
+
+def compare_with_previous_digests(new_digest: dict, previous: List[dict],
+                                  speaker_name: str = "",
+                                  model: Optional[str] = None) -> dict:
+    """{text, details} — что сдвинулось у спикера. previous: [{date, main_motif,
+    key_moments, comparison_details}] по возрастанию даты. Пусто → сравнивать не с чем."""
+    if not previous:
+        return {"text": "", "details": []}
+
+    prev_lines: List[str] = []
+    known: List[str] = []
+    for p in previous[-10:]:
+        prev_lines.append(f"\n— ВЫСТУПЛЕНИЕ {p.get('date', '')}: {(p.get('main_motif') or '')[:600]}")
+        for m in (p.get("key_moments") or [])[:6]:
+            q = (m.get("quote") or "").strip()
+            if q:
+                prev_lines.append(f"    «{q[:300]}»")
+        for d in (p.get("comparison_details") or [])[:8]:
+            if isinstance(d, dict) and d.get("topic"):
+                known.append(f"{p.get('date', '')}: {d.get('topic')} — {d.get('kind', '')}")
+
+    new_lines = [f"МОТИВ: {(new_digest.get('main_motif') or '')[:600]}"]
+    for m in (new_digest.get("key_moments") or [])[:8]:
+        q = (m.get("quote") or "").strip()
+        if q:
+            new_lines.append(f"  [{int(m.get('timecode_sec') or 0)}] «{q[:300]}»")
+    for b in (new_digest.get("blocks") or [])[:8]:
+        new_lines.append(f"  тема: {b.get('theme', '')} — {(b.get('gist') or '')[:200]}")
+
+    user = (
+        f"СПИКЕР: {speaker_name or '—'}\n\n"
+        "ПРОШЛЫЕ ВЫСТУПЛЕНИЯ (по возрастанию даты):" + "".join(prev_lines) + "\n\n"
+        + ("УЖЕ ЗАФИКСИРОВАНО РАНЕЕ (не повторять):\n" + "\n".join(known) + "\n\n" if known else "")
+        + "НОВОЕ ВЫСТУПЛЕНИЕ:\n" + "\n".join(new_lines)
+    )
+    data = generate_json(_COMPARISON_SYSTEM, user, max_tokens=2048,
+                         model=model or os.environ.get("LLM_DIGEST_MODEL", ""))
+    if not isinstance(data, dict):
+        return {"text": "", "details": []}
+    details = []
+    for d in (data.get("details") or []):
+        if not isinstance(d, dict) or not (d.get("topic") or "").strip():
+            continue
+        kind = d.get("kind")
+        if kind not in ("shifted", "reversed", "new", "gone_quiet", "rhetoric_drift"):
+            kind = "shifted"
+        was, now = d.get("was") or {}, d.get("now") or {}
+        details.append({
+            "topic": str(d.get("topic")).strip()[:160],
+            "kind": kind,
+            "was": {"quote": str(was.get("quote", "") or "")[:400],
+                    "date": str(was.get("date", "") or "")[:40]},
+            "now": {"quote": str(now.get("quote", "") or "")[:400],
+                    "timecode_sec": float(now.get("timecode_sec") or 0) if str(
+                        now.get("timecode_sec") or "0").replace(".", "", 1).isdigit() else 0.0},
+            "note": str(d.get("note", "") or "").strip()[:300],
+        })
+    return {"text": (data.get("text") or "").strip()[:2000], "details": details[:10]}
