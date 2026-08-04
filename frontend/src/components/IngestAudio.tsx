@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Layer, YouTubePreviewResult } from "../types";
+import type { DuplicateHint, Layer, YouTubePreviewResult } from "../types";
 import {
   FactCard, SkippedCard, fmtDuration, editIsEmpty, type FactEdit,
 } from "./IngestYouTube";
@@ -51,6 +51,18 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
   const qc = useQueryClient();
 
   const seekTo = (sec: number) => audioPanelRef.current?.seek(sec);
+
+  // Подсказка «возможный дубль» — та же, что в YouTube-превью: похожие активные
+  // факты той же ячейки. Ничего не блокирует.
+  const dupHints = useQuery<DuplicateHint[]>({
+    queryKey: ["dup-hints", clientId, preview?.preview_id],
+    queryFn: () => api.duplicateHints(
+      clientId,
+      (preview?.facts ?? []).map(f => ({ subsection_id: f.subsection_id, text: f.text_ru || f.text })),
+    ),
+    enabled: Boolean(preview?.preview_id && (preview?.facts ?? []).length > 0),
+  });
+  const hintByIdx = new Map((dupHints.data ?? []).map(h => [h.idx, h]));
 
   // Секундный тик, пока идёт обработка — чтобы elapsed обновлялся
   useEffect(() => {
@@ -460,6 +472,8 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
               clientId={clientId}
               sourceTitle={preview.meta.title}
               onSeek={sourceSha ? seekTo : undefined}
+              dupHint={hintByIdx.get(idx)}
+              onJumpToCell={onJumpToCell}
             />
           ))}
         </div>

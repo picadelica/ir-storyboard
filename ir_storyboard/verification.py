@@ -493,3 +493,69 @@ def _parse_json(raw: str) -> Optional[dict]:
     """Object-only wrapper over llm.extract_json (tolerant of chatty models)."""
     data = llm.extract_json(raw)
     return data if isinstance(data, dict) else None
+
+
+# ── Подсказка «возможный дубль» для превью ингеста ───────────────────────────
+# Механический скоринг (нормализация + пересечение слов) тем же способом, что и
+# жёсткий дедуп в пайплайне ингеста: там ≥0.85 факт вообще не доходит до превью,
+# здесь — полоса «похоже, но не одно и то же», где решает аналитик. Порог
+# консервативный: лучше недопоказать чип, чем завалить ими экран.
+
+DUP_HINT_MIN_SCORE = 0.55
+DUP_HINT_MIN_TOKENS = 4
+
+
+def duplicate_hints(conn, client_id: str, items: List[dict],
+                    *, min_score: float = DUP_HINT_MIN_SCORE) -> List[dict]:
+    """[{idx, score, fact:{id,text,flag,...}}] — по одному лучшему совпадению на факт.
+
+    items: [{subsection_id, text}] — факты ИЗ ПРЕВЬЮ (в БД их ещё нет). Сравниваем
+    только с активными фактами ТОЙ ЖЕ ячейки: дубль в другой ячейке — не дубль, а
+    вопрос раскладки, и к склейке отношения не имеет.
+    """
+    from .ingest.youtube_pipeline import _normalize_fact_text, _jaccard
+
+    by_sid: Dict[str, List[dict]] = {}
+    for it in items or []:
+        sid = (it.get("subsection_id") or "").strip()
+        if sid:
+            by_sid.setdefault(sid, [])
+    if not by_sid:
+        return []
+    placeholders = ",".join("?" * len(by_sid))
+    rows = conn.execute(
+        f"""SELECT f.id AS id, f.text AS text, f.flag AS flag, f.title AS title,
+                   c.subsection_id AS sid
+              FROM facts f JOIN cells c ON c.id = f.cell_id
+             WHERE c.client_id = ? AND f.state = 'active'
+               AND c.subsection_id IN ({placeholders})""",
+        (client_id, *by_sid.keys()),
+    ).fetchall()
+    for r in rows:
+        by_sid[r["sid"]].append({"id": r["id"], "text": r["text"] or "",
+                                 "flag": r["flag"], "title": r["title"] or "",
+                                 "norm": _normalize_fact_text(r["text"] or "")})
+
+    hints: List[dict] = []
+    for idx, it in enumerate(items or []):
+        sid = (it.get("subsection_id") or "").strip()
+        text = (it.get("text") or "").strip()
+        norm = _normalize_fact_text(text)
+        if not sid or len(norm.split()) < DUP_HINT_MIN_TOKENS:
+            continue
+        best, best_score = None, 0.0
+        for cand in by_sid.get(sid, []):
+            if len(cand["norm"].split()) < DUP_HINT_MIN_TOKENS:
+                continue
+            score = _jaccard(norm, cand["norm"])
+            if score > best_score:
+                best, best_score = cand, score
+        if best and best_score >= min_score:
+            hints.append({
+                "idx": idx,
+                "score": round(best_score, 3),
+                "fact": {"id": best["id"], "text": best["text"],
+                         "flag": best["flag"], "title": best["title"],
+                         "subsection_id": sid},
+            })
+    return hints

@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import type { Entity, Layer, YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
+import type { DuplicateHint, Entity, Layer, YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
 import SourceLine from "./SourceLine";
 import FlagDot from "./FlagDot";
+import EpisodeOverview from "./EpisodeOverview";
 
 interface Props {
   clientId: string;
@@ -119,6 +120,18 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   const founders = (entities.data ?? []).filter(e => e.kind === "founder");
   // 1 founder → auto-attribute; >1 → analyst must pick who the interview is with.
   const effectiveSpeaker = speakerId ?? (founders.length === 1 ? founders[0].id : null);
+
+  // Подсказка «возможный дубль»: похожие активные факты той же ячейки. Ничего не
+  // блокирует — аналитик решает сам, игнорирование чипа коммит не меняет.
+  const dupHints = useQuery<DuplicateHint[]>({
+    queryKey: ["dup-hints", clientId, preview?.preview_id],
+    queryFn: () => api.duplicateHints(
+      clientId,
+      (preview?.facts ?? []).map(f => ({ subsection_id: f.subsection_id, text: f.text_ru || f.text })),
+    ),
+    enabled: Boolean(preview?.preview_id && (preview?.facts ?? []).length > 0),
+  });
+  const hintByIdx = new Map((dupHints.data ?? []).map(h => [h.idx, h]));
 
   function stopPolling() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -689,6 +702,13 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         </a>
       </div>
 
+      {/* Обзор эпизода — read-only ориентировка перед разбором фактов */}
+      <EpisodeOverview
+        clientId={clientId}
+        url={preview.meta.canonical_url}
+        speakerEntityId={effectiveSpeaker}
+      />
+
       {/* Orientation brief — paragraph + per-cell coverage */}
       {(preview.video_brief || (preview.cell_briefs && Object.keys(preview.cell_briefs).length > 0)) && (
         <div className="border border-ink-line rounded-lg p-4 space-y-3 bg-white">
@@ -862,6 +882,8 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
               onEdit={(patch) => updateFactEdit(idx, patch)}
               clientId={clientId}
               sourceTitle={preview.meta.title}
+              dupHint={hintByIdx.get(idx)}
+              onJumpToCell={onJumpToCell}
             />
           ))}
         </div>
@@ -951,6 +973,45 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   );
 }
 
+// ── Чип «возможный дубль» ─────────────────────────────────────────────────────
+// Показываем то, на что факт похож, и даём не брать его. Склейка здесь невозможна
+// по построению: факта превью в базе ещё нет, а склеивать можно только сохранённые
+// (см. «Проверку фактов» — там же это и делается после коммита).
+
+function DupHintChip({ hint, onDrop, onJumpToCell }: {
+  hint: DuplicateHint;
+  onDrop: () => void;
+  onJumpToCell?: (sid: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="text-xs">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+      >
+        похоже на существующий факт
+      </button>
+      {open && (
+        <div className="mt-1.5 border-l-2 border-amber-300 pl-2 space-y-1">
+          <div className="text-slate-600">{hint.fact.text}</div>
+          <div className="flex gap-3">
+            {onJumpToCell && (
+              <button onClick={() => onJumpToCell(hint.fact.subsection_id)}
+                      className="text-blue-600 hover:underline">
+                открыть в матрице
+              </button>
+            )}
+            <button onClick={onDrop} className="text-amber-800 hover:underline">
+              не брать этот факт
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── FactCard ──────────────────────────────────────────────────────────────────
 
 interface FactCardProps {
@@ -967,9 +1028,12 @@ interface FactCardProps {
   sourceTitle?: string;
   /** When set, the timecode renders as a button that seeks an audio player. */
   onSeek?: (sec: number) => void;
+  /** Похожий факт уже в матрице — жёлтый чип. Ничего не блокирует. */
+  dupHint?: DuplicateHint;
+  onJumpToCell?: (sid: string) => void;
 }
 
-export function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, subsectionOptions, onToggleDrop, onEdit, clientId, sourceTitle, onSeek }: FactCardProps) {
+export function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSelect, subsectionOptions, onToggleDrop, onEdit, clientId, sourceTitle, onSeek, dupHint, onJumpToCell }: FactCardProps) {
   const [editing, setEditing] = useState(false);
   const effectiveTextRu = edit?.text_ru ?? (fact.text_ru || fact.text);
   const effectiveSid = edit?.subsection_id ?? fact.subsection_id;
@@ -1024,6 +1088,9 @@ export function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSele
                 <div className="text-xs text-slate-400 border-l-2 border-slate-200 pl-2 line-clamp-3">
                   "{displayQuote}"
                 </div>
+              )}
+              {dupHint && !dropped && (
+                <DupHintChip hint={dupHint} onDrop={onToggleDrop} onJumpToCell={onJumpToCell} />
               )}
               {effectiveFlag === "red" && (
                 fact.rationale

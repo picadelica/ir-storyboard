@@ -319,6 +319,72 @@ def init_schema(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (client_id, layer_id, tone)
         )
     """)
+    # Мониторинг: что регулярно проверяем по клиенту (канал / RSS / поисковый запрос).
+    # Найденное НИКОГДА не разбирается автоматически — попадает в monitor_candidates,
+    # разбирает аналитик существующим YouTube/Audio-ингестом.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist_items (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id         TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            kind              TEXT NOT NULL,
+            config            TEXT NOT NULL DEFAULT '{}',
+            label             TEXT NOT NULL DEFAULT '',
+            speaker_entity_id INTEGER,
+            schedule          TEXT NOT NULL DEFAULT 'daily',
+            status            TEXT NOT NULL DEFAULT 'active',
+            last_checked_at   TIMESTAMP,
+            last_error        TEXT NOT NULL DEFAULT '',
+            created_by        TEXT NOT NULL DEFAULT '',
+            created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CHECK(kind IN ('youtube_channel','rss','search_query')),
+            CHECK(status IN ('active','paused'))
+        )
+    """)
+    # Найденные выступления. norm_url — нормализованный URL, единственная защита от
+    # дублей при повторных проверках. state: new → ingesting → ingested | dismissed.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS monitor_candidates (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id         TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            watchlist_item_id INTEGER NOT NULL,
+            url               TEXT NOT NULL,
+            norm_url          TEXT NOT NULL,
+            title             TEXT NOT NULL DEFAULT '',
+            published_at      TEXT NOT NULL DEFAULT '',
+            duration_sec      INTEGER,
+            thumb_url         TEXT NOT NULL DEFAULT '',
+            relevance         TEXT NOT NULL DEFAULT 'unclear',
+            relevance_note    TEXT NOT NULL DEFAULT '',
+            state             TEXT NOT NULL DEFAULT 'new',
+            source_id         INTEGER,
+            acted_by          TEXT NOT NULL DEFAULT '',
+            acted_at          TIMESTAMP,
+            created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(client_id, norm_url)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_monitor_cand_client ON monitor_candidates(client_id, state)")
+    # «Обзор» эпизода: о чём говорили + что сдвинулось с прошлых выступлений спикера.
+    # Read-only материал для аналитика, к пути фактов отношения не имеет.
+    # NB (расхождение с ТЗ): ключ — (norm_url, speaker), а не (source_id, speaker):
+    # строка sources появляется только на коммите, а обзор нужен уже в превью.
+    # source_id проставляется задним числом, когда источник заведён.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS digests (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id         TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            norm_url          TEXT NOT NULL,
+            source_id         INTEGER,
+            speaker_entity_id INTEGER NOT NULL,
+            episode_date      TEXT NOT NULL DEFAULT '',
+            title             TEXT NOT NULL DEFAULT '',
+            payload           TEXT NOT NULL DEFAULT '{}',
+            model             TEXT NOT NULL DEFAULT '',
+            created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(norm_url, speaker_entity_id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_digests_speaker ON digests(speaker_entity_id, created_at)")
     # app-wide one-time migration flags (key/value). Keeps one-shot data fixes from
     # re-running on every startup (which would clobber later manual edits).
     conn.execute("""

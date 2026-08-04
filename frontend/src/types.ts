@@ -768,3 +768,113 @@ export interface Scorecard {
   rows: CellSummary[];
   totals: ScorecardTotals;
 }
+
+// ── Мониторинг ───────────────────────────────────────────────────────────────
+
+export type WatchlistKind = "youtube_channel" | "rss" | "search_query";
+
+export interface WatchlistItem {
+  id: number;
+  client_id: string;
+  kind: WatchlistKind;
+  config: { url?: string; feed_url?: string; query?: string };
+  label: string;
+  speaker_entity_id: number | null;
+  speaker_name?: string | null;
+  schedule: string;
+  status: "active" | "paused";
+  last_checked_at: string | null;
+  last_error: string;
+  new_count?: number;
+  created_at: string;
+}
+
+export interface MonitorCandidate {
+  id: number;
+  client_id: string;
+  watchlist_item_id: number;
+  url: string;
+  norm_url: string;
+  title: string;
+  published_at: string;
+  duration_sec: number | null;
+  thumb_url: string;
+  relevance: "likely" | "unclear" | "unlikely";
+  relevance_note: string;
+  state: "new" | "ingesting" | "ingested" | "dismissed";
+  source_id: number | null;
+  item_label?: string;
+  item_kind?: WatchlistKind;
+  speaker_entity_id?: number | null;
+  created_at: string;
+}
+
+export interface WatchlistSuggestion {
+  channel_name: string;
+  count: number;
+  sample_url: string;
+}
+
+export interface CheckResult {
+  client_id?: string;
+  items_checked?: number;
+  found: number;
+  new: number;
+  errors?: { label: string; error: string }[];
+}
+
+export interface DigestBlock {
+  theme: string;
+  start_sec: number;
+  end_sec: number;
+  gist: string;
+}
+
+export interface DigestMoment {
+  quote: string;
+  timecode_sec: number;
+  note: string;
+  unverified?: boolean;
+}
+
+export interface DigestComparisonDetail {
+  topic: string;
+  kind: "shifted" | "reversed" | "new" | "gone_quiet" | "rhetoric_drift";
+  was: { quote: string; date: string };
+  now: { quote: string; timecode_sec: number; unverified?: boolean };
+  note: string;
+}
+
+export interface DigestPayload {
+  main_motif: string;
+  blocks: DigestBlock[];
+  key_moments: DigestMoment[];
+  indirect: string[];
+  comparison: { text: string; details: DigestComparisonDetail[] } | null;
+}
+
+export interface EpisodeDigest {
+  id: number;
+  client_id: string;
+  norm_url: string;
+  source_id: number | null;
+  speaker_entity_id: number;
+  episode_date: string;
+  title: string;
+  payload: DigestPayload;
+  model: string;
+  created_at: string;
+}
+
+export interface DigestJobResult {
+  status: "ok" | "no_speaker" | "no_transcript";
+  digest?: EpisodeDigest;
+  reason?: string;
+  cached?: boolean;
+}
+
+export interface DuplicateHint {
+  idx: number;
+  score: number;
+  fact: { id: number; text: string; flag: string; title: string; subsection_id: string };
+}
