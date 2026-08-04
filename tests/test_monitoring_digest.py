@@ -174,11 +174,34 @@ def test_comparison_receives_previous_details(conn, tmp_path):
 
     prev = seen["previous"]
     assert len(prev) == 1 and prev[0]["date"] == "2026-01-01"
+    assert "created_at" not in prev[0], "в контекст сравнения уходит только дата выступления"
     assert prev[0]["comparison_details"][0]["topic"] == "сроки выхода на рынок", \
         "прошлые сдвиги обязаны попадать в контекст следующего сравнения"
     comparison = res["digest"]["payload"]["comparison"]
     assert comparison["text"].startswith("Позиция по срокам")
     assert comparison["details"][0]["now"]["unverified"] is False
+
+
+def test_unknown_episode_date_stays_empty(conn, tmp_path):
+    """Нет даты выступления → в сравнение уходит пустая строка, а не «сегодня».
+
+    Живой прогон на проде показал именно это: у старого эфира дата не определилась,
+    подстановка created_at выдала аналитику «было (2026-08-04)» у прошлогодней цитаты.
+    """
+    from ir_storyboard import digest, matrix
+
+    eid = matrix.add_entity(conn, client_id="test_founder", kind="founder", name="Иван Петров")
+    conn.execute(
+        """INSERT INTO digests (client_id, norm_url, speaker_entity_id, episode_date,
+                                title, payload, model, created_at)
+           VALUES (?, ?, ?, '', 'Старый эфир без даты', ?, 'test', '2026-08-04T10:00:00+00:00')""",
+        ("test_founder", "https://www.youtube.com/watch?v=old222", eid,
+         json.dumps({"main_motif": "мотив", "key_moments": []}, ensure_ascii=False)),
+    )
+    conn.commit()
+
+    prev = digest.previous_digests(conn, eid, exclude_norm_url=URL)
+    assert prev and prev[0]["date"] == "", "пустую дату не подменяем датой записи обзора"
 
 
 def test_first_episode_has_no_comparison(conn, tmp_path):

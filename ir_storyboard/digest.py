@@ -168,7 +168,10 @@ def previous_digests(conn: sqlite3.Connection, speaker_entity_id: int,
         d = _row_to_digest(r)
         payload = d["payload"]
         out.append({
-            "date": d.get("episode_date") or (d.get("created_at") or "")[:10],
+            # ТОЛЬКО дата выступления. Раньше пустую дату подменял created_at —
+            # и аналитик видел «было (сегодня)» у цитаты из прошлогоднего эфира.
+            # Нет даты — так и говорим, врать хуже, чем молчать.
+            "date": d.get("episode_date") or "",
             "main_motif": payload.get("main_motif", ""),
             "key_moments": payload.get("key_moments", []),
             "comparison_details": (payload.get("comparison") or {}).get("details", []),
