@@ -15,6 +15,7 @@ import {
   MATRIX_CELL_VALUE,
   MATRIX_GRID,
   MATRIX_HEADER,
+  MATRIX_HEADER_TITLE_OFFSET,
   MATRIX_LAYER_BADGE,
   MATRIX_LAYER_COL,
   MATRIX_LAYER_COLUMN_WIDTH,
@@ -80,8 +81,8 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
   return (
     <div className={`${MATRIX_PAGE} ${present ? MATRIX_PRESENT_PADDING : MATRIX_PAGE_PADDING}`}>
       <div className={MATRIX_HEADER}>
-        <div className="text-[12px] text-ink-mute">
-          {queue.length > 0 ? `${queue.length} черновиков ждут одобрения` : "Матрица знаний"}
+        <div className={`${MATRIX_HEADER_TITLE_OFFSET} text-lg font-semibold tracking-tight text-ink`}>
+          {queue.length > 0 ? `${queue.length} черновиков ждут одобрения` : "Что известно"}
         </div>
         {!present && queue.length > 0 && (
           <button onClick={() => setQueueOpen(o => !o)}

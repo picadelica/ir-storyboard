@@ -2,6 +2,7 @@ export const MATRIX_PAGE = "h-full min-h-0 flex flex-col bg-[#f4f4ef] relative";
 export const MATRIX_PAGE_PADDING = "p-5";
 export const MATRIX_PRESENT_PADDING = "px-6 py-5";
 export const MATRIX_HEADER = "h-11 mb-4 shrink-0 flex items-center justify-between gap-3";
+export const MATRIX_HEADER_TITLE_OFFSET = "pl-[44px]";
 export const MATRIX_BODY = "min-h-0 flex-1";
 export const MATRIX_LAYER_COLUMN_WIDTH = "38px";
 export const MATRIX_GRID = "h-full min-h-0 overflow-hidden grid gap-1.5";

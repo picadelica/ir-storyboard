@@ -102,6 +102,11 @@ function ClientPage() {
     setSelectedSid(sid);
   };
 
+  const toggleSelectedCell = (sid: string) => {
+    setFocusFactId(undefined);
+    setSelectedSid(current => current === sid ? undefined : sid);
+  };
+
   return (
     <div className="h-screen flex">
       {!present && <Sidebar clientId={clientId} />}
@@ -128,7 +133,7 @@ function ClientPage() {
             <MatrixGrid
               clientId={clientId!}
               selectedSubsectionId={selectedSid}
-              onSelectCell={setSelectedSid}
+              onSelectCell={toggleSelectedCell}
               present={present}
             />
           )}
@@ -143,10 +148,10 @@ function ClientPage() {
               clientId={clientId!}
               onJumpToCell={onJumpToCell}
               selectedSubsectionId={selectedSid}
-              onSelectCell={setSelectedSid}
+              onSelectCell={toggleSelectedCell}
             />
           )}
-          {activeTab === "scorecard" && <ScorecardView clientId={clientId!} onSelectCell={setSelectedSid} />}
+          {activeTab === "scorecard" && <ScorecardView clientId={clientId!} onSelectCell={toggleSelectedCell} />}
           {activeTab === "artifacts" && (
             <ArtifactsView clientId={clientId!} pickedArtifactId={pickedArtifactId} />
           )}
