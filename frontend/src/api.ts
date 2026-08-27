@@ -131,6 +131,8 @@ export const api = {
 
   cellFacts: (clientId: string, sid: string) =>
     call<Fact[]>(`/clients/${clientId}/cells/${sid}/facts`),
+  getFact: (clientId: string, factId: number) =>
+    call<Fact>(`/clients/${clientId}/facts/${factId}`),
   addFact: (clientId: string, sid: string, body: {
     text: string; flag: string; channel: string;
     source_title?: string; source_url?: string;
@@ -260,6 +262,26 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     return fetch(`${API_BASE}/clients/${clientId}/ingest/client-facts/preview`, { method: "POST", body: form })
+      .then(async r => { if (!r.ok) throw new Error(await uploadError(r)); return r.json(); });
+  },
+
+  universalTextPreview: (clientId: string, body: {
+    text: string; source_status: "regular" | "client"; source_title?: string; source_url?: string;
+  }): Promise<IngestPreviewOut> =>
+    call<IngestPreviewOut>(`/clients/${clientId}/ingest/universal/text/preview`, {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  universalUrlPreview: (clientId: string, body: {
+    url: string; source_status: "regular" | "client";
+  }): Promise<IngestPreviewOut> =>
+    call<IngestPreviewOut>(`/clients/${clientId}/ingest/universal/url/preview`, {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  universalFilePreview: (clientId: string, file: File, sourceStatus: "regular" | "client"): Promise<IngestPreviewOut> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("source_status", sourceStatus);
+    return fetch(`${API_BASE}/clients/${clientId}/ingest/universal/file/preview`, { method: "POST", body: form })
       .then(async r => { if (!r.ok) throw new Error(await uploadError(r)); return r.json(); });
   },
 

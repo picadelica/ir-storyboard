@@ -9,11 +9,18 @@ Run:
 from __future__ import annotations
 
 import json
+import html
+import io
+import ipaddress
+import re
+import socket
 import sqlite3
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import urljoin, urlparse
 
+import requests
 import yaml
 from fastapi import FastAPI, File, Form, HTTPException, Depends, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -262,6 +269,7 @@ class CellSummaryOut(BaseModel):
     n_must: int = 0
     n_must_client: int = 0   # синяя звезда (must-have от клиента / без пометки)
     n_must_expert: int = 0   # фиолетовая звезда (важное от эксперта)
+    corroborated: bool = False
     last_update: Optional[str] = None
     channels: List[str] = []
 
@@ -299,6 +307,7 @@ class FactOut(BaseModel):
     merged_into: Optional[int] = None   # set → this fact is hidden, folded into #merged_into
     n_sources: int = 1   # corroboration: 1 (primary) + folded-in sources
     about_company: str = ""   # факт про другую компанию (характеризует спикера)
+    sort_order: Optional[int] = None
 
 
 class FactCreate(BaseModel):
@@ -466,6 +475,7 @@ def _row_to_fact(row) -> FactOut:
         merged_into=row["merged_into"] if "merged_into" in keys and row["merged_into"] else None,
         n_sources=1 + (row["extra_sources"] if "extra_sources" in keys and row["extra_sources"] else 0),
         about_company=(row["about_company"] if "about_company" in keys and row["about_company"] else ""),
+        sort_order=row["sort_order"] if "sort_order" in keys else None,
     )
 
 
@@ -1148,6 +1158,16 @@ def add_cell_fact(client_id: str, subsection_id: str, f: FactCreate,
 
     # 'created' логируется центрально в matrix.add_fact (актор из created_by/tid)
     row = matrix.get_fact(conn, fid)
+    return _row_to_fact(row)
+
+
+@app.get("/api/clients/{client_id}/facts/{fact_id}", response_model=FactOut)
+def get_client_fact(client_id: str, fact_id: int, conn=Depends(get_conn)):
+    if matrix.fact_client_id(conn, fact_id) != client_id:
+        raise HTTPException(404, "fact not found")
+    row = matrix.get_fact(conn, fact_id)
+    if row is None:
+        raise HTTPException(404, "fact not found")
     return _row_to_fact(row)
 
 
@@ -2211,6 +2231,193 @@ class IngestConfirmOut(BaseModel):
     skipped: int
 
 
+class UniversalTextPreviewIn(BaseModel):
+    text: str
+    source_status: Literal["regular", "client"] = "regular"
+    source_title: str = ""
+    source_url: str = ""
+
+
+class UniversalUrlPreviewIn(BaseModel):
+    url: str
+    source_status: Literal["regular", "client"] = "regular"
+
+
+def _assert_public_http_url(value: str) -> str:
+    clean_url = (value or "").strip()
+    parsed = urlparse(clean_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(422, "Вставьте корректную ссылку http(s)://…")
+    host = parsed.hostname
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise HTTPException(422, f"Не удалось определить адрес сайта: {host}") from e
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            raise HTTPException(422, "Эта ссылка ведёт во внутреннюю сеть или служебный адрес, поэтому сервер её не скачивает.")
+    return clean_url
+
+
+def _extract_title_from_html(raw: str, url: str) -> str:
+    m = re.search(r"<title[^>]*>(.*?)</title>", raw, flags=re.I | re.S)
+    if m:
+        title = html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()
+        if title:
+            return title[:180]
+    host = urlparse(url).netloc
+    return host or url
+
+
+def _html_to_text(raw: str) -> str:
+    raw = re.sub(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", raw, flags=re.I | re.S)
+    raw = re.sub(r"<!--.*?-->", " ", raw, flags=re.S)
+    raw = re.sub(r"</(p|div|section|article|li|h[1-6]|br)>", "\n", raw, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", raw)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n\s+", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _docx_bytes_to_text(raw: bytes) -> str:
+    try:
+        from docx import Document
+        doc = Document(io.BytesIO(raw))
+    except Exception as e:
+        raise HTTPException(422, f"Не удалось прочитать DOCX: {e}") from e
+
+    parts: list[str] = []
+    for para in doc.paragraphs:
+        text = (para.text or "").strip()
+        if text:
+            parts.append(text)
+    for table in doc.tables:
+        for row in table.rows:
+            values = [(cell.text or "").strip() for cell in row.cells]
+            line = " | ".join(v for v in values if v)
+            if line:
+                parts.append(line)
+    return "\n".join(parts).strip()
+
+
+def _rtf_bytes_to_text(raw: bytes) -> str:
+    text = raw.decode("utf-8", errors="replace")
+    # Decode common RTF hex escapes before dropping control words.
+    text = re.sub(
+        r"\\'([0-9a-fA-F]{2})",
+        lambda m: bytes.fromhex(m.group(1)).decode("cp1251", errors="replace"),
+        text,
+    )
+    text = re.sub(r"\\par[d]?", "\n", text, flags=re.I)
+    text = re.sub(r"\\[a-zA-Z]+-?\d* ?", " ", text)
+    text = text.replace(r"\{", "{").replace(r"\}", "}").replace(r"\\", "\\")
+    text = text.replace("{", " ").replace("}", " ")
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n\s+", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _fetch_url_payload(url: str) -> tuple[bytes, str, str]:
+    current_url = _assert_public_http_url(url)
+    try:
+        for _ in range(4):
+            resp = requests.get(
+                current_url,
+                timeout=25,
+                allow_redirects=False,
+                headers={"User-Agent": "ir-storyboard/2.0 (+https://ir-storyboard.internal)"},
+                stream=True,
+            )
+            if resp.is_redirect or resp.is_permanent_redirect:
+                location = resp.headers.get("location") or ""
+                if not location:
+                    raise HTTPException(422, "Сайт вернул редирект без адреса.")
+                current_url = _assert_public_http_url(urljoin(current_url, location))
+                continue
+            resp.raise_for_status()
+            content_type = (resp.headers.get("content-type") or "").lower()
+            chunks: list[bytes] = []
+            total = 0
+            max_bytes = 8_000_000 if "pdf" in content_type or current_url.lower().split("?")[0].endswith(".pdf") else 1_500_000
+            for chunk in resp.iter_content(chunk_size=64_000):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > max_bytes:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks), content_type, current_url
+    except requests.RequestException as e:
+        raise HTTPException(422, f"Не удалось скачать ссылку: {e}") from e
+    raise HTTPException(422, "Слишком много редиректов по ссылке.")
+
+
+def _candidate_from_extracted_fact(f) -> Optional[FactCandidateOut]:
+    try:
+        sub = subsection_by_id(f.subsection_id)
+        layer_id = int(f.subsection_id.split(".")[0])
+        layer_name = layer_by_id(layer_id).name
+    except KeyError:
+        return None
+    return FactCandidateOut(
+        text=f.text,
+        suggested_subsection_id=f.subsection_id,
+        suggested_subsection_name=sub.name,
+        suggested_layer_id=layer_id,
+        suggested_layer_name=layer_name,
+        suggested_flag=f.flag,
+        confidence=f.confidence,
+        rationale=((getattr(f, "rationale", "") or getattr(f, "raw_paraphrase", "") or "")[:160]),
+    )
+
+
+def _universal_text_preview(
+    client_id: str,
+    *,
+    text: str,
+    source_status: str,
+    source_title: str,
+    source_url: str = "",
+    conn,
+) -> ResearchPreviewOut:
+    """Universal lightweight text/file facade.
+
+    It intentionally returns the existing ResearchPreviewOut shape and does not
+    write to DB. Commit stays on existing endpoints, so the database structure is
+    untouched.
+    """
+    from ir_storyboard.llm import extract_facts_from_research_text
+    from ir_storyboard.prompts import get_tone_instruction
+
+    _check_client(client_id, conn)
+    clean_text = (text or "").strip()
+    client_mode = source_status == "client"
+    channel = "offline_interview" if client_mode else "online_research"
+    title = source_title or ("От клиента" if client_mode else "Текст")
+    if not clean_text:
+        return ResearchPreviewOut(channel=channel, source_url=source_url, source_title=title, candidates=[])
+
+    available_subsections = [
+        sub.id for layer in LAYERS for sub in layer.subsections
+        if client_mode or layer.id >= 2
+    ]
+    tone_preset_id = matrix.get_client_tone_preset(conn, client_id)
+    facts = extract_facts_from_research_text(
+        text=clean_text,
+        source_title=title,
+        available_subsections=available_subsections,
+        subsection_descriptions=matrix.get_subsection_descriptions(conn),
+        client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
+        tone_instruction=get_tone_instruction(tone_preset_id),
+    )
+    candidates = [c for c in (_candidate_from_extracted_fact(f) for f in facts) if c is not None]
+    return ResearchPreviewOut(channel=channel, source_url=source_url, source_title=title, candidates=candidates)
+
+
 def _guess_channel(url: str) -> str:
     url_l = url.lower()
     if any(d in url_l for d in ("youtube.com", "youtu.be", "spotify.com",
@@ -2364,6 +2571,137 @@ def research_ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(
         source_url=body.source_url,
         source_title=body.source_title,
         candidates=candidates,
+    )
+
+
+@app.post("/api/clients/{client_id}/ingest/universal/text/preview", response_model=ResearchPreviewOut)
+def universal_text_preview(client_id: str, body: UniversalTextPreviewIn, conn=Depends(get_conn)):
+    return _universal_text_preview(
+        client_id,
+        text=body.text,
+        source_status=body.source_status,
+        source_title=body.source_title,
+        source_url=body.source_url,
+        conn=conn,
+    )
+
+
+@app.post("/api/clients/{client_id}/ingest/universal/url/preview", response_model=ResearchPreviewOut)
+def universal_url_preview(client_id: str, body: UniversalUrlPreviewIn, conn=Depends(get_conn)):
+    """Preview a public URL without writing to DB.
+
+    The URL fetcher blocks localhost/private/service IPs and validates every
+    redirect target before downloading content.
+    """
+    from ir_storyboard.llm import extract_facts_from_pdf, PdfRejectedError
+
+    _check_client(client_id, conn)
+    payload, content_type, final_url = _fetch_url_payload(body.url)
+    client_mode = body.source_status == "client"
+    is_pdf = "pdf" in content_type or final_url.lower().split("?")[0].endswith(".pdf")
+    if is_pdf:
+        available_subsections = [
+            s.id for L in LAYERS for s in L.subsections
+            if client_mode or L.id >= 2
+        ]
+        try:
+            facts = extract_facts_from_pdf(
+                payload,
+                available_subsections,
+                subsection_descriptions=matrix.get_subsection_descriptions(conn),
+                client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
+            )
+        except PdfRejectedError as e:
+            raise HTTPException(422, str(e))
+        candidates = [c for c in (_candidate_from_extracted_fact(f) for f in facts) if c is not None]
+        return ResearchPreviewOut(
+            channel="offline_interview" if client_mode else "archival",
+            source_url=final_url,
+            source_title=Path(urlparse(final_url).path).name or urlparse(final_url).netloc or final_url,
+            candidates=candidates,
+        )
+
+    raw_text = payload.decode("utf-8", errors="replace")
+    source_title = _extract_title_from_html(raw_text, final_url)
+    text = _html_to_text(raw_text)
+    if len(text) < 80:
+        raise HTTPException(422, "На странице не удалось найти достаточно текста для разбора.")
+    return _universal_text_preview(
+        client_id,
+        text=text[:120_000],
+        source_status=body.source_status,
+        source_title=source_title,
+        source_url=final_url,
+        conn=conn,
+    )
+
+
+@app.post("/api/clients/{client_id}/ingest/universal/file/preview", response_model=ResearchPreviewOut)
+async def universal_file_preview(
+    client_id: str,
+    file: UploadFile = File(...),
+    source_status: Literal["regular", "client"] = Form("regular"),
+    conn=Depends(get_conn),
+):
+    """Preview a dropped file through the universal add-data facade.
+
+    Supported here: PDF, DOCX, RTF, TXT, MD. Audio/video remain on their async
+    pipelines for now.
+    """
+    from ir_storyboard.llm import extract_facts_from_pdf, PdfRejectedError
+
+    _check_client(client_id, conn)
+    filename = file.filename or "Файл"
+    suffix = Path(filename).suffix.lower()
+    client_mode = source_status == "client"
+
+    if suffix in {".txt", ".md", ".docx", ".rtf"}:
+        raw = await file.read()
+        if suffix == ".docx":
+            text = _docx_bytes_to_text(raw)
+        elif suffix == ".rtf":
+            text = _rtf_bytes_to_text(raw)
+        else:
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                text = raw.decode("utf-8", errors="replace")
+        if len(text.strip()) < 20:
+            raise HTTPException(422, "В документе не удалось найти достаточно текста для разбора.")
+        return _universal_text_preview(
+            client_id,
+            text=text[:120_000],
+            source_status=source_status,
+            source_title=filename,
+            conn=conn,
+        )
+
+    if suffix == ".pdf":
+        pdf_bytes = await file.read()
+        available_subsections = [
+            s.id for L in LAYERS for s in L.subsections
+            if client_mode or L.id >= 2
+        ]
+        try:
+            facts = extract_facts_from_pdf(
+                pdf_bytes,
+                available_subsections,
+                subsection_descriptions=matrix.get_subsection_descriptions(conn),
+                client_subsection_notes=matrix.get_client_subsection_notes(conn, client_id),
+            )
+        except PdfRejectedError as e:
+            raise HTTPException(422, str(e))
+        candidates = [c for c in (_candidate_from_extracted_fact(f) for f in facts) if c is not None]
+        return ResearchPreviewOut(
+            channel="offline_interview" if client_mode else "archival",
+            source_url="",
+            source_title=filename if filename else ("От клиента" if client_mode else "Документ"),
+            candidates=candidates,
+        )
+
+    raise HTTPException(
+        415,
+        "Этот тип файла пока не поддержан в универсальном вводе. Сейчас работают PDF, TXT и MD; аудио/видео открывайте через соответствующий обработчик.",
     )
 
 

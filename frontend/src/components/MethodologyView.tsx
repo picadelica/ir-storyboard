@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import type {
   Client, ClientMethodologyCell, MethodologyCell, TonePreset,
   MethodologyMove, ReclassifyResult, Layer,
@@ -33,7 +34,7 @@ export default function MethodologyView({ clientId }: Props) {
   return (
     <div className="p-5 max-w-4xl space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">Methodology</h2>
+        <h2 className="text-lg font-semibold">Методология</h2>
         <div className="text-xs text-ink-mute mt-0.5">
           Описание ячейки = что в принципе сюда относится (общее для всех клиентов).{" "}
           Приписка «For this client» = что особенно важно для конкретной компании
@@ -143,7 +144,7 @@ function TonePresetSection({ client, presets, isLoading, onSave }: {
           </button>
         )}
       </div>
-      {isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
+      {isLoading && <div className="text-sm text-ink-mute">Загрузка…</div>}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {presets.map((p) => {
           const isOn = effective === p.id;
@@ -241,7 +242,7 @@ function CellsByLayer({
     cells: (MethodologyCell | ClientMethodologyCell)[];
   }>();
   for (const c of cells) {
-    const g = grouped.get(c.layer_id) ?? { layerName: c.layer_name, cells: [] };
+    const g = grouped.get(c.layer_id) ?? { layerName: layerNameRu(c.layer_id, c.layer_name), cells: [] };
     g.cells.push(c);
     grouped.set(c.layer_id, g);
   }
@@ -256,7 +257,7 @@ function CellsByLayer({
       <div className={`text-xs rounded-lg border px-3 py-2 ${bannerCls}`}>
         {bannerText}
       </div>
-      {isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
+      {isLoading && <div className="text-sm text-ink-mute">Загрузка…</div>}
       {layerIds.map((lid) => {
         const g = grouped.get(lid)!;
         return (
@@ -304,13 +305,13 @@ function CellRow({
         <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600">
           {cell.subsection_id}
         </span>
-        <span className="text-sm font-medium">{cell.subsection_name}</span>
-        {dirty && <span className="text-[10px] text-amber-600 ml-auto">unsaved</span>}
+        <span className="text-sm font-medium">{subsectionNameRu(cell.subsection_id, cell.subsection_name)}</span>
+        {dirty && <span className="text-[10px] text-amber-600 ml-auto">не сохранено</span>}
       </div>
       {globalText !== undefined && globalText.trim() && (
         <details className="mb-2 text-xs">
           <summary className="cursor-pointer text-ink-mute hover:text-ink">
-            global description (inherited)
+            общее описание (унаследовано)
           </summary>
           <div className="mt-1 text-slate-600 border-l-2 border-slate-200 pl-2 whitespace-pre-wrap">
             {globalText}
@@ -334,21 +335,21 @@ function CellRow({
               : "bg-ink text-white hover:bg-ink/90"
           }`}
         >
-          {saveMut.isPending ? "Saving…" : "Save"}
+          {saveMut.isPending ? "Сохраняю…" : "Сохранить"}
         </button>
         {dirty && (
           <button
             onClick={() => setDraft(currentValue)}
             className="text-xs px-3 py-1 border border-slate-300 text-slate-600 rounded hover:bg-slate-100"
           >
-            Revert
+            Откатить
           </button>
         )}
         {saveMut.isError && (
           <span className="text-xs text-red-600">{String(saveMut.error)}</span>
         )}
         {saveMut.isSuccess && !dirty && (
-          <span className="text-xs text-emerald-600">saved</span>
+          <span className="text-xs text-emerald-600">сохранено</span>
         )}
       </div>
     </div>
@@ -406,7 +407,7 @@ function ReapplyMethodologySection({ clientId, clientName }: {
         <div>
           <h3 className="text-sm font-semibold">Переосмысление раскладки</h3>
           <div className="text-xs text-ink-mute mt-0.5">
-            Изменили методологию выше? Пересчитайте раскладку active-фактов «{clientName}»
+            Изменили методологию выше? Пересчитайте раскладку активных фактов «{clientName}»
             по новым описаниям — увидите, какие карточки переезжают и куда, и подтвердите.
           </div>
         </div>
@@ -467,7 +468,7 @@ function MovesPreviewModal({
         <div className="px-5 py-3 border-b border-ink-line">
           <h3 className="text-base font-semibold">Переезды при новой методологии</h3>
           <div className="text-xs text-ink-mute mt-0.5">
-            Из {total} active-фактов переезжает {moves.length}. Отметьте, какие применить.
+            Из {total} активных фактов переезжает {moves.length}. Отметьте, какие применить.
           </div>
         </div>
 
@@ -546,10 +547,10 @@ function MoveRow({ move, checked, onToggle, layers, value, onChangeTarget }: {
             }`}
           >
             {layers.map((l) => (
-              <optgroup key={l.id} label={`${l.id}. ${l.name}`}>
+              <optgroup key={l.id} label={`${l.id}. ${layerNameRu(l.id, l.name)}`}>
                 {l.subsections.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.id} · {s.name}
+                    {s.id} · {subsectionNameRu(s.id, s.name)}
                   </option>
                 ))}
               </optgroup>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import type { FactCandidateOut, Flag, IngestPreviewOut, SearchHit } from "../types";
 
 interface Props { clientId: string }
@@ -39,9 +40,14 @@ const FLAG_COLORS: Record<string, string> = {
 };
 
 function ChannelBadge({ ch }: { ch: string }) {
+  const label = ch === "online_research" ? "онлайн-исследование"
+    : ch === "online_interview" ? "онлайн-интервью"
+    : ch === "archival" ? "архив"
+    : ch === "offline_interview" ? "офлайн-интервью"
+    : ch.replace("_", " ");
   return (
     <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded ${CHANNEL_COLORS[ch] ?? "bg-slate-100"}`}>
-      {ch.replace("_", " ")}
+      {label}
     </span>
   );
 }
@@ -73,10 +79,10 @@ function CandidateRow({ cand, checked, onToggle, flag, onFlag, subsectionId, onS
             value={subsectionId}
             onChange={e => onSid(e.target.value)}
             className="font-mono text-[10px] w-12 border border-ink-line rounded px-1 py-0.5"
-            title="Subsection ID"
+            title="ID позиции"
           />
           <span className="text-[10px] text-ink-mute truncate">
-            {cand.suggested_layer_name} → {cand.suggested_subsection_name}
+            {layerNameRu(null, cand.suggested_layer_name)} → {subsectionNameRu(subsectionId, cand.suggested_subsection_name)}
           </span>
           {/* flag picker */}
           <select
@@ -84,12 +90,12 @@ function CandidateRow({ cand, checked, onToggle, flag, onFlag, subsectionId, onS
             onChange={e => onFlag(e.target.value as Flag)}
             className={`text-[10px] border rounded px-1 py-0.5 ${FLAG_COLORS[flag]}`}
           >
-            <option value="green">green</option>
-            <option value="red">red</option>
-            <option value="grey">grey</option>
+            <option value="green">факт</option>
+            <option value="red">риск</option>
+            <option value="grey">пробел</option>
           </select>
           {cand.confidence < 0.6 && (
-            <span className="text-[9px] text-amber-600">conf {(cand.confidence * 100).toFixed(0)}%</span>
+            <span className="text-[9px] text-amber-600">уверенность {(cand.confidence * 100).toFixed(0)}%</span>
           )}
         </div>
         {cand.rationale && (
@@ -99,7 +105,7 @@ function CandidateRow({ cand, checked, onToggle, flag, onFlag, subsectionId, onS
           <input
             value={rationale}
             onChange={e => onRationale(e.target.value)}
-            placeholder="Concern: что именно проблема (обязательно для red)"
+            placeholder="Проблема: что именно требует внимания (обязательно для риска)"
             className={`w-full text-[11px] border rounded px-1.5 py-0.5 ${
               rationale.trim() ? "border-ink-line" : "border-red-400"
             }`}
@@ -164,7 +170,7 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
     mutationFn: async () => {
       const text = (customText || hit.snippet || "").trim();
       if (!text) {
-        throw new Error("Нет текста для классификации. Открой 'Paste full text' и вставь текст статьи.");
+        throw new Error("Нет текста для классификации. Откройте «Вставить полный текст» и вставьте текст статьи.");
       }
       return api.ingestPreview(clientId, {
         channel,
@@ -185,7 +191,7 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("classifyMut error:", err);
-      alert(`Classify failed: ${msg}`);
+      alert(`Классификация не удалась: ${msg}`);
     },
   });
 
@@ -243,12 +249,12 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
             <div className="text-xs text-pink-900 leading-snug flex-1">
               {directYouTubeUrl ? (
                 <>Это YouTube-ссылка — текстовая классификация даст плохой результат.
-                  Лучше обработать через <b>YouTube Ingest</b>: будет полный транскрипт
+                  Лучше обработать через <b>загрузку YouTube</b>: будет полный транскрипт
                   с таймкодами, факты с цитатами.</>
               ) : (
                 <>В этом твите/посте есть ссылка на YouTube
                   (<code className="bg-pink-100 px-1 rounded">{youtubeUrl}</code>).
-                  Рекомендуем обработать видео через <b>YouTube Ingest</b>.</>
+                  Рекомендуем обработать видео через <b>загрузку YouTube</b>.</>
               )}
             </div>
           </div>
@@ -257,7 +263,7 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
             onClick={processViaYouTube}
             className="w-full text-xs px-3 py-1.5 bg-pink-600 text-white rounded hover:bg-pink-700"
           >
-            Process via YouTube ingest →
+            Обработать через YouTube →
           </button>
         </div>
       ) : (
@@ -267,20 +273,20 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
             onChange={e => setChannel(e.target.value as Channel)}
             className="text-xs border border-ink-line rounded px-1.5 py-1"
           >
-            <option value="online_research">online_research</option>
-            <option value="online_interview">online_interview</option>
-            <option value="archival">archival</option>
+            <option value="online_research">онлайн-исследование</option>
+            <option value="online_interview">онлайн-интервью</option>
+            <option value="archival">архив</option>
           </select>
           <button
             onClick={() => setShowPaste(p => !p)}
             className="text-xs px-2 py-1 border border-ink-line rounded hover:bg-slate-50 text-ink-mute"
-          >{showPaste ? "Hide paste" : "Paste full text"}</button>
+          >{showPaste ? "Скрыть текст" : "Вставить полный текст"}</button>
           <button
             type="button"
             onClick={() => classifyMut.mutate()}
             disabled={classifyMut.isPending}
             className="text-xs px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 ml-auto cursor-pointer"
-          >{classifyMut.isPending ? "Extracting…" : "Extract facts →"}</button>
+          >{classifyMut.isPending ? "Извлекаю…" : "Извлечь факты →"}</button>
         </div>
       )}
 
@@ -301,12 +307,12 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
         <div className="border-t border-ink-line bg-slate-50 p-3 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-semibold uppercase text-ink-mute tracking-wide">
-              Classified facts — {preview.candidates.length} found
+              Классифицированные факты — найдено {preview.candidates.length}
             </span>
             <button
               onClick={() => setRows(r => r.map(x => ({ ...x, checked: true })))}
               className="text-[10px] text-blue-600 hover:underline"
-            >Select all</button>
+            >Выбрать всё</button>
           </div>
 
           {preview.candidates.length === 0 && (
@@ -368,10 +374,10 @@ export default function ResearchView({ clientId }: Props) {
   const queryCount = draft.split("\n").map(q => q.trim()).filter(Boolean).length;
 
   return (
-    <div className="p-5 space-y-5 max-w-4xl">
+    <div className="p-5 max-w-[820px] mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Research</h2>
+          <h2 className="text-lg font-semibold">Исследование</h2>
           <p className="text-xs text-ink-mute mt-0.5">
             Подобрать запросы → проверить и поправить → искать → выбрать факты → импортировать в матрицу
           </p>
@@ -389,7 +395,7 @@ export default function ResearchView({ clientId }: Props) {
 
       {/* Step 1 → 2: review & edit the generated queries before searching */}
       {generated && (
-        <div className="bg-white rounded-lg border border-ink-line p-4 space-y-2">
+        <div className="bg-white rounded-lg border border-ink-line p-5 space-y-3">
           <div className="flex items-baseline justify-between">
             <h3 className="text-sm font-semibold">Поисковые запросы <span className="font-normal text-ink-mute">({queryCount})</span></h3>
             <button onClick={() => genMut.mutate()} disabled={genMut.isPending}

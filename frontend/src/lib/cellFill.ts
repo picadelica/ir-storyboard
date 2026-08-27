@@ -1,27 +1,33 @@
 // Заливка ячейки матрицы/досье по объёму записей.
-// Ячейка — СПЛОШНОГО цвета (никаких градиентов: текст на границе тёмного и
-// светлого нечитаем). Зелёный — интенсивность ∝ объёму относительно среднего
-// у клиента (кламп ±20%): меньше записей → светлее, больше → темнее. Доля
-// серых карточек (пробелов) отдаётся числом greyShare — компонент рисует её
-// отдельной тонкой полоской, не смешивая с фоном.
-//
-// Палитра — editorial: приглушённый шалфейно-лесной зелёный (hue 152) на тёплой
-// бумаге; самые наполненные ячейки уходят в глубокий тёмный зелёный, и текст на
-// них становится светлым. Серый — тёплый песочный, под канву #fdf8f8.
+// 10 фиксированных ступеней из прототипа: чем больше записей в ячейке
+// относительно верхней границы шкалы, тем насыщеннее цвет.
+// Верхние 20% значений считаем плато: если максимум = 100, шкала строится
+// от 0 до 80, а значения 80–100 получают самый насыщенный цвет.
+// Используем именно ступени, а не плавную формулу, чтобы пользователь видел
+// понятные состояния, а не «почти одинаковые» оттенки. Две самые светлые
+// ступени оставлены в исходной палитре для истории, но исключены из активной
+// шкалы: непустая ячейка должна заметно отличаться от пустой.
 
-const GREEN_HUE = 152;
-const GREEN_SAT = 26;     // приглушённая, не «салатовая» насыщенность
-const GREEN_LIGHT = 90;   // HSL lightness при объёме ≤ среднее−20%
-const GREEN_DARK = 38;    // HSL lightness при объёме ≥ среднее+20%
-export const GREY = "hsl(42, 16%, 87%)";
-export const GREY_DEEP = "hsl(42, 14%, 62%)";  // насыщенный песочный — полоска пробелов
-const GREY_FG = "#6B6558";
+const STEP_PALETTE = [
+  { bg: "hsl(78, 54%, 96%)", fg: "#7C8078" },
+  { bg: "hsl(78, 58%, 92%)", fg: "#596A28" },
+  { bg: "hsl(78, 61%, 88%)", fg: "#4D6120" },
+  { bg: "hsl(78, 64%, 83%)", fg: "#415819" },
+  { bg: "hsl(78, 67%, 77%)", fg: "#344D14" },
+  { bg: "hsl(78, 70%, 71%)", fg: "#283F12" },
+  { bg: "hsl(78, 73%, 64%)", fg: "#20221F" },
+  { bg: "hsl(78, 76%, 57%)", fg: "#20221F" },
+  { bg: "hsl(78, 79%, 50%)", fg: "#20221F" },
+  { bg: "hsl(78, 82%, 44%)", fg: "#20221F" },
+] as const;
 
-// Среднее число записей на НЕпустую ячейку (пустые в среднее не входят).
-export function recordAvg(totals: number[]): number {
+const ACTIVE_PALETTE = STEP_PALETTE.slice(2);
+
+// Максимальное число записей на ячейку — база для 10-ступенчатой шкалы.
+export function recordMax(totals: number[]): number {
   const nz = totals.filter(t => t > 0);
   if (!nz.length) return 0;
-  return nz.reduce((a, b) => a + b, 0) / nz.length;
+  return Math.max(...nz);
 }
 
 export interface CellFill {
@@ -31,18 +37,14 @@ export interface CellFill {
   empty: boolean;       // в ячейке нет записей
 }
 
-export function cellFill(nGreen: number, nGrey: number, avg: number): CellFill {
+export function cellFill(nGreen: number, nGrey: number, maxRecords: number): CellFill {
   const total = nGreen + nGrey;
   if (total === 0) return { background: "transparent", fg: "#8B877C", greyShare: 0, empty: true };
 
   const greyShare = nGrey / total;
-  // ячейка целиком из пробелов — песочная
-  if (nGreen === 0) return { background: GREY, fg: GREY_FG, greyShare, empty: false };
-
-  const t = avg > 0 ? Math.max(0, Math.min(1, (total - 0.8 * avg) / (0.4 * avg))) : 0.5;
-  const L = GREEN_LIGHT - t * (GREEN_LIGHT - GREEN_DARK);
-  const background = `hsl(${GREEN_HUE}, ${GREEN_SAT}%, ${L.toFixed(1)}%)`;
-  // тёмная ячейка → светлый текст; светлая → глубокий зелёный
-  const fg = L <= 56 ? "#F5F2EA" : L <= 74 ? "#1C3E2E" : "#2F5D46";
+  const scaleMax = maxRecords > 0 ? maxRecords * 0.8 : 0;
+  const ratio = scaleMax > 0 ? Math.max(0, Math.min(1, total / scaleMax)) : 0;
+  const step = Math.max(0, Math.min(ACTIVE_PALETTE.length - 1, Math.ceil(ratio * ACTIVE_PALETTE.length) - 1));
+  const { bg: background, fg } = ACTIVE_PALETTE[step];
   return { background, fg, greyShare, empty: false };
 }

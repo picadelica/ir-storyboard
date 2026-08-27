@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { layerNameRu } from "../lib/matrixLabels";
 import type { BriefComposeResult, BriefTemplate, Layer } from "../types";
 
 const FLAGS: { id: string; label: string; dot: string }[] = [
@@ -100,7 +101,7 @@ export default function BriefComposer({ clientId, layers }: { clientId: string; 
                 className={`flex items-center gap-1.5 text-[11px] px-2 py-1.5 rounded-lg border text-left transition
                   ${layerIds.has(L.id) ? "border-ink bg-ink/[0.05] text-ink" : "border-ink-line text-ink-mute"}`}>
                 <span className="font-mono tabular-nums">{L.id}</span>
-                <span className="truncate">{L.name}</span>
+                <span className="truncate">{layerNameRu(L.id, L.name)}</span>
               </button>
             ))}
           </div>
@@ -130,8 +131,8 @@ export default function BriefComposer({ clientId, layers }: { clientId: string; 
           </div>
           <div className="flex items-center gap-2">
             {result && <span className="text-[11px] text-ink-mute tabular-nums">{result.fact_count} фактов</span>}
-            <button onClick={copy} disabled={!output} className={btn}>{copied ? "Скопировано ✓" : "Copy"}</button>
-            <button onClick={download} disabled={!output} className={btn}>Download</button>
+            <button onClick={copy} disabled={!output} className={btn}>{copied ? "Скопировано ✓" : "Копировать"}</button>
+            <button onClick={download} disabled={!output} className={btn}>Скачать</button>
           </div>
         </div>
         <pre className="text-xs font-mono leading-5 whitespace-pre-wrap break-words bg-white border border-ink-line rounded-xl p-4 overflow-auto"

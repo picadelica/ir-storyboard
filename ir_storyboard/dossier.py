@@ -87,6 +87,8 @@ def _cells_by_layer(conn, client_id: str) -> Dict[int, list]:
             "subsection_id": r["subsection_id"], "subsection_name": r["subsection_name"],
             "n_green": g, "n_red": rd, "n_grey": gr, "facts": g + rd + gr,
             "must_have": (r.get("n_must_client", 0) or 0) + (r.get("n_must_expert", 0) or 0) > 0,
+            "n_must_client": r.get("n_must_client", 0) or 0,
+            "n_must_expert": r.get("n_must_expert", 0) or 0,
             "corroborated": corr.get(r["subsection_id"], 0) > 0,
             "last_update": r["last_update"],
         })

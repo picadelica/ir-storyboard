@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import type { Layer, Track } from "../types";
 
 interface Props {
@@ -20,21 +21,21 @@ export default function PlanView({ clientId, quarter, layers }: Props) {
   return (
     <div className="p-5 max-w-4xl space-y-5">
       <div>
-        <h2 className="text-lg font-semibold">Plan · {quarter}</h2>
+        <h2 className="text-lg font-semibold">План · {quarter}</h2>
         <div className="text-xs text-ink-mute mt-0.5">
-          Narrative tracks определяют, на каких слоях/ячейках фокусируется
-          weekly / event / quarterly cycle. Без активного трека Weekly бриф
-          не отрендерится — cycle track-ориентирован by design.
+          Сценарные треки определяют, на каких слоях и ячейках фокусируются
+          недельный, событийный и квартальный циклы. Без активного трека недельный бриф
+          не соберётся — цикл ориентируется на выбранный трек.
         </div>
       </div>
 
-      {tracks.isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
+      {tracks.isLoading && <div className="text-sm text-ink-mute">Загрузка…</div>}
 
       {tracks.data && tracks.data.length === 0 && !showForm && (
         <div className="border border-amber-300 bg-amber-50 rounded-lg p-4 text-sm text-amber-900">
-          <div className="font-medium mb-1">No tracks for {quarter}.</div>
+          <div className="font-medium mb-1">Для {quarter} треков пока нет.</div>
           <div className="text-xs">
-            Создай хотя бы один трек, чтобы Weekly cycle мог работать.
+            Создайте хотя бы один трек, чтобы недельный цикл мог работать.
           </div>
         </div>
       )}
@@ -55,7 +56,7 @@ export default function PlanView({ clientId, quarter, layers }: Props) {
           onClick={() => setShowForm(true)}
           className="text-sm px-4 py-2 bg-ink text-white rounded hover:bg-ink/90"
         >
-          + New track
+          + Новый трек
         </button>
       )}
 
@@ -80,7 +81,7 @@ function TrackCard({ track, layers }: { track: Track; layers?: Layer[] }) {
     layers?.find((l) => l.id === id)?.name ?? `L${id}`;
   const subName = (sid: string) => {
     for (const l of layers ?? [])
-      for (const s of l.subsections) if (s.id === sid) return s.name;
+      for (const s of l.subsections) if (s.id === sid) return subsectionNameRu(s.id, s.name);
     return sid;
   };
 
@@ -89,7 +90,7 @@ function TrackCard({ track, layers }: { track: Track; layers?: Layer[] }) {
       <div className="flex items-baseline justify-between gap-2">
         <div className="font-medium text-sm">{track.name}</div>
         <div className="text-[10px] font-mono text-ink-mute uppercase">
-          priority {track.priority}
+          приоритет {track.priority}
         </div>
       </div>
       {track.angle && (
@@ -174,20 +175,20 @@ function NewTrackForm({
 
   return (
     <div className="border border-ink-line rounded-lg p-4 bg-white space-y-4">
-      <div className="text-sm font-semibold">New track</div>
+      <div className="text-sm font-semibold">Новый трек</div>
 
-      <Field label="Name" hint="короткое имя трека, например «Founder origin story»">
+      <Field label="Название" hint="короткое имя трека, например «История происхождения фаундера»">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="w-full text-sm border border-slate-300 rounded px-2 py-1.5"
-          placeholder="Founder origin story"
+          placeholder="История происхождения фаундера"
         />
       </Field>
 
       <Field
-        label="Angle"
-        hint="одно предложение про cause → effect → so what (опционально, попадает в prompt)"
+        label="Угол"
+        hint="одно предложение про причину → следствие → значение (опционально, попадёт в промпт)"
       >
         <textarea
           value={angle}
@@ -201,14 +202,14 @@ function NewTrackForm({
       <div className="space-y-2">
         <div className="flex items-baseline justify-between">
           <div className="text-xs font-medium text-ink-mute uppercase">
-            Target {granular ? "subsections" : "layers"}
+            Цель: {granular ? "позиции" : "слои"}
           </div>
           <button
             type="button"
             onClick={() => setGranular(!granular)}
             className="text-[11px] text-ink-mute hover:text-ink underline"
           >
-            {granular ? "→ pick whole layers" : "→ pick individual subsections"}
+            {granular ? "→ выбрать целые слои" : "→ выбрать отдельные позиции"}
           </button>
         </div>
 
@@ -230,7 +231,7 @@ function NewTrackForm({
                   <span className="font-mono text-[10px] text-ink-mute mr-1">
                     L{l.id}
                   </span>
-                  {l.name}
+                  {layerNameRu(l.id, l.name)}
                 </button>
               );
             })}
@@ -242,7 +243,7 @@ function NewTrackForm({
             {layers.map((l) => (
               <div key={l.id} className="space-y-1">
                 <div className="text-[11px] font-medium text-ink-mute">
-                  L{l.id}. {l.name}
+                  L{l.id}. {layerNameRu(l.id, l.name)}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-1.5">
                   {l.subsections.map((s) => {
@@ -261,7 +262,7 @@ function NewTrackForm({
                         <span className="font-mono text-[10px] text-ink-mute mr-1">
                           {s.id}
                         </span>
-                        {s.name}
+                        {subsectionNameRu(s.id, s.name)}
                       </button>
                     );
                   })}
@@ -272,7 +273,7 @@ function NewTrackForm({
         )}
       </div>
 
-      <Field label="Priority" hint="1 = самый важный; weekly использует трек с highest priority">
+      <Field label="Приоритет" hint="1 = самый важный; недельный цикл использует трек с самым высоким приоритетом">
         <input
           type="number"
           min={1}
@@ -294,7 +295,7 @@ function NewTrackForm({
           onClick={onCancel}
           className="text-sm px-3 py-1.5 text-ink-mute hover:bg-slate-100 rounded"
         >
-          Cancel
+          Отмена
         </button>
         <button
           onClick={() => submit.mutate()}
@@ -305,7 +306,7 @@ function NewTrackForm({
               : "bg-slate-200 text-slate-400 cursor-not-allowed"
           }`}
         >
-          {submit.isPending ? "Creating…" : "Create track"}
+          {submit.isPending ? "Создаю…" : "Создать трек"}
         </button>
       </div>
     </div>

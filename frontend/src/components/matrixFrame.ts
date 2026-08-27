@@ -1,0 +1,16 @@
+export const MATRIX_PAGE = "h-full min-h-0 flex flex-col bg-[#f4f4ef] relative";
+export const MATRIX_PAGE_PADDING = "p-5";
+export const MATRIX_PRESENT_PADDING = "px-6 py-5";
+export const MATRIX_HEADER = "h-11 mb-4 shrink-0 flex items-center justify-between gap-3";
+export const MATRIX_BODY = "min-h-0 flex-1";
+export const MATRIX_LAYER_COLUMN_WIDTH = "38px";
+export const MATRIX_GRID = "h-full min-h-0 overflow-hidden grid gap-1.5";
+export const MATRIX_ROW = "grid items-stretch gap-1.5";
+export const MATRIX_LAYER_COL = "relative h-full min-h-0 rounded-lg bg-transparent px-0 py-[5px] flex flex-col items-center justify-center";
+export const MATRIX_LAYER_BADGE = "w-[25px] h-[25px] shrink-0 rounded-md bg-white text-[#59604b] grid place-items-center text-[10px] font-extrabold leading-none select-none shadow-[0_0_0_1px_rgba(37,40,31,0.06)]";
+export const MATRIX_CELL = "group relative h-full min-h-0 overflow-hidden rounded-lg text-left border-0 px-[10px] pt-[7px] pb-[6px] transition-[filter,transform] duration-200 ease-out flex flex-col items-stretch shadow-none focus-visible:outline-none";
+export const MATRIX_CELL_SELECTED = "z-10 -translate-y-px brightness-[0.94]";
+export const MATRIX_CELL_IDLE = "hover:z-10 hover:-translate-y-px hover:brightness-[0.96]";
+export const MATRIX_CELL_ID = "text-[9px] font-extrabold leading-none tabular-nums";
+export const MATRIX_CELL_TITLE = "block max-w-[180px] font-bold leading-tight text-[10px] line-clamp-2";
+export const MATRIX_CELL_VALUE = "block shrink-0 min-w-[52px] text-right text-[24px] font-extrabold leading-none tabular-nums select-none";

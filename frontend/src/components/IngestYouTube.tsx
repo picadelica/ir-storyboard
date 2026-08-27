@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import type { DuplicateHint, Entity, Layer, YouTubeFact, YouTubePreviewResult, YouTubeSkipped } from "../types";
 import SourceLine from "./SourceLine";
 import FlagDot from "./FlagDot";
@@ -42,7 +43,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   const lsSaved = (() => { try { return JSON.parse(localStorage.getItem(lsKey) || "{}"); } catch { return {}; } })();
 
   const subsectionOptions = (layers ?? []).flatMap(L =>
-    L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${s.name} (${L.name})` }))
+    L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${subsectionNameRu(s.id, s.name)} (${layerNameRu(L.id, L.name)})` }))
   );
 
   // Restore only lightweight fields — preview JSON can be 200-500 KB and is
@@ -377,15 +378,15 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
 
   if (screen === "input") {
     return (
-      <div className="p-5 max-w-2xl space-y-6">
+      <div className="p-5 max-w-[820px] mx-auto space-y-4">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-lg font-semibold">Ingest YouTube Interview</h2>
+          <h2 className="text-lg font-semibold">Загрузка YouTube-интервью</h2>
           {history.data && history.data.length > 0 && (
             <button
               onClick={() => setScreen("history")}
               className="text-xs text-ink-mute hover:text-ink underline-offset-2 hover:underline"
             >
-              History ({history.data.length}) →
+              История ({history.data.length}) →
             </button>
           )}
         </div>
@@ -412,11 +413,11 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                   : "bg-ink text-white hover:bg-ink/90"
               }`}
             >
-              {previewMut.isPending ? "Processing…" : "Preview"}
+              {previewMut.isPending ? "Обрабатываю…" : "Предпросмотр"}
             </button>
           </div>
           {(previewMut.isPending || jobStatus === "processing") && (
-            <div className="rounded-lg border border-ink-line bg-slate-50 p-3 space-y-2">
+            <div className="bg-white rounded-lg border border-ink-line p-5 space-y-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="flex items-center gap-2 font-medium text-ink">
                   <span className="inline-block w-3 h-3 rounded-full border-2 border-ink/30 border-t-ink animate-spin" />
@@ -447,24 +448,24 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
           <div>
             <div className="flex items-baseline justify-between mb-2">
               <div className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                Recent ingests
+                Последние загрузки
               </div>
               {history.data.length > 5 && (
                 <button
                   onClick={() => setScreen("history")}
                   className="text-[10px] text-ink-mute hover:text-ink"
                 >
-                  View all {history.data.length} →
+                  Показать все {history.data.length} →
                 </button>
               )}
             </div>
             <table className="w-full text-xs">
               <thead className="text-[10px] text-ink-mute uppercase">
                 <tr>
-                  <th className="text-left py-1 pr-3">Date</th>
-                  <th className="text-left py-1 pr-3">Video</th>
-                  <th className="text-right py-1 pr-3">Emitted</th>
-                  <th className="text-right py-1 pr-3">Committed</th>
+                  <th className="text-left py-1 pr-3">Дата</th>
+                  <th className="text-left py-1 pr-3">Видео</th>
+                  <th className="text-right py-1 pr-3">Извлечено</th>
+                  <th className="text-right py-1 pr-3">Внесено</th>
                   <th className="text-right py-1"></th>
                 </tr>
               </thead>
@@ -479,7 +480,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                     </td>
                     <td className="py-1.5 pr-3 text-right">{row.facts_emitted}</td>
                     <td className="py-1.5 pr-3 text-right">
-                      {row.confirmed_at ? row.facts_committed : <span className="text-amber-600">pending</span>}
+                      {row.confirmed_at ? row.facts_committed : <span className="text-amber-600">ожидает</span>}
                     </td>
                     <td className="py-1.5 text-right">
                       <button
@@ -487,7 +488,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                         disabled={reopenLoading === row.id}
                         className="text-[10px] text-blue-600 hover:underline disabled:text-slate-400"
                       >
-                        {reopenLoading === row.id ? "loading…" : "reopen"}
+                        {reopenLoading === row.id ? "загрузка…" : "открыть"}
                       </button>
                     </td>
                   </tr>
@@ -506,37 +507,37 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   if (screen === "history") {
     const rows = history.data ?? [];
     return (
-      <div className="p-5 max-w-5xl space-y-4">
+      <div className="p-5 max-w-[820px] mx-auto space-y-4">
         <div className="flex items-baseline justify-between">
           <div>
-            <h2 className="text-lg font-semibold">YouTube Ingest History</h2>
+            <h2 className="text-lg font-semibold">История загрузок YouTube</h2>
             <div className="text-xs text-ink-mute mt-0.5">
-              {rows.length} past ingest{rows.length !== 1 ? "s" : ""} for this client
+              Загрузок для этого клиента: {rows.length}
             </div>
           </div>
           <button
             onClick={() => { setScreen("input"); setReopenError(""); }}
             className="text-xs text-ink-mute hover:text-ink"
           >
-            ← Back to input
+            ← Назад к вводу
           </button>
         </div>
-        {history.isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
+        {history.isLoading && <div className="text-sm text-ink-mute">Загрузка…</div>}
         {rows.length === 0 && !history.isLoading && (
-          <div className="text-sm text-ink-mute">No ingests yet.</div>
+          <div className="text-sm text-ink-mute">Загрузок пока нет.</div>
         )}
         {rows.length > 0 && (
           <table className="w-full text-xs">
             <thead className="text-[10px] text-ink-mute uppercase">
               <tr className="border-b border-ink-line">
-                <th className="text-left py-2 pr-3">Date</th>
-                <th className="text-left py-2 pr-3">Video</th>
-                <th className="text-left py-2 pr-3">Transcriber</th>
-                <th className="text-right py-2 pr-3">Cost</th>
-                <th className="text-right py-2 pr-3">Emitted</th>
-                <th className="text-right py-2 pr-3">Committed</th>
-                <th className="text-right py-2 pr-3">Warnings</th>
-                <th className="text-left py-2 pr-3">Expert</th>
+                <th className="text-left py-2 pr-3">Дата</th>
+                <th className="text-left py-2 pr-3">Видео</th>
+                <th className="text-left py-2 pr-3">Транскрибация</th>
+                <th className="text-right py-2 pr-3">Стоимость</th>
+                <th className="text-right py-2 pr-3">Извлечено</th>
+                <th className="text-right py-2 pr-3">Внесено</th>
+                <th className="text-right py-2 pr-3">Предупреждения</th>
+                <th className="text-left py-2 pr-3">Эксперт</th>
                 <th className="text-right py-2"></th>
               </tr>
             </thead>
@@ -558,7 +559,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                     {row.confirmed_at ? (
                       <span className="text-emerald-700">{row.facts_committed}</span>
                     ) : (
-                      <span className="text-amber-600">pending</span>
+                      <span className="text-amber-600">ожидает</span>
                     )}
                   </td>
                   <td className="py-2 pr-3 text-right">{row.channel_warnings}</td>
@@ -571,7 +572,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                       disabled={reopenLoading === row.id}
                       className="text-[11px] text-blue-600 hover:underline disabled:text-slate-400"
                     >
-                      {reopenLoading === row.id ? "loading…" : "reopen"}
+                      {reopenLoading === row.id ? "загрузка…" : "открыть"}
                     </button>
                   </td>
                 </tr>
@@ -591,12 +592,11 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   if (screen === "done" && commitMut.data) {
     const r = commitMut.data;
     return (
-      <div className="p-5 max-w-2xl space-y-4">
+      <div className="p-5 max-w-[820px] mx-auto space-y-4">
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-          <div className="font-semibold text-emerald-800 mb-1">Saved to matrix</div>
+          <div className="font-semibold text-emerald-800 mb-1">Сохранено в матрицу</div>
           <div className="text-sm text-emerald-700">
-            {r.committed} fact{r.committed !== 1 ? "s" : ""} committed ·{" "}
-            {r.skipped} skipped (duplicates or dropped)
+            Внесено фактов: {r.committed} · пропущено: {r.skipped} (дубли или снятые карточки)
           </div>
         </div>
         <div className="flex gap-3">
@@ -604,7 +604,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             onClick={() => onJumpToCell(preview?.facts[0]?.subsection_id ?? "2.1")}
             className="px-4 py-2 text-sm bg-ink text-white rounded hover:bg-ink/90"
           >
-            View in Matrix
+            Открыть в матрице
           </button>
           <button
             onClick={() => {
@@ -622,7 +622,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             }}
             className="px-4 py-2 text-sm border border-ink-line rounded hover:bg-slate-50"
           >
-            Ingest another
+            Загрузить ещё
           </button>
         </div>
       </div>
@@ -634,14 +634,14 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
   if (!preview) return null;
 
   return (
-    <div className="p-5 max-w-4xl space-y-6">
+    <div className="p-5 max-w-[820px] mx-auto space-y-4">
       <div className="flex items-baseline justify-between">
         <div>
           <h2 className="text-lg font-semibold">
-            {readOnly ? "Past Preview (review-only)" : "Preview"}
+            {readOnly ? "Прошлый предпросмотр (только чтение)" : "Предпросмотр"}
           </h2>
           <div className="text-xs text-ink-mute mt-0.5">
-            {preview.facts.length} facts · {preview.skipped.length} skipped by LayerGuard
+            фактов: {preview.facts.length} · пропущено LayerGuard: {preview.skipped.length}
           </div>
         </div>
         <button
@@ -658,15 +658,15 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
           }}
           className="text-xs text-ink-mute hover:text-ink"
         >
-          ← Back
+          ← Назад
         </button>
       </div>
 
       {readOnly && (
         <div className="bg-slate-100 border border-slate-300 rounded-lg p-3 text-sm text-slate-700">
-          <span className="font-medium">Committed</span> on{" "}
+          <span className="font-medium">Внесено</span>:{" "}
           {preview.confirmed_at && new Date(preview.confirmed_at).toLocaleString()} —
-          read-only review. Edits and re-commit disabled.
+          режим просмотра. Правки и повторное внесение отключены.
         </div>
       )}
 
@@ -679,16 +679,16 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
       )}
 
       {/* Video meta */}
-      <div className="bg-slate-50 border border-ink-line rounded-lg p-4 space-y-1 text-sm">
+      <div className="bg-white rounded-lg border border-ink-line p-5 space-y-1 text-sm">
         <div className="font-medium">{preview.meta.title}</div>
         <div className="text-xs text-ink-mute">
           {preview.meta.channel_name} · {fmtDuration(preview.meta.duration_sec)}
           {preview.meta.view_count != null &&
-            ` · ${preview.meta.view_count.toLocaleString()} views`}
+            ` · ${preview.meta.view_count.toLocaleString()} просмотров`}
           {preview.meta.like_count != null &&
-            ` · ${preview.meta.like_count.toLocaleString()} likes`}
+            ` · ${preview.meta.like_count.toLocaleString()} лайков`}
           {preview.meta.upload_date && ` · ${preview.meta.upload_date}`}
-          {preview.from_cache && " · transcript from cache"}
+          {preview.from_cache && " · транскрипт из кэша"}
           {preview.transcribe_cost_usd != null &&
             ` · ~$${preview.transcribe_cost_usd.toFixed(2)} (OpenAI Whisper)`}
         </div>
@@ -711,11 +711,11 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
 
       {/* Orientation brief — paragraph + per-cell coverage */}
       {(preview.video_brief || (preview.cell_briefs && Object.keys(preview.cell_briefs).length > 0)) && (
-        <div className="border border-ink-line rounded-lg p-4 space-y-3 bg-white">
+        <div className="bg-white rounded-lg border border-ink-line p-5 space-y-3">
           {preview.video_brief && (
             <div>
               <div className="text-[10px] font-medium uppercase tracking-wide text-ink-mute mb-1">
-                Brief
+                Краткая сводка
               </div>
               <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
                 {preview.video_brief}
@@ -725,7 +725,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
           {preview.cell_briefs && Object.keys(preview.cell_briefs).length > 0 && (
             <div>
               <div className="text-[10px] font-medium uppercase tracking-wide text-ink-mute mb-1">
-                Coverage ({Object.keys(preview.cell_briefs).length} cells)
+                Покрытие ({Object.keys(preview.cell_briefs).length} ячеек)
               </div>
               <ul className="space-y-1">
                 {Object.entries(preview.cell_briefs)
@@ -748,7 +748,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
       {preview.meta.description && preview.meta.description.trim() && (
         <details className="text-xs text-ink-mute">
           <summary className="cursor-pointer hover:text-ink">
-            Original video description ({preview.meta.description.length} chars)
+            Оригинальное описание видео ({preview.meta.description.length} символов)
           </summary>
           <div className="mt-2 text-slate-600 whitespace-pre-wrap border-l-2 border-slate-200 pl-3">
             {preview.meta.description}
@@ -760,11 +760,11 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
       {(preview.stats.chunks_failed ?? 0) > 0 && (
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-900">
           <div className="font-medium">
-            ⚠ {preview.stats.chunks_failed} of {preview.stats.chunks_total ?? "?"} chunks failed
+            ⚠ Не обработано чанков: {preview.stats.chunks_failed} из {preview.stats.chunks_total ?? "?"}
           </div>
           <div className="text-xs mt-1">
-            Some 15-min windows produced no facts because the LLM returned an empty
-            or unparseable response (likely rate-limit / overload). Re-run preview to retry — transcript is cached, retry is free.
+            Часть 15-минутных окон не дала фактов: LLM вернул пустой или нечитаемый ответ.
+            Запустите предпросмотр ещё раз — транскрипт уже в кэше.
           </div>
         </div>
       )}
@@ -773,7 +773,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
       {preview.notes.length > 0 && (
         <details className="text-xs text-ink-mute">
           <summary className="cursor-pointer hover:text-ink">
-            {preview.notes.length} note{preview.notes.length !== 1 ? "s" : ""}
+            Заметки парсера: {preview.notes.length}
           </summary>
           <ul className="mt-1 space-y-0.5 pl-3">
             {preview.notes.map((n, i) => <li key={i}>— {n}</li>)}
@@ -785,7 +785,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
       <div>
         <div className="flex items-baseline justify-between mb-2">
           <div className="text-xs font-medium uppercase text-ink-mute tracking-wide">
-            Facts ({preview.facts.length})
+            Факты ({preview.facts.length})
           </div>
           {!readOnly && (
             <div className="flex items-center gap-2 text-[10px]">
@@ -793,7 +793,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                 onClick={() => setSelected(new Set(preview.facts.map((_, i) => i)))}
                 className="text-ink-mute hover:text-ink"
               >
-                select all
+                выбрать всё
               </button>
               <span className="text-slate-300">·</span>
               <button
@@ -801,7 +801,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
                 className="text-ink-mute hover:text-ink"
                 disabled={selected.size === 0}
               >
-                clear
+                сбросить
               </button>
             </div>
           )}
@@ -811,23 +811,23 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         {!readOnly && selected.size > 0 && (
           <div className="sticky top-0 z-10 mb-3 bg-amber-50 border border-amber-300 rounded-lg p-3 flex flex-wrap items-center gap-2 text-xs shadow-sm">
             <span className="font-medium text-amber-900">
-              {selected.size} selected
+              выбрано: {selected.size}
             </span>
             <div className="h-4 w-px bg-amber-300" />
             <button
               onClick={bulkDrop}
               className="px-2 py-1 border border-red-300 text-red-700 rounded hover:bg-red-50"
             >
-              drop
+              снять
             </button>
             <button
               onClick={bulkRestore}
               className="px-2 py-1 border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-50"
             >
-              restore
+              вернуть
             </button>
             <div className="h-4 w-px bg-amber-300" />
-            <span className="text-amber-900">flag →</span>
+            <span className="text-amber-900">флаг →</span>
             {(["green", "red", "grey"] as const).map((f) => (
               <button
                 key={f}
@@ -838,7 +838,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
               </button>
             ))}
             <div className="h-4 w-px bg-amber-300" />
-            <span className="text-amber-900">move →</span>
+            <span className="text-amber-900">перенести →</span>
             <select
               onChange={(e) => {
                 if (e.target.value) {
@@ -849,7 +849,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
               defaultValue=""
               className="text-xs border border-amber-300 rounded px-2 py-1 bg-white"
             >
-              <option value="" disabled>subsection…</option>
+              <option value="" disabled>позиция…</option>
               {subsectionOptions.map((o) => (
                 <option key={o.id} value={o.id}>{o.label}</option>
               ))}
@@ -858,7 +858,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
               onClick={() => setSelected(new Set())}
               className="ml-auto text-[10px] text-amber-900 hover:text-amber-700"
             >
-              ✕ clear
+              ✕ сбросить
             </button>
           </div>
         )}
@@ -893,7 +893,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
       {preview.skipped.length > 0 && (
         <div>
           <div className="text-xs font-medium uppercase text-ink-mute tracking-wide mb-2">
-            Skipped by LayerGuard ({preview.skipped.length})
+            Пропущено LayerGuard ({preview.skipped.length})
           </div>
           <div className="space-y-2">
             {preview.skipped.map((s, idx) => (
@@ -942,7 +942,7 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
         <div className="flex items-center gap-3">
           <input
             type="email"
-            placeholder="your@email.com"
+            placeholder="ваш@email.com"
             value={expertEmail}
             onChange={(e) => setExpertEmail(e.target.value)}
             className="flex-1 text-sm border border-ink-line rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-ink"
@@ -957,12 +957,12 @@ export default function IngestYouTube({ clientId, onJumpToCell, layers }: Props)
             }`}
           >
             {commitMut.isPending
-              ? "Saving…"
-              : `Save ${keptCount} fact${keptCount !== 1 ? "s" : ""} to matrix`}
+              ? "Сохраняю…"
+              : `Сохранить факты в матрицу (${keptCount})`}
           </button>
         </div>
         {keptCount === 0 && (
-          <div className="text-xs text-red-600">Drop all facts — nothing to commit</div>
+          <div className="text-xs text-red-600">Все факты сняты — нечего сохранять</div>
         )}
         {commitMut.isError && (
           <div className="text-xs text-red-600">{String(commitMut.error)}</div>
@@ -1079,7 +1079,7 @@ export function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSele
             <>
               <div className={`font-medium text-slate-800 ${dropped ? "line-through" : ""}`}>
                 {displayRu}
-                {isEdited && <span className="ml-1 text-[10px] text-amber-600">(edited)</span>}
+                {isEdited && <span className="ml-1 text-[10px] text-amber-600">(изменено)</span>}
               </div>
               {displayEn && displayEn !== displayRu && (
                 <div className="text-xs text-slate-500 italic">{displayEn}</div>
@@ -1095,14 +1095,14 @@ export function FactCard({ fact, edit, dropped, readOnly, selected, onToggleSele
               {effectiveFlag === "red" && (
                 fact.rationale
                   ? <div className="text-xs border-l-2 border-flag-red/60 text-flag-red pl-2 leading-snug">
-                      <span className="font-medium uppercase tracking-wide text-[10px] mr-1">concern:</span>
+                      <span className="font-medium uppercase tracking-wide text-[10px] mr-1">риск:</span>
                       {fact.rationale}
                     </div>
-                  : <div className="text-xs italic text-amber-600">⚠ Concern: (не указано)</div>
+                  : <div className="text-xs italic text-amber-600">⚠ Риск не указан</div>
               )}
               {effectiveFlag === "grey" && fact.rationale && (
                 <div className="text-xs border-l-2 border-slate-300 text-ink-mute pl-2 leading-snug">
-                  <span className="font-medium uppercase tracking-wide text-[10px] mr-1">gap:</span>
+                  <span className="font-medium uppercase tracking-wide text-[10px] mr-1">пробел:</span>
                   {fact.rationale}
                 </div>
               )}
@@ -1309,7 +1309,7 @@ export function SkippedCard({ skipped, edit, overridden, readOnly, subsectionOpt
             <>
               <div className="font-medium text-slate-700">
                 {displayRu}
-                {isEdited && <span className="ml-1 text-[10px] text-amber-600">(edited)</span>}
+                {isEdited && <span className="ml-1 text-[10px] text-amber-600">(изменено)</span>}
               </div>
               {displayEn && displayEn !== displayRu && (
                 <div className="text-xs text-slate-500 italic">{displayEn}</div>

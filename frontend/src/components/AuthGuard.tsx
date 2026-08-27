@@ -57,7 +57,7 @@ function Login({ onAuthed }: { onAuthed: () => void }) {
   return (
     <Centered>
       <div className="w-[360px] bg-white rounded-2xl border border-ink-line px-7 py-8 text-center">
-        <div className="text-xl font-semibold tracking-tight text-ink">StoryBoard</div>
+        <div className="text-xl font-semibold tracking-tight text-ink">Сториборд</div>
         <div className="text-sm text-ink-mute mt-1.5 leading-snug">
           Доступ по приглашению в рабочую группу Telegram.
         </div>
@@ -73,7 +73,7 @@ function Login({ onAuthed }: { onAuthed: () => void }) {
 
         {state === "waiting" && (
           <div className="mt-6 space-y-3">
-            <div className="text-sm text-ink">Открой бота и нажми <span className="font-medium">Start</span>.</div>
+            <div className="text-sm text-ink">Откройте бота и нажмите <span className="font-medium">Start</span>.</div>
             <a href={link} target="_blank" rel="noopener noreferrer"
                className="block w-full py-2.5 rounded-xl bg-ink text-white text-sm font-medium hover:opacity-90 transition">
               Открыть бота

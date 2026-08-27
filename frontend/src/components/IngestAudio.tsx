@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import type { DuplicateHint, Layer, YouTubePreviewResult } from "../types";
 import {
   FactCard, SkippedCard, fmtDuration, editIsEmpty, type FactEdit,
@@ -28,7 +29,7 @@ interface Props {
 
 export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
   const subsectionOptions = (layers ?? []).flatMap(L =>
-    L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${s.name} (${L.name})` }))
+    L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${subsectionNameRu(s.id, s.name)} (${layerNameRu(L.id, L.name)})` }))
   );
 
   const [screen, setScreen] = useState<"input" | "preview" | "done">("input");
@@ -227,73 +228,80 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
   if (screen === "input") {
     const processing = previewMut.isPending || jobStatus === "processing";
     return (
-      <div className="p-5 max-w-2xl space-y-6">
-        <h2 className="text-lg font-semibold">Ingest Audio Recording</h2>
-
-        <div className="space-y-2">
-          <label className="block text-xs font-medium text-ink-mute">
-            Audio file ({ALLOWED_EXT.join(" / ")}, до 500 MB)
-          </label>
-          <input
-            type="file"
-            accept={ALLOWED_EXT.join(",")}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="block w-full text-sm text-ink-mute file:mr-3 file:px-3 file:py-1.5 file:text-sm file:font-medium file:border file:border-ink-line file:rounded file:bg-white file:text-ink hover:file:bg-slate-50 file:cursor-pointer"
-          />
-          {fileError && <div className="text-xs text-red-600">{fileError}</div>}
+      <div className="p-5 max-w-[820px] mx-auto space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold text-ink">Загрузка аудиозаписи</h2>
+          <p className="text-sm text-ink-mute">
+            Загрузите аудиофайл, проверьте извлечённые факты и внесите их в матрицу.
+          </p>
         </div>
 
-        <div className="space-y-2">
-          <label className="block text-xs font-medium text-ink-mute">
-            Title (опционально — по умолчанию имя файла)
-          </label>
-          <input
-            type="text"
-            placeholder='например "Interview with founder 2026-06-01"'
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full text-sm border border-ink-line rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-ink"
-          />
-        </div>
+        <div className="bg-white rounded-lg border border-ink-line p-5 space-y-4">
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-ink-mute">
+              Аудиофайл ({ALLOWED_EXT.join(" / ")}, до 500 MB)
+            </label>
+            <input
+              type="file"
+              accept={ALLOWED_EXT.join(",")}
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-ink-mute file:mr-3 file:px-3 file:py-1.5 file:text-sm file:font-medium file:border file:border-ink-line file:rounded-xl file:bg-white file:text-ink hover:file:bg-slate-50 file:cursor-pointer"
+            />
+            {fileError && <div className="text-xs text-red-600">{fileError}</div>}
+          </div>
 
-        <div className="space-y-2">
-          <button
-            onClick={() => previewMut.mutate()}
-            disabled={!file || !!fileError || processing}
-            className={`px-4 py-2 text-sm rounded font-medium transition ${
-              !file || fileError || processing
-                ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-                : "bg-ink text-white hover:bg-ink/90"
-            }`}
-          >
-            {processing ? "Processing…" : "Preview"}
-          </button>
-          {processing && (
-            <div className="text-xs text-ink-mute space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
-                <span className="font-medium">
-                  {jobStage || "Запущено в фоне — обрабатываем…"}
-                </span>
-                {jobStartedAt && (
-                  <span className="font-mono text-[10px] text-slate-400">
-                    {Math.floor((Date.now() - jobStartedAt) / 60000)}:
-                    {String(Math.floor(((Date.now() - jobStartedAt) / 1000) % 60)).padStart(2, "0")}
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-ink-mute">
+              Название (опционально — по умолчанию имя файла)
+            </label>
+            <input
+              type="text"
+              placeholder='например «Интервью с фаундером 2026-06-01»'
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full text-sm border border-ink-line rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-ink"
+            />
+          </div>
+
+          <div className="space-y-3">
+            <button
+              onClick={() => previewMut.mutate()}
+              disabled={!file || !!fileError || processing}
+              className={`px-4 py-2 text-sm rounded-xl font-medium transition ${
+                !file || fileError || processing
+                  ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  : "bg-ink text-white hover:bg-ink/90"
+              }`}
+            >
+              {processing ? "Обрабатываю…" : "Предпросмотр"}
+            </button>
+            {processing && (
+              <div className="rounded-xl border border-ink-line bg-[#fbfbf7] p-3 text-xs text-ink-mute space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+                  <span className="font-medium">
+                    {jobStage || "Запущено в фоне — обрабатываем…"}
                   </span>
-                )}
+                  {jobStartedAt && (
+                    <span className="font-mono text-[10px] text-slate-400">
+                      {Math.floor((Date.now() - jobStartedAt) / 60000)}:
+                      {String(Math.floor(((Date.now() - jobStartedAt) / 1000) % 60)).padStart(2, "0")}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  Этапы: нарезка → транскрибирование чанков → извлечение фактов.
+                  Для часовой записи ~5–15 мин. Повторная загрузка того же файла
+                  бесплатна — транскрипт кэшируется.
+                </div>
               </div>
-              <div className="text-[10px] text-slate-400">
-                Этапы: нарезка → транскрибирование чанков → извлечение фактов.
-                Для часовой записи ~5–15 мин. Повторная загрузка того же файла
-                бесплатна — транскрипт кэшируется.
+            )}
+            {(jobStatus === "error" || jobError) && !processing && (
+              <div className="text-sm text-red-600 bg-red-50 rounded-xl p-3">
+                Ошибка: {jobError || "что-то пошло не так"}
               </div>
-            </div>
-          )}
-          {(jobStatus === "error" || jobError) && !processing && (
-            <div className="text-sm text-red-600 bg-red-50 rounded p-3">
-              Ошибка: {jobError || "что-то пошло не так"}
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     );
@@ -304,12 +312,11 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
   if (screen === "done" && commitMut.data) {
     const r = commitMut.data;
     return (
-      <div className="p-5 max-w-2xl space-y-4">
+      <div className="p-5 max-w-[820px] mx-auto space-y-4">
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-          <div className="font-semibold text-emerald-800 mb-1">Saved to matrix</div>
+          <div className="font-semibold text-emerald-800 mb-1">Сохранено в матрицу</div>
           <div className="text-sm text-emerald-700">
-            {r.committed} fact{r.committed !== 1 ? "s" : ""} committed ·{" "}
-            {r.skipped} skipped (duplicates or dropped)
+            Внесено фактов: {r.committed} · пропущено: {r.skipped} (дубли или снятые карточки)
           </div>
         </div>
         <div className="flex gap-3">
@@ -317,7 +324,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
             onClick={() => onJumpToCell(preview?.facts[0]?.subsection_id ?? "2.1")}
             className="px-4 py-2 text-sm bg-ink text-white rounded hover:bg-ink/90"
           >
-            View in Matrix
+            Открыть в матрице
           </button>
           <button
             onClick={() => {
@@ -334,7 +341,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
             }}
             className="px-4 py-2 text-sm border border-ink-line rounded hover:bg-slate-50"
           >
-            Ingest another
+            Загрузить ещё
           </button>
         </div>
       </div>
@@ -349,28 +356,28 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
   const sourceSha = (preview.meta.canonical_url || "").replace(/^file:\/\//, "");
 
   return (
-    <div className="p-5 max-w-4xl space-y-6">
+    <div className="p-5 max-w-[820px] mx-auto space-y-4">
       <div className="flex items-baseline justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Preview</h2>
+          <h2 className="text-lg font-semibold">Предпросмотр</h2>
           <div className="text-xs text-ink-mute mt-0.5">
-            {preview.facts.length} facts · {preview.skipped.length} skipped by LayerGuard
+            {preview.facts.length} фактов · {preview.skipped.length} пропущено LayerGuard
           </div>
         </div>
         <button
           onClick={() => { setScreen("input"); previewMut.reset(); setJobStatus(""); }}
           className="text-xs text-ink-mute hover:text-ink"
         >
-          ← Back
+          ← Назад
         </button>
       </div>
 
       {/* Audio meta */}
-      <div className="bg-slate-50 border border-ink-line rounded-lg p-4 space-y-1 text-sm">
+      <div className="bg-white rounded-lg border border-ink-line p-5 space-y-1 text-sm">
         <div className="font-medium">{preview.meta.title}</div>
         <div className="text-xs text-ink-mute">
           {preview.meta.channel_name} · {fmtDuration(preview.meta.duration_sec)}
-          {preview.from_cache && " · transcript from cache"}
+          {preview.from_cache && " · транскрипт из кэша"}
           {preview.transcribe_cost_usd != null &&
             ` · ~$${preview.transcribe_cost_usd.toFixed(2)} (OpenAI Whisper)`}
         </div>
@@ -392,11 +399,11 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
 
       {/* Orientation brief */}
       {(preview.video_brief || (preview.cell_briefs && Object.keys(preview.cell_briefs).length > 0)) && (
-        <div className="border border-ink-line rounded-lg p-4 space-y-3 bg-white">
+        <div className="bg-white rounded-lg border border-ink-line p-5 space-y-3">
           {preview.video_brief && (
             <div>
               <div className="text-[10px] font-medium uppercase tracking-wide text-ink-mute mb-1">
-                Brief
+                Краткая сводка
               </div>
               <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
                 {preview.video_brief}
@@ -406,7 +413,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
           {preview.cell_briefs && Object.keys(preview.cell_briefs).length > 0 && (
             <div>
               <div className="text-[10px] font-medium uppercase tracking-wide text-ink-mute mb-1">
-                Coverage ({Object.keys(preview.cell_briefs).length} cells)
+                Покрытие ({Object.keys(preview.cell_briefs).length} ячеек)
               </div>
               <ul className="space-y-1">
                 {Object.entries(preview.cell_briefs)
@@ -429,7 +436,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
       {(preview.stats.chunks_failed ?? 0) > 0 && (
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-900">
           <div className="font-medium">
-            ⚠ {preview.stats.chunks_failed} of {preview.stats.chunks_total ?? "?"} chunks failed
+            ⚠ Не обработано чанков: {preview.stats.chunks_failed} из {preview.stats.chunks_total ?? "?"}
           </div>
           <div className="text-xs mt-1">
             Часть окон не дала фактов (LLM вернул пустой ответ). Перезапустите
@@ -442,7 +449,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
       {preview.notes.length > 0 && (
         <details className="text-xs text-ink-mute">
           <summary className="cursor-pointer hover:text-ink">
-            {preview.notes.length} note{preview.notes.length !== 1 ? "s" : ""}
+            Заметки парсера: {preview.notes.length}
           </summary>
           <ul className="mt-1 space-y-0.5 pl-3">
             {preview.notes.map((n, i) => <li key={i}>— {n}</li>)}
@@ -453,7 +460,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
       {/* Facts */}
       <div>
         <div className="text-xs font-medium uppercase text-ink-mute tracking-wide mb-2">
-          Facts ({preview.facts.length})
+          Факты ({preview.facts.length})
         </div>
         <div className="space-y-2">
           {preview.facts.map((fact, idx) => (
@@ -483,7 +490,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
       {preview.skipped.length > 0 && (
         <div>
           <div className="text-xs font-medium uppercase text-ink-mute tracking-wide mb-2">
-            Skipped by LayerGuard ({preview.skipped.length})
+            Пропущено LayerGuard ({preview.skipped.length})
           </div>
           <div className="space-y-2">
             {preview.skipped.map((s, idx) => (
@@ -513,7 +520,7 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
         <div className="flex items-center gap-3">
           <input
             type="email"
-            placeholder="your@email.com"
+            placeholder="ваш@email.com"
             value={expertEmail}
             onChange={(e) => setExpertEmail(e.target.value)}
             className="flex-1 text-sm border border-ink-line rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-ink"
@@ -528,12 +535,12 @@ export default function IngestAudio({ clientId, onJumpToCell, layers }: Props) {
             }`}
           >
             {commitMut.isPending
-              ? "Saving…"
-              : `Save ${keptCount} fact${keptCount !== 1 ? "s" : ""} to matrix`}
+              ? "Сохраняю…"
+              : `Сохранить факты в матрицу (${keptCount})`}
           </button>
         </div>
         {keptCount === 0 && (
-          <div className="text-xs text-red-600">Drop all facts — nothing to commit</div>
+          <div className="text-xs text-red-600">Все факты сняты — нечего сохранять</div>
         )}
         {commitMut.isError && (
           <div className="text-xs text-red-600">{String(commitMut.error)}</div>

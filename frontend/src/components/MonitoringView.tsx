@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { fmtDuration } from "./IngestYouTube";
+import { HintTarget } from "./Hint";
 import type { Entity, MonitorCandidate, WatchlistItem, WatchlistKind, WatchlistSuggestion } from "../types";
 
 interface Props {
@@ -29,6 +30,17 @@ const WINDOW_LABEL: Record<string, string> = {
   month: "месяц",
 };
 
+const PANEL = "rounded-lg border p-5";
+const MONITOR_GREEN_PANEL = `${PANEL} border-[#d8e6b8] bg-[#fbfff2] space-y-3`;
+const MONITOR_WHITE_PANEL = `${PANEL} border-ink-line bg-white space-y-3`;
+const BLOCK_KICKER = "text-[11px] font-bold uppercase tracking-[0.18em]";
+const KICKER_GREEN = "text-[#6d8d13]";
+const FIELD = "text-sm border border-ink-line rounded-xl bg-white px-3 py-2 focus:outline-none focus:ring-1 focus:ring-ink focus:border-ink transition";
+const BUTTON_PRIMARY = "h-10 shrink-0 text-sm bg-ink text-white rounded-xl px-4 font-normal hover:opacity-90 disabled:opacity-40 transition";
+const BUTTON_SECONDARY = "shrink-0 rounded-xl border border-ink-line bg-white px-3 py-1.5 text-xs font-medium text-ink hover:bg-[#fbfbf7] disabled:opacity-40 transition";
+const BUTTON_GHOST = "text-xs font-normal text-ink-mute hover:text-ink transition";
+const BUTTON_AMBER = "shrink-0 rounded-xl border border-[#f0c86b] bg-[#fff4d8] px-3 py-1.5 text-xs font-medium text-[#5b4215] hover:bg-[#fff0c8] transition";
+
 /** Русские числительные: 1 находка, 2 находки, 5 находок. */
 function plural(n: number, one: string, few: string, many: string): string {
   const mod10 = n % 10, mod100 = n % 100;
@@ -44,6 +56,7 @@ export default function MonitoringView({ clientId }: Props) {
   const [error, setError] = useState("");
   const [showSources, setShowSources] = useState(false);
   const [showFiltered, setShowFiltered] = useState(false);
+  const [showCandidates, setShowCandidates] = useState(false);
 
   const candidates = useQuery<MonitorCandidate[]>({
     queryKey: ["monitor-candidates", clientId],
@@ -95,24 +108,40 @@ export default function MonitoringView({ clientId }: Props) {
   const queue = list.filter(c => c.relevance !== "unlikely");
   const filteredOut = list.filter(c => c.relevance === "unlikely");
   const activeCount = (items.data ?? []).filter(i => i.status === "active").length;
+  const candidateStatusText = candidates.isLoading
+    ? "Новые выступления: загружаем…"
+    : queue.length > 0
+      ? `${queue.length} ${plural(queue.length, "новое выступление", "новых выступления", "новых выступлений")} ждут разбора`
+      : activeCount === 0
+        ? ""
+        : filteredOut.length > 0
+          ? `Новых выступлений нет · ${filteredOut.length} ${plural(filteredOut.length, "находка отсеяна", "находки отсеяны", "находок отсеяно")} как чужие`
+          : "";
+  const showCandidateBlock = candidateStatusText.length > 0 || filteredOut.length > 0;
 
   return (
-    <div className="p-5 space-y-6 max-w-5xl">
-      <div className="flex items-baseline justify-between gap-4">
+    <div className="p-5 max-w-[820px] mx-auto space-y-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold">Мониторинг</h2>
-          <p className="text-xs text-ink-mute mt-0.5">
-            Система сама следит за каналами и подкастами спикеров и приносит новые
-            выступления. Разбирает — по-прежнему аналитик, обычным ингестом.
+          <h2 className="text-lg font-semibold tracking-tight">Мониторинг</h2>
+          <p className="text-[13px] text-ink-mute mt-0.5">
+            Следите за каналами, подкастами и поисковыми запросами — новые находки попадут в разбор.
           </p>
         </div>
-        <button
-          onClick={() => checkMut.mutate({ client_id: clientId })}
-          disabled={checkMut.isPending || activeCount === 0}
-          className="text-xs px-3 py-1.5 rounded border border-ink-line hover:bg-slate-100 disabled:opacity-40 whitespace-nowrap"
-        >
-          {checkMut.isPending ? "проверяем…" : "Проверить сейчас"}
-        </button>
+        {activeCount > 0 && (
+          <HintTarget
+            title="Проверить сейчас"
+            body="Запускает ручную проверку всех активных источников мониторинга: каналов, RSS-фидов и поисковых запросов. Новые находки появятся ниже."
+          >
+            <button
+              onClick={() => checkMut.mutate({ client_id: clientId })}
+              disabled={checkMut.isPending}
+              className={`${BUTTON_SECONDARY} whitespace-nowrap`}
+            >
+              {checkMut.isPending ? "проверяем…" : "Проверить сейчас"}
+            </button>
+          </HintTarget>
+        )}
       </div>
 
       {error && (
@@ -131,79 +160,79 @@ export default function MonitoringView({ clientId }: Props) {
       )}
 
       {/* ── очередь находок ── */}
-      <section className="space-y-3">
-        <div className="flex items-baseline gap-2">
-          <h3 className="text-sm font-medium">Новые выступления</h3>
-          <span className="text-xs text-ink-mute">{queue.length}</span>
-        </div>
-
-        {candidates.isLoading && <div className="text-sm text-ink-mute">Загружаем…</div>}
-        {!candidates.isLoading && queue.length === 0 && (
-          <div className="text-sm text-ink-mute border border-dashed border-ink-line rounded p-4">
-            {activeCount === 0
-              ? "Пока не за чем следить — добавьте канал, фид или поиск по имени спикера ниже."
-              : filteredOut.length > 0
-                ? `Новых выступлений нет: ${filteredOut.length} ${plural(filteredOut.length,
-                    "находка отсеяна", "находки отсеяны", "находок отсеяно")} как чужие.`
-                : "Новых выступлений нет. Как появятся — окажутся здесь."}
+      {showCandidateBlock && (
+      <section className="relative">
+        {candidateStatusText && (
+          <div className="min-h-8 flex items-center justify-between gap-3">
+            <div className="text-[12px] text-ink-mute">{candidateStatusText}</div>
+            {queue.length > 0 && (
+              <button onClick={() => setShowCandidates(v => !v)}
+                      className={BUTTON_AMBER}>
+                Новые выступления {showCandidates ? "▴" : "▾"}
+              </button>
+            )}
           </div>
         )}
 
-        <ul className="space-y-2">
-          {queue.map(c => {
-            const rel = RELEVANCE_STYLE[c.relevance] ?? RELEVANCE_STYLE.unclear;
-            return (
-              <li key={c.id} className="border border-ink-line rounded p-3 flex gap-3">
-                {c.thumb_url ? (
-                  <img src={c.thumb_url} alt="" className="w-28 h-16 object-cover rounded shrink-0" />
-                ) : (
-                  <div className="w-28 h-16 rounded bg-flag-empty-bg shrink-0" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start gap-2">
-                    <a href={c.url} target="_blank" rel="noreferrer"
-                       className="text-sm font-medium hover:underline break-words">
-                      {c.title || c.norm_url}
-                    </a>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${rel.cls}`}>
-                      {rel.label}
-                    </span>
-                  </div>
-                  <div className="text-xs text-ink-mute mt-1">
-                    {[c.published_at, c.duration_sec ? fmtDuration(c.duration_sec) : "", c.item_label]
-                      .filter(Boolean).join(" · ")}
-                  </div>
-                  {c.relevance_note && (
-                    <div className="text-xs text-ink-mute mt-1 italic">{c.relevance_note}</div>
-                  )}
-                </div>
-                <div className="flex flex-col gap-1.5 shrink-0">
-                  <button
-                    onClick={() => ingestMut.mutate(c.id)}
-                    disabled={ingestMut.isPending}
-                    className="text-xs px-3 py-1.5 rounded bg-ink text-white hover:opacity-90 disabled:opacity-40"
-                  >
-                    Разобрать
-                  </button>
-                  <button
-                    onClick={() => dismissMut.mutate(c.id)}
-                    disabled={dismissMut.isPending}
-                    className="text-xs px-3 py-1.5 rounded border border-ink-line hover:bg-slate-100"
-                  >
-                    Скрыть
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        {queue.length > 0 && showCandidates && (
+          <div className="border border-[#f0c86b] bg-[#fff9ea] rounded-2xl overflow-hidden">
+            <ul className="divide-y divide-[#f0c86b]/50">
+              {queue.map(c => {
+                const rel = RELEVANCE_STYLE[c.relevance] ?? RELEVANCE_STYLE.unclear;
+                return (
+                  <li key={c.id} className="px-4 py-3 flex gap-3">
+                    {c.thumb_url ? (
+                      <img src={c.thumb_url} alt="" className="w-28 h-16 object-cover rounded shrink-0" />
+                    ) : (
+                      <div className="w-28 h-16 rounded bg-flag-empty-bg shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start gap-2">
+                        <a href={c.url} target="_blank" rel="noreferrer"
+                           className="text-sm font-medium hover:underline break-words">
+                          {c.title || c.norm_url}
+                        </a>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${rel.cls}`}>
+                          {rel.label}
+                        </span>
+                      </div>
+                      <div className="text-xs text-ink-mute mt-1">
+                        {[c.published_at, c.duration_sec ? fmtDuration(c.duration_sec) : "", c.item_label]
+                          .filter(Boolean).join(" · ")}
+                      </div>
+                      {c.relevance_note && (
+                        <div className="text-xs text-ink-mute mt-1 italic">{c.relevance_note}</div>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <button
+                        onClick={() => ingestMut.mutate(c.id)}
+                        disabled={ingestMut.isPending}
+                        className={BUTTON_PRIMARY}
+                      >
+                        Разобрать
+                      </button>
+                      <button
+                        onClick={() => dismissMut.mutate(c.id)}
+                        disabled={dismissMut.isPending}
+                        className={`${BUTTON_SECONDARY} border-[#f0c86b]/70 hover:bg-[#fff4d8]`}
+                      >
+                        Скрыть
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         {/* Отсеянное — свёрнуто. Не прячем совсем: если фильтр ошибётся, аналитик
             должен это увидеть и вытащить находку руками. */}
         {filteredOut.length > 0 && (
-          <div>
+          <div className={queue.length > 0 && showCandidates ? "mt-2" : ""}>
             <button onClick={() => setShowFiltered(v => !v)}
-                    className="text-xs text-ink-mute hover:text-ink">
+                    className={BUTTON_GHOST}>
               {showFiltered ? "▾" : "▸"} Отсеяно как чужое ({filteredOut.length})
             </button>
             {showFiltered && (
@@ -217,7 +246,7 @@ export default function MonitoringView({ clientId }: Props) {
                     <span className="text-ink-mute shrink-0">·</span>
                     <span className="text-ink-mute italic min-w-0 flex-1">{c.relevance_note}</span>
                     <button onClick={() => ingestMut.mutate(c.id)}
-                            className="text-blue-600 hover:underline shrink-0">всё-таки разобрать</button>
+                            className={`${BUTTON_GHOST} text-flag-blue hover:text-flag-blue hover:underline shrink-0`}>всё-таки разобрать</button>
                   </li>
                 ))}
               </ul>
@@ -225,11 +254,17 @@ export default function MonitoringView({ clientId }: Props) {
           </div>
         )}
       </section>
+      )}
 
       {/* ── предложения из уже разобранного ── */}
       {(suggestions.data ?? []).length > 0 && (
-        <section className="space-y-2">
-          <h3 className="text-sm font-medium">Предложения</h3>
+        <section className={MONITOR_GREEN_PANEL}>
+          <div>
+            <div className={`${BLOCK_KICKER} ${KICKER_GREEN}`}>Предложения</div>
+            <p className="text-xs text-ink-mute mt-1">
+              Источники, которые система нашла в уже разобранных материалах.
+            </p>
+          </div>
           <ul className="space-y-2">
             {(suggestions.data ?? []).map(s => (
               <SuggestionRow key={s.channel_name} s={s} clientId={clientId}
@@ -239,10 +274,22 @@ export default function MonitoringView({ clientId }: Props) {
         </section>
       )}
 
+      {/* ── добавление источника ── */}
+      <section className={MONITOR_WHITE_PANEL}>
+        <div>
+          <div className={`${BLOCK_KICKER} ${KICKER_GREEN}`}>Добавить источник</div>
+          <p className="text-xs text-ink-mute mt-1">
+            Канал, RSS-фид или поисковый запрос — после добавления он появится в списке «За чем следим».
+          </p>
+        </div>
+        <AddSourceForm clientId={clientId} founders={founders}
+                       onDone={refresh} onError={setError} />
+      </section>
+
       {/* ── источники ── */}
-      <section className="space-y-3">
+      <section className={`${MONITOR_WHITE_PANEL}`}>
         <button onClick={() => setShowSources(v => !v)}
-                className="text-sm font-medium hover:underline">
+                className={`${BUTTON_GHOST} text-sm hover:underline`}>
           {showSources ? "▾" : "▸"} За чем следим ({items.data?.length ?? 0})
         </button>
 
@@ -250,7 +297,7 @@ export default function MonitoringView({ clientId }: Props) {
           <>
             <ul className="space-y-2">
               {(items.data ?? []).map(it => (
-                <li key={it.id} className="border border-ink-line rounded p-3 flex items-start gap-3">
+                <li key={it.id} className="rounded-2xl border border-ink-line bg-white px-4 py-3 flex items-start gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-sm break-words">
                       <span className="text-[10px] font-mono uppercase text-ink-mute mr-2">
@@ -274,24 +321,22 @@ export default function MonitoringView({ clientId }: Props) {
                     <button
                       onClick={() => checkMut.mutate({ item_id: it.id })}
                       disabled={checkMut.isPending}
-                      className="text-xs px-2 py-1 rounded border border-ink-line hover:bg-slate-100"
+                      className={BUTTON_SECONDARY}
                     >проверить</button>
                     <button
                       onClick={() => api.pauseWatchlistItem(it.id, it.status === "active")
                         .then(refresh).catch((e: Error) => setError(e.message))}
-                      className="text-xs px-2 py-1 rounded border border-ink-line hover:bg-slate-100"
+                      className={BUTTON_SECONDARY}
                     >{it.status === "active" ? "пауза" : "включить"}</button>
                     <button
                       onClick={() => api.deleteWatchlistItem(it.id)
                         .then(refresh).catch((e: Error) => setError(e.message))}
-                      className="text-xs px-2 py-1 rounded border border-ink-line hover:bg-slate-100 text-flag-red"
+                      className={`${BUTTON_SECONDARY} text-flag-red`}
                     >убрать</button>
                   </div>
                 </li>
               ))}
             </ul>
-            <AddSourceForm clientId={clientId} founders={founders}
-                           onDone={refresh} onError={setError} />
           </>
         )}
       </section>
@@ -304,7 +349,7 @@ function SuggestionRow({ s, clientId, onDone, onError }: {
 }) {
   const [busy, setBusy] = useState(false);
   return (
-    <li className="border border-ink-line rounded p-3 flex items-center justify-between gap-3">
+    <li className="bg-white/80 rounded-2xl border border-[#d8e0cc] px-4 py-3 flex items-center justify-between gap-3">
       <div className="text-sm">
         Вы {s.count === 1 ? "уже брали" : `брали ${s.count} видео`} с канала{" "}
         <span className="font-medium">{s.channel_name}</span> — добавить в мониторинг?
@@ -318,7 +363,7 @@ function SuggestionRow({ s, clientId, onDone, onError }: {
             config: { url: s.sample_url }, label: s.channel_name,
           }).then(onDone).catch((e: Error) => onError(e.message)).finally(() => setBusy(false));
         }}
-        className="text-xs px-3 py-1.5 rounded border border-ink-line hover:bg-slate-100 shrink-0"
+        className={`${BUTTON_SECONDARY} border-[#cbd8a2] hover:bg-[#f0fadb]`}
       >{busy ? "добавляем…" : "Добавить"}</button>
     </li>
   );
@@ -355,12 +400,12 @@ function AddSourceForm({ clientId, founders, onDone, onError }: {
   }
 
   return (
-    <div className="border border-dashed border-ink-line rounded p-3 space-y-2">
+    <div className="rounded-2xl bg-[#fbfbf7] border border-ink-line p-3 space-y-3">
       <div className="flex gap-2 flex-wrap">
         {(Object.keys(KIND_LABEL) as WatchlistKind[]).map(k => (
           <button key={k} onClick={() => setKind(k)}
-            className={`text-xs px-2.5 py-1 rounded border ${
-              kind === k ? "bg-ink text-white border-ink" : "border-ink-line hover:bg-slate-100"}`}>
+            className={`rounded-xl border px-2.5 py-1.5 text-xs font-medium transition ${
+              kind === k ? "bg-ink text-white border-ink" : "border-ink-line bg-white text-ink hover:bg-[#fbfbf7]"}`}>
             {KIND_LABEL[k]}
           </button>
         ))}
@@ -371,11 +416,11 @@ function AddSourceForm({ clientId, founders, onDone, onError }: {
           onChange={e => setValue(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter") submit(); }}
           placeholder={placeholder}
-          className="flex-1 min-w-[16rem] text-sm px-2 py-1.5 border border-ink-line rounded"
+          className={`flex-1 min-w-[16rem] ${FIELD}`}
         />
         {founders.length > 0 && (
           <select value={speaker} onChange={e => setSpeaker(e.target.value === "" ? "" : Number(e.target.value))}
-                  className="text-sm px-2 py-1.5 border border-ink-line rounded">
+                  className={FIELD}>
             <option value="">чей источник (необяз.)</option>
             {founders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
@@ -383,7 +428,7 @@ function AddSourceForm({ clientId, founders, onDone, onError }: {
         {kind === "search_query" && (
           <select value={window} onChange={e => setWindow(e.target.value)}
                   title="Насколько глубоко искать в прошлое"
-                  className="text-sm px-2 py-1.5 border border-ink-line rounded">
+                  className={FIELD}>
             <option value="auto">сначала за год, потом только новое</option>
             <option value="all">за всё время</option>
             <option value="year">только за год</option>
@@ -392,7 +437,7 @@ function AddSourceForm({ clientId, founders, onDone, onError }: {
           </select>
         )}
         <button onClick={submit} disabled={busy || !value.trim()}
-                className="text-xs px-3 py-1.5 rounded bg-ink text-white hover:opacity-90 disabled:opacity-40">
+                className={BUTTON_PRIMARY}>
           {busy ? "добавляем…" : "Добавить"}
         </button>
       </div>

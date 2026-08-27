@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import type { Layer } from "../types";
 
 interface Props {
@@ -56,7 +57,7 @@ export default function CycleRunner({ clientId, quarter, kind, onClose, onArtifa
            onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-ink-line flex items-center justify-between">
           <div>
-            <div className="text-[10px] font-mono text-ink-mute uppercase">{kind} cycle</div>
+            <div className="text-[10px] font-mono text-ink-mute uppercase">цикл: {kind === "weekly" ? "недельный" : kind === "event" ? "событийный" : "квартальный"}</div>
             <h3 className="text-base font-semibold">
               {kind === "weekly" && "Weekly бриф"}
               {kind === "event" && "Event-реакция"}
@@ -71,7 +72,7 @@ export default function CycleRunner({ clientId, quarter, kind, onClose, onArtifa
 
         <div className="p-5 space-y-4">
           <div className="text-xs text-ink-mute">
-            client <span className="font-mono">{clientId}</span> · quarter <span className="font-mono">{quarter}</span>
+            клиент <span className="font-mono">{clientId}</span> · квартал <span className="font-mono">{quarter}</span>
           </div>
 
           {kind === "weekly" && (
@@ -101,7 +102,7 @@ export default function CycleRunner({ clientId, quarter, kind, onClose, onArtifa
                   className="w-full text-sm border border-ink-line rounded px-2 py-1.5">
                   {layers.data?.flatMap(L =>
                     L.subsections.map(s => (
-                      <option key={s.id} value={s.id}>{s.id} · L{L.id} {L.name} → {s.name}</option>
+                      <option key={s.id} value={s.id}>{s.id} · L{L.id} {layerNameRu(L.id, L.name)} → {subsectionNameRu(s.id, s.name)}</option>
                     ))
                   )}
                 </select>
@@ -115,8 +116,8 @@ export default function CycleRunner({ clientId, quarter, kind, onClose, onArtifa
                 <select value={traversal}
                   onChange={e => setTraversal(e.target.value as "inside_out" | "outside_in")}
                   className="w-full text-sm border border-ink-line rounded px-2 py-1.5">
-                  <option value="inside_out">inside-out (L1 → L8)</option>
-                  <option value="outside_in">outside-in (L8 → L1)</option>
+                  <option value="inside_out">изнутри наружу (L1 → L8)</option>
+                  <option value="outside_in">снаружи внутрь (L8 → L1)</option>
                 </select>
               </Field>
               <Field label="Facts per subsection">
@@ -163,7 +164,7 @@ export default function CycleRunner({ clientId, quarter, kind, onClose, onArtifa
 
         <div className="px-5 py-4 border-t border-ink-line bg-slate-50 flex justify-end gap-2">
           <button onClick={onClose}
-            className="text-sm px-3 py-1.5 hover:bg-slate-200 rounded text-ink-mute">Cancel</button>
+            className="text-sm px-3 py-1.5 hover:bg-slate-200 rounded text-ink-mute">Отмена</button>
           <button
             onClick={() => run.mutate()}
             disabled={run.isPending || (kind === "event" && !eventText.trim())}

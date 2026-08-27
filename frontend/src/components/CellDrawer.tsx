@@ -1,7 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api";
-import type { Channel, Entity, Fact, Flag, Layer } from "../types";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
+import { displayWorkBody, displayWorkTitle, isFirstMaterialWorkTitle, isInterviewWorkTitle } from "../lib/workItemDisplay";
+import type { Channel, Entity, Fact, Flag, Layer, PunchList, WorkItem } from "../types";
 import SourceLine from "./SourceLine";
 import AudioSourcePanel, { type AudioSourceHandle } from "./AudioSourcePanel";
 import FlagDot from "./FlagDot";
@@ -27,13 +31,116 @@ interface Props {
   onClose: () => void;
   layers?: Layer[];
   focusFactId?: number;   // из поиска: подсветить/раскрыть эту карточку
+  auditFocus?: "all";
 }
 
-export default function CellDrawer({ clientId, subsectionId, onClose, layers, focusFactId }: Props) {
+const ACTIVE_WORK_STATUSES = new Set(["queued", "in_progress", "needs_review"]);
+
+type DrawerTaskCard = {
+  key: string;
+  title: string;
+  body: string;
+  tone: "grey" | "green" | "amber";
+  meta?: string;
+  createdAt?: string;
+  relatedFactId?: number;
+  greyFacts?: Array<{ id: number; text: string }>;
+  firstMaterialActions?: string[];
+};
+
+function isReviewFact(f: Fact): boolean {
+  // Режим «Ревью» в матрице считается из review-queue: это именно карточки,
+  // ожидающие решения владельца/аналитика, а не все active-факты без verification.
+  return f.state === "review";
+}
+
+function factTime(f: Fact): number {
+  if (!f.captured_at) return 0;
+  const normalized = f.captured_at.includes("T") ? f.captured_at : f.captured_at.replace(" ", "T");
+  const ts = Date.parse(normalized.endsWith("Z") ? normalized : `${normalized}Z`);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function factDay(f: Fact): string {
+  return (f.captured_at || "").slice(0, 10);
+}
+
+function mustScore(f: Fact): number {
+  if (!f.must_have) return 0;
+  return f.must_have_by === "expert" ? 2 : 1;
+}
+
+function compareFactsForDrawer(a: Fact, b: Fact): number {
+  const ao = typeof a.sort_order === "number" ? a.sort_order : null;
+  const bo = typeof b.sort_order === "number" ? b.sort_order : null;
+  if (ao !== null || bo !== null) {
+    if (ao === null) return 1;
+    if (bo === null) return -1;
+    if (ao !== bo) return ao - bo;
+  }
+  const at = factTime(a);
+  const bt = factTime(b);
+  if (at !== bt) return bt - at;
+  const sameDay = factDay(a) && factDay(a) === factDay(b);
+  if (sameDay) {
+    const am = mustScore(a);
+    const bm = mustScore(b);
+    if (am !== bm) return bm - am;
+  }
+  return b.id - a.id;
+}
+
+function compareFactsByDate(a: Fact, b: Fact): number {
+  const at = factTime(a);
+  const bt = factTime(b);
+  if (at !== bt) return bt - at;
+  return b.id - a.id;
+}
+
+function workStatusLabel(status: WorkItem["status"]): string {
+  switch (status) {
+    case "queued": return "в очереди";
+    case "in_progress": return "в работе";
+    case "needs_review": return "на проверке";
+    case "blocked": return "заблокировано";
+    case "done": return "готово";
+    case "cancelled": return "отменено";
+    default: return status;
+  }
+}
+
+function gapPlural(n: number) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "пробел";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "пробела";
+  return "пробелов";
+}
+
+function questionPlural(n: number) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "открытый вопрос";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "открытых вопроса";
+  return "открытых вопросов";
+}
+
+export default function CellDrawer({ clientId, subsectionId, onClose, layers, focusFactId, auditFocus }: Props) {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const facts = useQuery<Fact[]>({
     queryKey: ["facts", clientId, subsectionId],
     queryFn: () => api.cellFacts(clientId, subsectionId),
+  });
+  const punch = useQuery<PunchList>({
+    queryKey: ["punch", clientId],
+    queryFn: () => api.punchList(clientId),
+    enabled: !!auditFocus,
+  });
+  const workItems = useQuery<WorkItem[]>({
+    queryKey: ["work-items", clientId],
+    queryFn: () => api.listWorkItems(clientId),
+    enabled: !!auditFocus,
   });
 
   // роль: одобрять черновики может владелец данных / супер-админ (локально без auth — все)
@@ -45,6 +152,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const subsection = layers
     ?.flatMap(L => L.subsections.map(s => ({ ...s, layer: L })))
     .find(s => s.id === subsectionId);
+  const subsectionTitle = subsectionNameRu(subsectionId, subsection?.name ?? subsectionId);
   // тег «про какую компанию» доступен на ВСЕХ карточках: если факт про другую компанию
   // (не базовую) — это сильный сигнал классификатору отправить его в слои истории фаундера (L2).
   const allowAboutCompany = true;
@@ -73,6 +181,13 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
 
   const [showAdd, setShowAdd] = useState(false);
   const [showHidden, setShowHidden] = useState(false);   // collapsible for merged-away cards
+  const [factSortMode, setFactSortMode] = useState<"custom" | "date">("custom");
+  const [factSortDir, setFactSortDir] = useState<"desc" | "asc">("desc");
+  const [taskSortMode, setTaskSortMode] = useState<"custom" | "date">("custom");
+  const [taskSortDir, setTaskSortDir] = useState<"desc" | "asc">("desc");
+  const [taskOrderKeys, setTaskOrderKeys] = useState<string[]>([]);
+  const [expandedTaskKeys, setExpandedTaskKeys] = useState<Set<string>>(new Set());
+  const toggleTask = (key: string) => setExpandedTaskKeys(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
   const [expandedKids, setExpandedKids] = useState<Set<number>>(new Set());   // inline-раскрытые исходники под собранной карточкой
   const toggleKid = (id: number) => setExpandedKids(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [editSpeakerIds, setEditSpeakerIds] = useState<Set<number>>(new Set());   // у каких карточек открыт выбор спикера
@@ -80,17 +195,45 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const closeSpeaker = (id: number) => setEditSpeakerIds(s => { const n = new Set(s); n.delete(id); return n; });
 
   // drag-сортировка активных карточек (тянуть за ручку ⠿)
-  const [dragHandleId, setDragHandleId] = useState<number | null>(null);   // за какую карточку схватились ручкой
   const [dragId, setDragId] = useState<number | null>(null);               // что тащим
   const [dragOverId, setDragOverId] = useState<number | null>(null);       // над кем висим
+  const [dragOffsetY, setDragOffsetY] = useState(0);
+  const [dragStartIndex, setDragStartIndex] = useState<number | null>(null);
+  const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
+  const dragTargetIndexRef = useRef<number | null>(null);
+  const [dragItemHeight, setDragItemHeight] = useState(0);
+  const drawerScrollRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollFrameRef = useRef<number | null>(null);
+  const pointerDragRef = useRef<{
+    id: number;
+    startY: number;
+    currentY: number;
+    grabOffsetY: number;
+    ids: number[];
+    mids: Array<{ id: number; mid: number }>;
+    startScrollTop: number;
+    scrollTop: number;
+  } | null>(null);
+  const dragCommittedRef = useRef(false);
+  const [taskDragKey, setTaskDragKey] = useState<string | null>(null);
+  const [taskDragOverKey, setTaskDragOverKey] = useState<string | null>(null);
+  const [taskDragOffsetY, setTaskDragOffsetY] = useState(0);
+  const [taskDragStartIndex, setTaskDragStartIndex] = useState<number | null>(null);
+  const [taskDragTargetIndex, setTaskDragTargetIndex] = useState<number | null>(null);
+  const [taskDragItemHeight, setTaskDragItemHeight] = useState(0);
+  const taskDragTargetIndexRef = useRef<number | null>(null);
+  const taskDragRef = useRef<{
+    key: string;
+    startY: number;
+    currentY: number;
+    grabOffsetY: number;
+    keys: string[];
+    mids: Array<{ key: string; mid: number }>;
+    startScrollTop: number;
+    scrollTop: number;
+  } | null>(null);
   const [infoIds, setInfoIds] = useState<Set<number>>(new Set());   // per-fact "info" footer open
   const toggleInfo = (id: number) => setInfoIds(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const InfoBtn = ({ id }: { id: number }) => (
-    <button onClick={() => toggleInfo(id)} aria-label="Источник и детали"
-      className={infoIds.has(id) ? "text-ink" : "text-ink-mute/50 hover:text-ink"}>
-      <svg width="15" height="15" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.3" stroke="currentColor" strokeWidth="1.3"/><path d="M10 9v4.2M10 6.4v.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-    </button>
-  );
   const [newText, setNewText] = useState("");
   const [newFlag, setNewFlag] = useState<Flag>("green");
   const [newChannel, setNewChannel] = useState<Channel>("online_research");
@@ -104,26 +247,269 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
     qc.invalidateQueries({ queryKey: ["matrix", clientId] });
     qc.invalidateQueries({ queryKey: ["scorecard", clientId] });
     qc.invalidateQueries({ queryKey: ["punch", clientId] });
+    qc.invalidateQueries({ queryKey: ["work-items", clientId] });
   };
 
   const reorderMut = useMutation({
     mutationFn: (orderedIds: number[]) => api.reorderFacts(clientId, subsectionId, orderedIds),
     onSuccess: invalidate,
   });
-  const dropOn = (targetId: number) => {
+
+  const commitFactOrder = () => {
+    if (dragCommittedRef.current) return;
+    dragCommittedRef.current = true;
+    const drag = pointerDragRef.current;
     const cur = qc.getQueryData<Fact[]>(["facts", clientId, subsectionId]) ?? [];
-    if (dragId == null || dragId === targetId) return;
-    const act = cur.filter(f => f.state !== "rejected");
+    const active = cur.filter(f => f.state !== "rejected").sort(compareFactsForDrawer);
     const rest = cur.filter(f => f.state === "rejected");
-    const from = act.findIndex(f => f.id === dragId);
-    const to = act.findIndex(f => f.id === targetId);
-    if (from < 0 || to < 0) return;
-    const next = [...act];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    qc.setQueryData<Fact[]>(["facts", clientId, subsectionId], [...next, ...rest]);   // оптимистично
-    reorderMut.mutate(next.map(f => f.id));
+    const from = drag ? active.findIndex(f => f.id === drag.id) : -1;
+    const to = dragTargetIndexRef.current ?? from;
+    if (from >= 0 && to >= 0 && from !== to) {
+      const next = [...active];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      qc.setQueryData<Fact[]>(["facts", clientId, subsectionId], [
+        ...next.map((f, index) => ({ ...f, sort_order: index })),
+        ...rest,
+      ]);
+    }
+    const orderedIds = (qc.getQueryData<Fact[]>(["facts", clientId, subsectionId]) ?? cur)
+      .filter(f => f.state !== "rejected")
+      .sort(compareFactsForDrawer)
+      .map(f => f.id);
+    if (orderedIds.length) reorderMut.mutate(orderedIds);
   };
+
+  const endPointerDrag = () => {
+    commitFactOrder();
+    if (autoScrollFrameRef.current != null) {
+      cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = null;
+    }
+    pointerDragRef.current = null;
+    setDragId(null);
+    setDragOverId(null);
+    setDragOffsetY(0);
+    setDragStartIndex(null);
+    setDragTargetIndex(null);
+    dragTargetIndexRef.current = null;
+    setDragItemHeight(0);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+  };
+
+  const startPointerDrag = (factId: number, e: ReactPointerEvent<HTMLElement>) => {
+    const card = document.getElementById(`fact-${factId}`);
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    const cur = qc.getQueryData<Fact[]>(["facts", clientId, subsectionId]) ?? [];
+    const ids = cur.filter(f => f.state !== "rejected").sort(compareFactsForDrawer).map(f => f.id);
+    const startIndex = ids.indexOf(factId);
+    if (startIndex < 0) return;
+    const mids = ids.map(id => {
+      const el = document.getElementById(`fact-${id}`);
+      const r = el?.getBoundingClientRect();
+      return r ? { id, mid: r.top + r.height / 2 } : null;
+    }).filter((x): x is { id: number; mid: number } => !!x);
+    pointerDragRef.current = {
+      id: factId,
+      startY: e.clientY,
+      currentY: e.clientY,
+      grabOffsetY: e.clientY - rect.top,
+      ids,
+      mids,
+      startScrollTop: drawerScrollRef.current?.scrollTop ?? 0,
+      scrollTop: drawerScrollRef.current?.scrollTop ?? 0,
+    };
+    dragCommittedRef.current = false;
+    setFactSortMode("custom");
+    setFactSortDir("desc");
+    setDragId(factId);
+    setDragOverId(null);
+    setDragOffsetY(0);
+    setDragStartIndex(startIndex);
+    setDragTargetIndex(startIndex);
+    dragTargetIndexRef.current = startIndex;
+    setDragItemHeight(rect.height + 12);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "grabbing";
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const tickAutoScroll = () => {
+    const drag = pointerDragRef.current;
+    const scroller = drawerScrollRef.current;
+    if (!drag || !scroller) {
+      autoScrollFrameRef.current = null;
+      return;
+    }
+    const rect = scroller.getBoundingClientRect();
+    const edge = 92;
+    const maxSpeed = 18;
+    let speed = 0;
+    if (drag.currentY < rect.top + edge) {
+      speed = -maxSpeed * (1 - Math.max(0, drag.currentY - rect.top) / edge);
+    } else if (drag.currentY > rect.bottom - edge) {
+      speed = maxSpeed * (1 - Math.max(0, rect.bottom - drag.currentY) / edge);
+    }
+    if (speed !== 0) {
+      scroller.scrollTop += speed;
+      drag.scrollTop = scroller.scrollTop;
+      setDragOffsetY(drag.currentY - drag.startY + (drag.scrollTop - drag.startScrollTop));
+    }
+    autoScrollFrameRef.current = requestAnimationFrame(tickAutoScroll);
+  };
+
+  useEffect(() => {
+    if (dragId == null) return;
+
+    const onMove = (e: PointerEvent) => {
+      const drag = pointerDragRef.current;
+      if (!drag) return;
+      drag.currentY = e.clientY;
+      drag.scrollTop = drawerScrollRef.current?.scrollTop ?? drag.scrollTop;
+      setDragOffsetY(e.clientY - drag.startY + (drag.scrollTop - drag.startScrollTop));
+      if (autoScrollFrameRef.current == null) {
+        autoScrollFrameRef.current = requestAnimationFrame(tickAutoScroll);
+      }
+
+      const draggedMid = e.clientY - drag.grabOffsetY + dragItemHeight / 2 + (drag.scrollTop - drag.startScrollTop);
+      const rects = drag.mids
+        .filter(r => r.id !== drag.id)
+        .sort((a, b) => a.mid - b.mid);
+      let nextIndex = 0;
+      for (const r of rects) {
+        if (draggedMid > r.mid) nextIndex += 1;
+      }
+      nextIndex = Math.max(0, Math.min(drag.ids.length - 1, nextIndex));
+      dragTargetIndexRef.current = nextIndex;
+      setDragTargetIndex(nextIndex);
+      const overId = drag.ids[nextIndex];
+      setDragOverId(overId === drag.id ? null : overId);
+    };
+
+    const onUp = () => endPointerDrag();
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+    window.addEventListener("pointercancel", onUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [dragId, dragItemHeight]);
+
+  const endTaskDrag = () => {
+    const drag = taskDragRef.current;
+    if (drag) {
+      const from = taskOrderKeys.indexOf(drag.key);
+      const to = taskDragTargetIndexRef.current ?? from;
+      if (from >= 0 && to >= 0 && from !== to) {
+        const next = [...taskOrderKeys];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        setTaskOrderKeys(next);
+        localStorage.setItem(`cell-drawer-task-order-${clientId}-${subsectionId}`, JSON.stringify(next));
+      }
+    }
+    if (autoScrollFrameRef.current != null) {
+      cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = null;
+    }
+    taskDragRef.current = null;
+    setTaskDragKey(null);
+    setTaskDragOverKey(null);
+    setTaskDragOffsetY(0);
+    setTaskDragStartIndex(null);
+    setTaskDragTargetIndex(null);
+    taskDragTargetIndexRef.current = null;
+    setTaskDragItemHeight(0);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+  };
+
+  const startTaskDrag = (key: string, e: ReactPointerEvent<HTMLElement>) => {
+    const card = document.getElementById(`task-${key}`);
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    const keys = taskOrderKeys.length ? taskOrderKeys : [];
+    const startIndex = keys.indexOf(key);
+    if (startIndex < 0) return;
+    const mids = keys.map(k => {
+      const el = document.getElementById(`task-${k}`);
+      const r = el?.getBoundingClientRect();
+      return r ? { key: k, mid: r.top + r.height / 2 } : null;
+    }).filter((x): x is { key: string; mid: number } => !!x);
+    taskDragRef.current = {
+      key,
+      startY: e.clientY,
+      currentY: e.clientY,
+      grabOffsetY: e.clientY - rect.top,
+      keys,
+      mids,
+      startScrollTop: drawerScrollRef.current?.scrollTop ?? 0,
+      scrollTop: drawerScrollRef.current?.scrollTop ?? 0,
+    };
+    setTaskSortMode("custom");
+    setTaskSortDir("desc");
+    setTaskDragKey(key);
+    setTaskDragOverKey(null);
+    setTaskDragOffsetY(0);
+    setTaskDragStartIndex(startIndex);
+    setTaskDragTargetIndex(startIndex);
+    taskDragTargetIndexRef.current = startIndex;
+    setTaskDragItemHeight(rect.height + 8);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "grabbing";
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  useEffect(() => {
+    if (taskDragKey == null) return;
+
+    const onMove = (e: PointerEvent) => {
+      const drag = taskDragRef.current;
+      if (!drag) return;
+      drag.currentY = e.clientY;
+      const scroller = drawerScrollRef.current;
+      if (scroller) {
+        const rect = scroller.getBoundingClientRect();
+        const edge = 92;
+        const maxSpeed = 18;
+        let speed = 0;
+        if (e.clientY < rect.top + edge) {
+          speed = -maxSpeed * (1 - Math.max(0, e.clientY - rect.top) / edge);
+        } else if (e.clientY > rect.bottom - edge) {
+          speed = maxSpeed * (1 - Math.max(0, rect.bottom - e.clientY) / edge);
+        }
+        if (speed !== 0) scroller.scrollTop += speed;
+      }
+      drag.scrollTop = drawerScrollRef.current?.scrollTop ?? drag.scrollTop;
+      setTaskDragOffsetY(e.clientY - drag.startY + (drag.scrollTop - drag.startScrollTop));
+
+      const draggedMid = e.clientY - drag.grabOffsetY + taskDragItemHeight / 2 + (drag.scrollTop - drag.startScrollTop);
+      const rects = drag.mids.filter(r => r.key !== drag.key).sort((a, b) => a.mid - b.mid);
+      let nextIndex = 0;
+      for (const r of rects) {
+        if (draggedMid > r.mid) nextIndex += 1;
+      }
+      nextIndex = Math.max(0, Math.min(drag.keys.length - 1, nextIndex));
+      taskDragTargetIndexRef.current = nextIndex;
+      setTaskDragTargetIndex(nextIndex);
+      const overKey = drag.keys[nextIndex];
+      setTaskDragOverKey(overKey === drag.key ? null : overKey);
+    };
+
+    const onUp = () => endTaskDrag();
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+    window.addEventListener("pointercancel", onUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [taskDragKey, taskDragItemHeight, taskOrderKeys]);
 
   const isOnlineChannel = (ch: Channel) =>
     ch === "online_research" || ch === "online_interview" || ch === "archival";
@@ -232,28 +618,122 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   }, [focusFactId, facts.data]);
 
   const channelHint = subsection
-    ? `Primary channels for L${subsection.layer.id}: ${subsection.layer.primary_channels.join(", ")}`
+    ? `Основные каналы для слоя ${subsection.layer.id}: ${subsection.layer.primary_channels.join(", ")}`
     : "";
-
+  const focusedTaskItems = (workItems.data ?? []).filter(item =>
+    item.subsection_id === subsectionId && ACTIVE_WORK_STATUSES.has(item.status)
+  );
+  const focusedEmptyCell = punch.data?.empty_cells.find(c => c.subsection_id === subsectionId);
+  const focusedThinCell = punch.data?.thinly_covered.find(c => c.subsection_id === subsectionId);
+  const focusedKnownGap = punch.data?.cells_with_known_gaps.find(c => c.subsection_id === subsectionId);
+  const firstMaterialItems = focusedEmptyCell
+    ? focusedTaskItems.filter(item => isFirstMaterialWorkTitle(item.title))
+    : [];
+  const visibleWorkItems = focusedEmptyCell
+    ? focusedTaskItems.filter(item => !isFirstMaterialWorkTitle(item.title))
+    : focusedTaskItems;
+  const hasDeepenWorkItem = visibleWorkItems.some(item =>
+    item.type === "deepen" || item.title.startsWith("Deepen:")
+  );
+  const baseTaskCards: DrawerTaskCard[] = [
+    ...(focusedKnownGap ? [{
+      key: "gap",
+      title: "Открытые вопросы",
+      body: focusedKnownGap.grey_facts.length
+        ? `${focusedKnownGap.grey_facts.length} ${gapPlural(focusedKnownGap.grey_facts.length)} требуют закрытия.`
+        : "Есть отмеченные пробелы, которые нужно закрыть.",
+      tone: "grey" as const,
+      greyFacts: focusedKnownGap.grey_facts,
+      createdAt: "",
+    }] : []),
+    ...visibleWorkItems.map(item => {
+      const fallbackFactId = Number(item.title.match(/\((\d+)\)\s*$/)?.[1] ?? NaN);
+      return {
+        key: `work-${item.id}`,
+        title: displayWorkTitle(item.title),
+        body: displayWorkBody(item.title, item.rationale || item.notes || workStatusLabel(item.status)),
+        meta: workStatusLabel(item.status),
+        createdAt: item.created_at,
+        relatedFactId: item.related_fact_id ?? (Number.isFinite(fallbackFactId) ? fallbackFactId : undefined),
+        tone: "green" as const,
+      };
+    }),
+    ...(focusedThinCell && !hasDeepenWorkItem
+      ? [{ key: "thin", title: "Добрать подтверждения", body: "Фактов недостаточно: стоит добрать источники или подтверждения.", tone: "amber" as const, createdAt: "" }]
+      : []),
+    ...(focusedEmptyCell ? [{
+      key: "empty",
+      title: "Нужен первый материал",
+      body: "Фактов пока нет. Начните с источника или подготовьте вопрос для интервью.",
+      tone: "amber" as const,
+      firstMaterialActions: firstMaterialItems.map(item => item.title),
+      createdAt: "",
+    }] : []),
+  ];
+  useEffect(() => {
+    const storageKey = `cell-drawer-task-order-${clientId}-${subsectionId}`;
+    let stored: string[] = [];
+    try {
+      stored = JSON.parse(localStorage.getItem(storageKey) || "[]");
+    } catch {
+      stored = [];
+    }
+    const keys = baseTaskCards.map(t => t.key);
+    const next = [...stored.filter(k => keys.includes(k)), ...keys.filter(k => !stored.includes(k))];
+    setTaskOrderKeys(next);
+  }, [clientId, subsectionId, baseTaskCards.map(t => t.key).join("|")]);
+  const taskCards = (() => {
+    const sorted = [...baseTaskCards].sort((a, b) => {
+      if (taskSortMode === "date") {
+        const at = Date.parse(a.createdAt || "") || 0;
+        const bt = Date.parse(b.createdAt || "") || 0;
+        if (at !== bt) return bt - at;
+      }
+      const ai = taskOrderKeys.indexOf(a.key);
+      const bi = taskOrderKeys.indexOf(b.key);
+      const ao = ai >= 0 ? ai : 9999;
+      const bo = bi >= 0 ? bi : 9999;
+      if (ao !== bo) return ao - bo;
+      return a.key.localeCompare(b.key);
+    });
+    return taskSortDir === "asc" ? sorted.reverse() : sorted;
+  })();
+  const relatedFactIds = Array.from(new Set(taskCards
+    .map(task => "relatedFactId" in task ? task.relatedFactId : undefined)
+    .filter((id): id is number => typeof id === "number" && Number.isFinite(id))
+  ));
+  const relatedFactQueries = useQueries({
+    queries: relatedFactIds.map(id => ({
+      queryKey: ["fact", clientId, id],
+      queryFn: () => api.getFact(clientId, id),
+      enabled: !!auditFocus,
+      retry: false,
+    })),
+  });
+  const relatedFactsById = new Map<number, Fact>();
+  for (const fact of facts.data ?? []) relatedFactsById.set(fact.id, fact);
+  relatedFactQueries.forEach(q => {
+    if (q.data) relatedFactsById.set(q.data.id, q.data);
+  });
   return (
     <aside className="fixed top-0 right-0 bottom-0 w-[28rem] bg-white border-l border-ink-line shadow-xl
                       flex flex-col z-30">
       <div className="px-4 py-3 border-b border-ink-line flex items-start justify-between gap-3">
         <div>
-          <div className="text-[10px] font-mono text-ink-mute">Cell {subsectionId}</div>
+          <div className="text-[10px] font-mono text-ink-mute">Ячейка {subsectionId}</div>
           <h3 className="text-base font-semibold leading-tight">
-            {subsection ? subsection.name : subsectionId}
+            {subsectionTitle}
           </h3>
           {subsection && (
             <div className="text-[11px] text-ink-mute mt-0.5">
-              L{subsection.layer.id} {subsection.layer.name}
+              L{subsection.layer.id} {layerNameRu(subsection.layer.id, subsection.layer.name)}
             </div>
           )}
         </div>
         <button
           onClick={onClose}
           className="text-ink-mute hover:text-ink rounded p-1 -mr-1"
-          aria-label="close"
+          aria-label="Закрыть"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
             <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -261,20 +741,24 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {facts.isLoading && <div className="text-sm text-ink-mute">Loading facts…</div>}
+      <div ref={drawerScrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+        {facts.isLoading && <div className="text-sm text-ink-mute">Загружаю факты…</div>}
 
-        {facts.data && facts.data.length === 0 && !showAdd && (
+        {facts.data && facts.data.length === 0 && !showAdd && !auditFocus && (
           <div className="text-sm text-ink-mute italic py-3">
-            No facts yet in this cell. Use the channels noted on the right
-            of the layer label to populate it.
+            В этой ячейке пока нет фактов. Добавьте факт вручную или загрузите данные через подходящий канал.
           </div>
         )}
 
         {(() => {
           const all = facts.data ?? [];
-          const active = all.filter(f => f.state !== "rejected");
-          const hidden = all.filter(f => f.state === "rejected");
+          const sortFacts = (items: Fact[]) => {
+            const sorted = [...items].sort(factSortMode === "date" ? compareFactsByDate : compareFactsForDrawer);
+            return factSortDir === "asc" ? sorted.reverse() : sorted;
+          };
+          const activeAll = sortFacts(all.filter(f => f.state !== "rejected"));
+          const active = sortFacts(auditFocus ? activeAll.filter(isReviewFact) : activeAll);
+          const hidden = all.filter(f => f.state === "rejected").sort(compareFactsForDrawer);
           const jumpTo = (id: number) => {
             setShowHidden(true);
             setTimeout(() => {
@@ -285,18 +769,82 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
             }, 60);
           };
           return (<>
-            {active.map(f => {
+            {auditFocus && active.length === 0 && taskCards.length === 0 && (
+              <div className="rounded-lg border border-ink-line bg-white p-3 text-sm text-ink-mute">
+                В этой ячейке нет открытых вопросов проверки.
+              </div>
+            )}
+            {active.length > 0 && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-mute">Факты</div>
+                {active.length > 1 && (
+                  <div className="flex items-center gap-1 text-[11px] text-ink-mute">
+                    <span>сортировка:</span>
+                    <button
+                      onClick={() => setFactSortMode(m => m === "custom" ? "date" : "custom")}
+                      className="font-medium text-ink transition-colors hover:text-ink/75"
+                      title="Переключить сортировку: своя / дата"
+                    >
+                      {factSortMode === "custom" ? "своя" : "дата"}
+                    </button>
+                    <button
+                      onClick={() => setFactSortDir(d => d === "desc" ? "asc" : "desc")}
+                      className="ml-1 text-ink-mute transition-colors hover:text-ink"
+                      title={factSortDir === "desc" ? "Сейчас сверху вниз: новые или первые в своём порядке" : "Сейчас снизу вверх: обратный порядок"}
+                    >
+                      {factSortDir === "desc" ? "↓" : "↑"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {active.map((f, index) => {
               const kids = hidden.filter(h => h.merged_into === f.id);
+              const shiftY = (() => {
+                if (dragId == null || dragStartIndex == null || dragTargetIndex == null || dragItemHeight === 0 || f.id === dragId) return 0;
+                if (dragTargetIndex > dragStartIndex && index > dragStartIndex && index <= dragTargetIndex) return -dragItemHeight;
+                if (dragTargetIndex < dragStartIndex && index >= dragTargetIndex && index < dragStartIndex) return dragItemHeight;
+                return 0;
+              })();
+              const mustHaveBy = f.must_have_by || (f.must_have ? "client" : "");
+              const nextMustHave = mustHaveBy === "" ? "client" : mustHaveBy === "client" ? "expert" : "";
+              const mustHaveColor = mustHaveBy === "client"
+                ? "text-[#5f789c] hover:text-[#405f88]"
+                : mustHaveBy === "expert"
+                  ? "text-[#756082] hover:text-[#5f486d]"
+                  : "text-ink-mute/45 hover:text-[#5f789c]";
+              const mustHaveTitle = mustHaveBy === "client" ? "обязательное от клиента → клик: важное от эксперта"
+                : mustHaveBy === "expert" ? "важное от эксперта (приоритет) → клик: снять"
+                : "клик: отметить как обязательное от клиента";
+              const mustHaveLabel = mustHaveBy === "client" ? "от клиента" : mustHaveBy === "expert" ? "от эксперта" : "★";
               return (
-                <div key={f.id} id={`fact-${f.id}`}
-                  draggable={dragHandleId === f.id}
-                  onDragStart={() => setDragId(f.id)}
-                  onDragOver={e => { if (dragId != null && dragId !== f.id) { e.preventDefault(); setDragOverId(f.id); } }}
-                  onDragLeave={() => setDragOverId(o => (o === f.id ? null : o))}
-                  onDrop={() => { dropOn(f.id); setDragId(null); setDragOverId(null); setDragHandleId(null); }}
-                  onDragEnd={() => { setDragId(null); setDragOverId(null); setDragHandleId(null); }}
-                  className={`rounded-lg border p-3 transition-shadow ${flagBg(f.flag)} ${flagBorder(f.flag)}
-                    ${dragId === f.id ? "opacity-50" : ""} ${dragOverId === f.id ? "ring-2 ring-blue-400" : ""}`}>
+                <div key={f.id} id={`fact-${f.id}`} data-fact-id={f.id}
+                  role={editingId === f.id ? undefined : "button"}
+                  tabIndex={editingId === f.id ? undefined : 0}
+                  style={
+                    dragId === f.id
+                      ? { transform: `translate3d(0, ${dragOffsetY}px, 0)` }
+                      : shiftY
+                        ? { transform: `translate3d(0, ${shiftY}px, 0)` }
+                        : undefined
+                  }
+                  onClick={(e) => {
+                    if (editingId === f.id) return;
+                    const target = e.target as HTMLElement;
+                    if (target.closest("button, select, input, textarea, a, summary, [data-no-card-toggle]")) return;
+                    toggleInfo(f.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (editingId === f.id) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggleInfo(f.id);
+                    }
+                  }}
+                  className={`group/fact relative rounded-xl border border-ink-line bg-white p-3.5 shadow-[0_4px_18px_rgba(35,39,28,0.04)]
+                    transition-[background-color,box-shadow,opacity,transform] duration-300 ease-out hover:-translate-y-px hover:bg-[#fbfbf7]
+                    ${editingId === f.id ? "" : "cursor-pointer"} ${dragId === f.id ? "z-20 bg-[#fbfbf7] opacity-80 shadow-[0_16px_34px_rgba(35,39,28,0.12)]" : ""} ${dragOverId === f.id ? "bg-[#fbfbf7]" : ""}`}>
                   {editingId === f.id ? (
                     <div className="space-y-2">
                       <input value={draftTitle} onChange={e => setDraftTitle(e.target.value)}
@@ -305,7 +853,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                       <textarea value={draftText} onChange={e => setDraftText(e.target.value)}
                         className="w-full text-sm border border-ink-line rounded px-2 py-1.5 min-h-[5rem]" />
                       <textarea value={draftRationale} onChange={e => setDraftRationale(e.target.value)}
-                        placeholder={draftFlag === "red" ? "Concern: что именно проблема (обязательно для red)" : "Rationale (опц.)"}
+                        placeholder={draftFlag === "red" ? "Проблема: что именно требует внимания (обязательно для риска)" : "Пояснение (опц.)"}
                         rows={3}
                         className={`w-full text-xs border rounded px-2 py-1.5 min-h-[3rem] resize-none ${draftFlag === "red" && !draftRationale.trim() ? "border-red-400" : "border-ink-line"}`} />
                       {/* только слои 1-2: факт может быть про ДРУГУЮ компанию (характеризует фаундера).
@@ -337,8 +885,8 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                             if (allowAboutCompany && (draftAbout.trim() !== (f.about_company ?? "").trim())) setAbout.mutate({ id: f.id, value: draftAbout });
                           }}
                           disabled={draftFlag === "red" && !draftRationale.trim()}
-                          className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">Save</button>
-                        <button onClick={() => setEditingId(null)} className="text-xs px-3 py-1 hover:bg-slate-100 rounded text-ink-mute">Cancel</button>
+                          className="text-xs px-3 py-1 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300">Сохранить</button>
+                        <button onClick={() => setEditingId(null)} className="text-xs px-3 py-1 hover:bg-slate-100 rounded text-ink-mute">Отмена</button>
                       </div>
                       {/* перенос в другой раздел (подсекцию) — факт уходит из этой ячейки */}
                       <div className="flex items-center gap-2 pt-1 border-t border-ink-line/60">
@@ -350,8 +898,8 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                           }}
                           className="text-xs border border-ink-line rounded px-1.5 py-1 bg-white max-w-[18rem]">
                           {(layers ?? []).map(L => (
-                            <optgroup key={L.id} label={`L${L.id}. ${L.name}`}>
-                              {L.subsections.map(s => <option key={s.id} value={s.id}>{s.id} {s.name}</option>)}
+                            <optgroup key={L.id} label={`L${L.id}. ${layerNameRu(L.id, L.name)}`}>
+                              {L.subsections.map(s => <option key={s.id} value={s.id}>{s.id} {subsectionNameRu(s.id, s.name)}</option>)}
                             </optgroup>
                           ))}
                         </select>
@@ -360,110 +908,108 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                     </div>
                   ) : (
                     <>
-                      {/* top row: star (left), edit + delete (right). Флаг-кружок убран —
-                          сама карточка уже окрашена во флаговый цвет (flagBg/flagBorder). */}
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span
-                            onMouseDown={() => setDragHandleId(f.id)}
-                            onMouseUp={() => setDragHandleId(null)}
-                            title="перетащить: изменить порядок"
-                            className="cursor-grab active:cursor-grabbing text-ink-mute/40 hover:text-ink-mute select-none leading-none text-[13px]">⠿</span>
-                          {(() => {
-                            const by = f.must_have_by || (f.must_have ? "client" : "");
-                            const next = by === "" ? "client" : by === "client" ? "expert" : "";
-                            const color = by === "client" ? "text-flag-blue" : by === "expert" ? "text-purple-600" : "text-ink-mute/40 hover:text-flag-blue";
-                            const title = by === "client" ? "must-have от клиента (обязательно) → клик: от эксперта"
-                              : by === "expert" ? "важное от эксперта (приоритет) → клик: снять"
-                              : "клик: must-have от клиента (синяя)";
-                            return <button onClick={() => setMustHave.mutate({ id: f.id, source: next as "" | "client" | "expert" })}
-                              title={title} className={`text-[15px] leading-none ${color}`}>★</button>;
-                          })()}
-                          <InfoBtn id={f.id} />
-                          {f.state === "review" && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide bg-amber-100 text-amber-800"
-                              title="черновик — ждёт одобрения владельца данных">черновик</span>
-                          )}
+                      {auditFocus && (
+                        <div className="mb-2 flex items-start gap-1.5 text-[11px] leading-snug text-amber-900">
+                          <span className="mt-[0.45em] h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                          <span><span className="font-medium">Причина:</span> {reviewReason(f)}</span>
                         </div>
-                        <div className="flex items-center gap-2 text-ink-mute">
-                          {f.state === "review" && canApprove && (
-                            <button onClick={() => approveFact.mutate(f.id)} disabled={approveFact.isPending}
-                              className="text-[11px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-300"
-                              title="одобрить черновик — попадёт в матрицу">одобрить</button>
-                          )}
-                          <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
-                            aria-label="Редактировать" className="hover:text-ink">
-                            <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M4 13.5V16h2.5l7.4-7.4-2.5-2.5L4 13.5zM13.1 4.9l2.5 2.5 1-1a1.4 1.4 0 0 0-2-2l-1.5.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>
-                          </button>
-                          <button onClick={() => { if (confirm("Удалить факт безвозвратно?")) deleteFact.mutate(f.id); }}
-                            aria-label="Удалить" className="hover:text-flag-red">
-                            <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M8 6V4.5h4V6M6.5 6l.7 9.5h5.6L13.5 6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                          </button>
-                        </div>
+                      )}
+
+                      {/* title + fact text */}
+                      <div className="mb-1 flex items-start gap-2">
+                        {f.title && <div className="min-w-0 flex-1 text-[14px] font-semibold leading-tight text-ink">{f.title}</div>}
+                        <span
+                          data-no-card-toggle
+                          onPointerDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            startPointerDrag(f.id, e);
+                          }}
+                          title="перетащить: изменить порядок"
+                          className="ml-auto shrink-0 cursor-grab select-none text-[13px] leading-none text-ink-mute/0 transition-colors hover:text-ink-mute/70 group-hover/fact:text-ink-mute/30 active:cursor-grabbing">⠿</span>
                       </div>
+                      <div className="text-[13px] leading-snug whitespace-pre-wrap text-ink">{f.text}</div>
 
-                      {/* title (bold, slightly larger) + fact text (justified to fill) */}
-                      {f.title && <div className="text-[15px] font-semibold text-ink leading-tight mb-0.5">{f.title}</div>}
-                      <div className="text-sm leading-snug whitespace-pre-wrap text-ink" style={{ textAlign: "justify" }}>{f.text}</div>
-
-                      {/* одна строка: слева — компания (фавикон + полное название, без слова «про»),
-                          справа — спикер (кто говорит). Оба клик → правка (компания → форма, спикер инлайн). */}
-                      {(founders.length > 0 || (allowAboutCompany && f.about_company)) && (
-                        <div className="mt-1.5 flex items-center gap-2">
-                          {/* компания — слева. Текущая (пин) → 📌 + полное название; другая → фавикон + название. */}
+                      <div className="mt-2.5 flex items-center gap-2 border-t border-ink-line/50 pt-2 text-[11px] text-ink-mute">
+                        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
                           {allowAboutCompany && f.about_company && (
                             isCurrentTag(f.about_company) ? (
                               <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
                                 title="закреплено за текущей компанией — не уйдёт в L1/L2 (клик — изменить)"
-                                className="flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink min-w-0">
-                                <span className="shrink-0">📌</span><span className="font-medium text-ink truncate">{f.about_company}</span>
+                                className="flex min-w-0 items-center gap-1 hover:text-ink">
+                                <span className="shrink-0">📌</span><span className="truncate">{f.about_company}</span>
                               </button>
                             ) : (
                               <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
                                 title="про какую компанию (клик — изменить в форме)"
-                                className="flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink min-w-0">
+                                className="flex min-w-0 items-center gap-1 hover:text-ink">
                                 <CompanyFavicon name={f.about_company} logo={companyByName(f.about_company)?.logo} />
-                                <span className="font-medium text-ink truncate">{f.about_company}</span>
+                                <span className="truncate">{f.about_company}</span>
                               </button>
                             )
                           )}
-                          {/* спикер — справа (ml-auto, когда слева есть компания; иначе остаётся слева). */}
-                          {founders.length > 0 && (() => {
-                            const alignRight = allowAboutCompany && !!f.about_company ? "ml-auto " : "";
-                            return editSpeakerIds.has(f.id) ? (
-                              <div className={`${alignRight}flex items-center gap-1.5`}>
-                                <span className="text-[11px] text-ink-mute" title="кто из фаундеров это говорит/чей факт">🗣</span>
-                                <select autoFocus value={f.speaker_entity_id ?? ""}
-                                  onChange={e => { setSpeaker.mutate({ id: f.id, entityId: e.target.value ? Number(e.target.value) : null }); closeSpeaker(f.id); }}
-                                  className="text-[11px] border border-ink-line rounded px-1.5 py-0.5 bg-white max-w-[13rem] text-ink">
-                                  <option value="">— не указан —</option>
-                                  {founders.map(fo => <option key={fo.id} value={fo.id}>{fo.name}</option>)}
-                                </select>
-                                <button onClick={() => closeSpeaker(f.id)} className="text-[11px] text-ink-mute hover:text-ink">✕</button>
-                              </div>
-                            ) : f.speaker_name ? (
-                              <button onClick={() => openSpeaker(f.id)} title="сменить спикера"
-                                className={`${alignRight}flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink min-w-0`}>
-                                <span className="shrink-0">🗣</span><span className="font-medium text-ink truncate">{f.speaker_name}</span>
-                              </button>
-                            ) : (
-                              <button onClick={() => openSpeaker(f.id)} title="указать, кто говорит"
-                                className={`${alignRight}flex items-center gap-1 text-[11px] text-ink-mute/60 hover:text-ink`}>
-                                <span>🗣</span><span>указать спикера</span>
-                              </button>
-                            );
-                          })()}
+                          {founders.length > 0 && (
+                            <>
+                              {(allowAboutCompany && f.about_company) && <span className="text-ink-mute/45">·</span>}
+                              {editSpeakerIds.has(f.id) ? (
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <select autoFocus value={f.speaker_entity_id ?? ""}
+                                    onChange={e => { setSpeaker.mutate({ id: f.id, entityId: e.target.value ? Number(e.target.value) : null }); closeSpeaker(f.id); }}
+                                    className="max-w-[9rem] rounded border border-ink-line bg-white px-1.5 py-0.5 text-[11px] text-ink">
+                                    <option value="">— не указан —</option>
+                                    {founders.map(fo => <option key={fo.id} value={fo.id}>{fo.name}</option>)}
+                                  </select>
+                                  <button onClick={() => closeSpeaker(f.id)} className="text-ink-mute hover:text-ink">✕</button>
+                                </div>
+                              ) : (
+                                <button onClick={() => openSpeaker(f.id)} title={f.speaker_name ? "сменить спикера" : "указать, кто говорит"}
+                                  className="min-w-0 truncate hover:text-ink">
+                                  {f.speaker_name || "указать спикера"}
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {f.captured_at && (
+                            <>
+                              <span className="text-ink-mute/45">·</span>
+                              <span className="shrink-0 tabular-nums">{f.captured_at.slice(0, 10)}</span>
+                            </>
+                          )}
                         </div>
-                      )}
+                        <div className="ml-auto flex shrink-0 items-center gap-2 text-ink-mute">
+                          {f.state === "review" && (
+                            <span className="text-[11px] font-medium text-amber-800"
+                              title="черновик — ждёт одобрения владельца данных">на ревью</span>
+                          )}
+                          <button onClick={() => setMustHave.mutate({ id: f.id, source: nextMustHave as "" | "client" | "expert" })}
+                            title={mustHaveTitle}
+                            className={`text-[11px] leading-none font-medium transition-opacity ${mustHaveColor} ${mustHaveBy ? "" : "opacity-0 group-hover/fact:opacity-100 focus-visible:opacity-100"}`}>
+                            {mustHaveLabel}
+                          </button>
+                          {f.state === "review" && canApprove && (
+                            <button onClick={() => approveFact.mutate(f.id)} disabled={approveFact.isPending}
+                              className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] text-white hover:bg-emerald-700 disabled:bg-emerald-300"
+                              title="одобрить черновик — попадёт в матрицу">одобрить</button>
+                          )}
+                          <button onClick={() => { setEditingId(f.id); setDraftText(f.text); setDraftFlag(f.flag); setDraftRationale(f.rationale ?? ""); setDraftTitle(f.title ?? ""); setDraftAbout(f.about_company ?? ""); }}
+                            aria-label="Редактировать" className="opacity-0 transition-opacity hover:text-ink group-hover/fact:opacity-100 focus-visible:opacity-100">
+                            <svg width="15" height="15" viewBox="0 0 20 20" fill="none"><path d="M4 13.5V16h2.5l7.4-7.4-2.5-2.5L4 13.5zM13.1 4.9l2.5 2.5 1-1a1.4 1.4 0 0 0-2-2l-1.5.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>
+                          </button>
+                          <button onClick={() => { if (confirm("Удалить факт безвозвратно?")) deleteFact.mutate(f.id); }}
+                            aria-label="Удалить" className="opacity-0 transition-opacity hover:text-flag-red group-hover/fact:opacity-100 focus-visible:opacity-100">
+                            <svg width="15" height="15" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M8 6V4.5h4V6M6.5 6l.7 9.5h5.6L13.5 6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          </button>
+                        </div>
+                      </div>
 
                       {/* risk / gap — kept in the text body */}
                       {f.flag === "red" && (f.rationale
                         ? <div className="mt-1.5 text-xs border-l-2 pl-2 leading-snug border-flag-red/60 text-flag-red">
                             <span className="font-medium uppercase tracking-wide text-[10px] mr-1">риск:</span>{f.rationale}</div>
-                        : <div className="mt-1.5 text-xs text-amber-600 italic">⚠ риск не указан — добавьте через edit</div>)}
+                        : <div className="mt-1.5 text-xs text-amber-600 italic">⚠ риск не указан — добавьте через редактирование</div>)}
                       {f.flag === "grey" && f.rationale && (
                         <div className="mt-1.5 text-xs border-l-2 pl-2 leading-snug border-flag-grey/60 text-ink-mute">
-                          <span className="font-medium uppercase tracking-wide text-[10px] mr-1">gap:</span>{f.rationale}</div>)}
+                          <span className="font-medium uppercase tracking-wide text-[10px] mr-1">пробел:</span>{f.rationale}</div>)}
 
                       {/* verification (only when meaningful) */}
                       {f.verification && f.verification !== "unverified" && (
@@ -542,7 +1088,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                                           className="ml-auto text-ink-mute hover:text-ink" title="вернуть в матрицу как отдельную карточку">вернуть</button>
                                       </div>
                                       {k.title && <div className="text-xs font-semibold text-ink-mute leading-tight">{k.title}</div>}
-                                      <div className="text-xs leading-snug whitespace-pre-wrap text-ink-mute" style={{ textAlign: "justify" }}>{k.text}</div>
+                                      <div className="text-xs leading-snug whitespace-pre-wrap text-ink-mute">{k.text}</div>
                                       {k.evidence_snippet && (
                                         <blockquote className="mt-1 text-[11px] text-ink-mute border-l-2 border-ink-line pl-2 italic leading-snug">{k.evidence_snippet}</blockquote>
                                       )}
@@ -582,6 +1128,179 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
               );
             })}
 
+            {auditFocus && taskCards.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-mute">Задачи</div>
+                  {taskCards.length > 1 && (
+                    <div className="flex items-center gap-1 text-[11px] text-ink-mute">
+                      <span>сортировка:</span>
+                      <button
+                        onClick={() => setTaskSortMode(m => m === "custom" ? "date" : "custom")}
+                        className="font-medium text-ink transition-colors hover:text-ink/75"
+                        title="Переключить сортировку: своя / дата"
+                      >
+                        {taskSortMode === "custom" ? "своя" : "дата"}
+                      </button>
+                      <button
+                        onClick={() => setTaskSortDir(d => d === "desc" ? "asc" : "desc")}
+                        className="ml-1 text-ink-mute transition-colors hover:text-ink"
+                        title={taskSortDir === "desc" ? "Сейчас сверху вниз" : "Сейчас снизу вверх"}
+                      >
+                        {taskSortDir === "desc" ? "↓" : "↑"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {taskCards.map((task, index) => {
+                  const greyFacts = "greyFacts" in task && Array.isArray(task.greyFacts) ? task.greyFacts : [];
+                  const isGapTask = greyFacts.length > 0;
+                  const taskShiftY = (() => {
+                    if (taskDragKey == null || taskDragStartIndex == null || taskDragTargetIndex == null || taskDragItemHeight === 0 || task.key === taskDragKey) return 0;
+                    if (taskDragTargetIndex > taskDragStartIndex && index > taskDragStartIndex && index <= taskDragTargetIndex) return -taskDragItemHeight;
+                    if (taskDragTargetIndex < taskDragStartIndex && index >= taskDragTargetIndex && index < taskDragStartIndex) return taskDragItemHeight;
+                    return 0;
+                  })();
+                  const relatedFact = "relatedFactId" in task && typeof task.relatedFactId === "number"
+                    ? relatedFactsById.get(task.relatedFactId)
+                    : undefined;
+                  const canExpand = "relatedFactId" in task && typeof task.relatedFactId === "number";
+                  const expanded = expandedTaskKeys.has(task.key);
+
+                  return (
+                    <div key={task.key} id={`task-${task.key}`} data-task-key={task.key}
+                      style={
+                        taskDragKey === task.key
+                          ? { transform: `translate3d(0, ${taskDragOffsetY}px, 0)` }
+                          : taskShiftY
+                            ? { transform: `translate3d(0, ${taskShiftY}px, 0)` }
+                            : undefined
+                      }
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (target.closest("button, select, input, textarea, a, summary, [data-no-card-toggle]")) return;
+                        if (canExpand || isGapTask) toggleTask(task.key);
+                      }}
+                      role={canExpand || isGapTask ? "button" : undefined}
+                      tabIndex={canExpand || isGapTask ? 0 : undefined}
+                      onKeyDown={(e) => {
+                        if (!canExpand && !isGapTask) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          toggleTask(task.key);
+                        }
+                      }}
+                      className={`group/task relative rounded-xl border border-ink-line bg-white p-3.5 shadow-[0_4px_18px_rgba(35,39,28,0.04)]
+                        transition-[background-color,box-shadow,opacity,transform] duration-300 ease-out hover:-translate-y-px hover:bg-[#fbfbf7]
+                        ${canExpand || isGapTask ? "cursor-pointer" : ""} ${taskDragKey === task.key ? "z-20 bg-[#fbfbf7] opacity-80 shadow-[0_16px_34px_rgba(35,39,28,0.12)]" : ""} ${taskDragOverKey === task.key ? "bg-[#fbfbf7]" : ""}`}>
+                      <div>
+                        <div className="min-w-0">
+                          <div className="mb-1 flex items-start gap-2">
+                            <div className="min-w-0 flex-1 text-[14px] font-semibold leading-tight text-ink">{task.title}</div>
+                            <span
+                              data-no-card-toggle
+                              onPointerDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                startTaskDrag(task.key, e);
+                              }}
+                              title="перетащить: изменить порядок"
+                              className="ml-auto shrink-0 cursor-grab select-none text-[13px] leading-none text-ink-mute/0 transition-colors hover:text-ink-mute/70 group-hover/task:text-ink-mute/30 active:cursor-grabbing">⠿</span>
+                          </div>
+                          <div className="mt-1 text-[13px] text-ink-mute leading-snug whitespace-pre-wrap">{task.body}</div>
+                          {isGapTask && expanded && (
+                            <div className="mt-3 space-y-2">
+                              {greyFacts.map((gap, index) => (
+                                <div key={gap.id} className="rounded-lg border border-ink-line/80 bg-[#fbfbf7] p-2.5">
+                                  <div className="mb-1 flex items-center gap-1.5 text-[10px] font-medium text-ink-mute">
+                                    <span className="tabular-nums">{index + 1}</span>
+                                    <span>открытый вопрос</span>
+                                  </div>
+                                  <div className="text-[12px] leading-snug text-ink">{gap.text}</div>
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/ingest`); }}
+                                      className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink hover:bg-[#f6f6f1]"
+                                      title="Перейти в сбор данных и добавить источник, который закрывает этот пробел"
+                                    >
+                                      Добавить источник
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/interview`); }}
+                                      className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink-mute hover:bg-[#f6f6f1] hover:text-ink"
+                                      title="Перейти к вопросам интервью и использовать этот пробел как вопрос"
+                                    >
+                                      Вопрос для интервью
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {canExpand && expanded && (
+                            <div className="mt-3 rounded-lg border border-ink-line/80 bg-[#fbfbf7] p-2.5">
+                              {relatedFact ? (
+                                <>
+                                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-mute">Факт на проверку</div>
+                                  <div className="text-[12px] leading-snug text-ink">{relatedFact.text}</div>
+                                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-ink-mute">
+                                    <span>уверенность {relatedFact.confidence.toFixed(2)}</span>
+                                    {relatedFact.source_title && <span>· {relatedFact.source_title}</span>}
+                                    {relatedFact.rationale && <span>· {relatedFact.rationale}</span>}
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-mute">Связанный факт не найден</div>
+                                  <div className="text-[12px] leading-snug text-ink-mute">
+                                    Возможно, факт был удалён, слит с другой карточкой или перенесён после создания задачи.
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/ingest`); }}
+                                      className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink hover:bg-[#f6f6f1]"
+                                    >
+                                      Добавить источник
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          {"firstMaterialActions" in task && Array.isArray(task.firstMaterialActions) && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/ingest`); }}
+                                className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink hover:bg-[#f6f6f1]"
+                              >
+                                Добавить источник
+                              </button>
+                              {(task.firstMaterialActions.some(isInterviewWorkTitle) || subsection?.layer.id && subsection.layer.id <= 3) && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/interview`); }}
+                                  className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink-mute hover:bg-[#f6f6f1] hover:text-ink"
+                                >
+                                  Вопрос для интервью
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        {(task.meta || isGapTask) && (
+                          <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-ink-line/50 pt-2 text-[11px] text-ink-mute">
+                            <div className="min-w-0">
+                              {task.meta && <span className="font-medium">{task.meta}</span>}
+                              {isGapTask && <span>{greyFacts.length} {questionPlural(greyFacts.length)}</span>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* merged-away originals under a collapsible (each keeps its own source) */}
             {hidden.length > 0 && (
               <details open={showHidden} onToggle={e => setShowHidden((e.currentTarget as HTMLDetailsElement).open)}
@@ -607,7 +1326,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                         </span>
                       </div>
                       {h.title && <div className="text-xs font-semibold text-ink-mute leading-tight">{h.title}</div>}
-                      <div className="text-xs leading-snug whitespace-pre-wrap text-ink-mute" style={{ textAlign: "justify" }}>{h.text}</div>
+                      <div className="text-xs leading-snug whitespace-pre-wrap text-ink-mute">{h.text}</div>
                       {/* originals keep their own provenance — always shown here */}
                       <div className="mt-1.5 pt-1.5 border-t border-ink-line/60">
                         {h.evidence_snippet && (
@@ -628,7 +1347,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
         })()}
       </div>
 
-      <div className="border-t border-ink-line p-4 bg-slate-50">
+      {!auditFocus && <div className="border-t border-ink-line p-4 bg-slate-50">
         {!showAdd ? (
           <button
             onClick={() => setShowAdd(true)}
@@ -649,20 +1368,20 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                 onChange={e => setNewChannel(e.target.value as Channel)}
                 className="text-sm border border-ink-line rounded px-2 py-1.5"
               >
-                <option value="online_research">online_research</option>
-                <option value="online_interview">online_interview</option>
-                <option value="archival">archival</option>
-                <option value="offline_interview">offline_interview</option>
+                <option value="online_research">онлайн-исследование</option>
+                <option value="online_interview">онлайн-интервью</option>
+                <option value="archival">архив</option>
+                <option value="offline_interview">офлайн-интервью</option>
               </select>
             </div>
             <input
-              placeholder="Source title (опц.)"
+              placeholder="Название источника (опц.)"
               value={newSourceTitle}
               onChange={e => setNewSourceTitle(e.target.value)}
               className="w-full text-sm border border-ink-line rounded px-2 py-1.5"
             />
             <input
-              placeholder={snippetRequired ? "Source URL (обязательно для online/archival)" : "Source URL (опц.)"}
+              placeholder={snippetRequired ? "URL источника (обязательно для онлайн/архива)" : "URL источника (опц.)"}
               value={newSourceUrl}
               onChange={e => setNewSourceUrl(e.target.value)}
               className="w-full text-sm border border-ink-line rounded px-2 py-1.5"
@@ -681,14 +1400,14 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
               />
               {snippetRequired && (
                 <div className={`text-[10px] mt-0.5 ${snippetValid ? "text-ink-mute" : "text-red-500"}`}>
-                  {newSnippet.trim().length}/20 chars required
+                  {newSnippet.trim().length}/20 символов минимум
                 </div>
               )}
             </div>
             <textarea
               placeholder={newFlag === "red"
-                ? "Concern: что именно проблема (обязательно для red)"
-                : "Rationale (опц.)"}
+                ? "Проблема: что именно требует внимания (обязательно для риска)"
+                : "Пояснение (опц.)"}
               value={newRationale}
               onChange={e => setNewRationale(e.target.value)}
               rows={2}
@@ -706,28 +1425,42 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                 disabled={!newText.trim() || !snippetValid || (newFlag === "red" && !newRationale.trim()) || addFact.isPending}
                 className="text-sm px-3 py-1.5 bg-ink text-white rounded hover:bg-black disabled:bg-slate-300"
                 title={
-                  !snippetValid ? "Evidence snippet ≥20 chars required for online channels"
-                  : (newFlag === "red" && !newRationale.trim()) ? "Red facts require a rationale"
+                  !snippetValid ? "Для онлайн-источников нужна цитата минимум 20 символов"
+                  : (newFlag === "red" && !newRationale.trim()) ? "Для риска нужно пояснение"
                   : undefined
                 }
-              >Save</button>
+              >Сохранить</button>
               <button
                 onClick={() => setShowAdd(false)}
                 className="text-sm px-3 py-1.5 hover:bg-slate-200 rounded text-ink-mute"
-              >Cancel</button>
+              >Отмена</button>
             </div>
           </div>
         )}
-      </div>
+      </div>}
     </aside>
   );
 }
 
-function flagBg(f: Flag) {
-  return f === "green" ? "bg-flag-green-bg" : f === "red" ? "bg-flag-red-bg" : "bg-flag-grey-bg";
+function flagLabel(f: Flag) {
+  return f === "green" ? "факт" : f === "red" ? "риск" : "пробел";
 }
-function flagBorder(f: Flag) {
-  return f === "green" ? "border-flag-green/40" : f === "red" ? "border-flag-red/40" : "border-flag-grey/40";
+
+function flagChipClass(f: Flag) {
+  return f === "green"
+    ? "bg-[#eaf3de] text-[#3b6d11]"
+    : f === "red"
+      ? "bg-[#fde8e3] text-[#9b3a2a]"
+      : "bg-[#ecece6] text-ink-mute";
+}
+
+function reviewReason(f: Fact) {
+  if (f.state === "review") return "карточка ждёт одобрения владельца данных.";
+  if (f.flag === "grey") return f.rationale ? "пробел нужно закрыть источником или уточнением." : "пробел без пояснения.";
+  if (f.flag === "red") return f.rationale ? "риск требует решения или комментария." : "риск без пояснения.";
+  if (f.verification === "questioned") return "формулировка или источник под вопросом.";
+  if (f.verification === "refuted") return "факт помечен как опровергнутый.";
+  return "карточка требует внимания в рамках проверки этой ячейки.";
 }
 
 function FlagPicker({ value, onChange }: { value: Flag; onChange: (f: Flag) => void }) {
@@ -737,9 +1470,9 @@ function FlagPicker({ value, onChange }: { value: Flag; onChange: (f: Flag) => v
       onChange={e => onChange(e.target.value as Flag)}
       className="text-sm border border-ink-line rounded px-2 py-1.5"
     >
-      <option value="green">green</option>
-      <option value="red">red</option>
-      <option value="grey">grey (gap)</option>
+      <option value="green">факт</option>
+      <option value="red">риск</option>
+      <option value="grey">пробел</option>
     </select>
   );
 }

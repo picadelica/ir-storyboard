@@ -17,6 +17,7 @@ import FactAuditView from "./components/FactAuditView";
 import WorkView from "./components/WorkView";
 import ResearchView from "./components/ResearchView";
 import MonitoringView from "./components/MonitoringView";
+import AddDataHub from "./components/AddDataHub";
 import IngestLLMReport from "./components/IngestLLMReport";
 import IngestYouTube from "./components/IngestYouTube";
 import IngestAudio from "./components/IngestAudio";
@@ -29,6 +30,10 @@ import PlanView from "./components/PlanView";
 import BriefComposer from "./components/BriefComposer";
 import ExportView from "./components/ExportView";
 import DossierView from "./components/DossierView";
+import { HintTarget } from "./components/Hint";
+
+const BUTTON_SECONDARY = "shrink-0 rounded-xl border border-ink-line bg-white px-3 py-1.5 text-xs font-medium text-ink hover:bg-[#fbfbf7] disabled:opacity-40 transition";
+const BUTTON_BLUE = "shrink-0 rounded-xl border border-flag-blue/40 bg-white px-3 py-1.5 text-xs font-medium text-flag-blue hover:bg-flag-blue/5 disabled:opacity-40 transition";
 
 export default function App() {
   return (
@@ -42,7 +47,7 @@ export default function App() {
 
 function RootRedirect() {
   const clients = useQuery({ queryKey: ["clients"], queryFn: () => api.listClients() });
-  if (clients.isLoading) return <div className="p-8 text-sm text-ink-mute">Loading…</div>;
+  if (clients.isLoading) return <div className="p-8 text-sm text-ink-mute">Загрузка…</div>;
   if (clients.data && clients.data.length > 0)
     return <Navigate to={`/clients/${clients.data[0].id}/matrix`} replace />;
   return <EmptyState />;
@@ -54,8 +59,8 @@ function EmptyState() {
       <Sidebar />
       <div className="flex-1 flex items-center justify-center text-sm text-ink-mute">
         <div className="max-w-sm text-center">
-          <div className="text-base font-semibold text-ink mb-1">No clients yet</div>
-          <div>Use the sidebar button to load the Accumulator pilot dataset.</div>
+          <div className="text-base font-semibold text-ink mb-1">Клиентов пока нет</div>
+          <div>Используйте кнопку в боковой панели, чтобы загрузить пилотный набор Accumulator.</div>
         </div>
       </div>
     </div>
@@ -102,7 +107,7 @@ function ClientPage() {
       {!present && <Sidebar clientId={clientId} />}
 
       <main className="flex-1 flex flex-col overflow-hidden"
-        style={{ transition: "margin-right 200ms", marginRight: selectedSid && (activeTab === "matrix" || activeTab === "scorecard") ? "28rem" : 0 }}>
+        style={{ transition: "margin-right 200ms", marginRight: selectedSid && (activeTab === "matrix" || activeTab === "scorecard" || activeTab === "audit") ? "28rem" : 0 }}>
         {present ? (
           <PresentBar clientId={clientId!} quarter={quarter} onExit={() => setPresent(false)} />
         ) : (
@@ -116,7 +121,7 @@ function ClientPage() {
           />
         )}
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="ir-workspace-scroll flex-1 min-h-0 overflow-y-auto">
           {activeTab === "about" && <CompanyAbout clientId={clientId!} />}
           {activeTab === "dossier" && <DossierView clientId={clientId!} />}
           {activeTab === "matrix" && (
@@ -134,7 +139,12 @@ function ClientPage() {
             <InterviewView clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
           {activeTab === "audit" && (
-            <FactAuditView clientId={clientId!} onJumpToCell={onJumpToCell} />
+            <FactAuditView
+              clientId={clientId!}
+              onJumpToCell={onJumpToCell}
+              selectedSubsectionId={selectedSid}
+              onSelectCell={setSelectedSid}
+            />
           )}
           {activeTab === "scorecard" && <ScorecardView clientId={clientId!} onSelectCell={setSelectedSid} />}
           {activeTab === "artifacts" && (
@@ -150,6 +160,9 @@ function ClientPage() {
             <MonitoringView key={clientId} clientId={clientId!} />
           )}
           {activeTab === "ingest" && (
+            <AddDataHub clientId={clientId!} layers={layers.data} />
+          )}
+          {activeTab === "source-file" && (
             <IngestLLMReport clientId={clientId!} onJumpToCell={onJumpToCell} />
           )}
           {activeTab === "youtube" && (
@@ -180,11 +193,12 @@ function ClientPage() {
         {present && <PresentFooter clientId={clientId!} />}
       </main>
 
-      {selectedSid && (activeTab === "matrix" || activeTab === "scorecard") && (
+      {selectedSid && (activeTab === "matrix" || activeTab === "scorecard" || activeTab === "audit") && (
         <CellDrawer
           clientId={clientId!}
           subsectionId={selectedSid}
           focusFactId={focusFactId}
+          auditFocus={activeTab === "audit" ? "all" : undefined}
           onClose={() => { setSelectedSid(undefined); setFocusFactId(undefined); }}
           layers={layers.data}
         />
@@ -216,15 +230,6 @@ interface TabsProps {
   onTogglePresent: (v: boolean) => void;
 }
 
-function monogram(name: string): string {
-  return name.replace(/^@/, "").split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "—";
-}
-function monoColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return `hsl(${h % 360} 42% 42%)`;
-}
-
 function ZoneIcon({ id }: { id: string }) {
   const p = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (id) {
@@ -240,48 +245,85 @@ function ZoneIcon({ id }: { id: string }) {
       return <svg {...p}><path d="M3 12h4l2 6 4-14 2 8h6" /></svg>;
     case "deliver":
       return <svg {...p}><path d="M21 16V8l-9-5-9 5v8l9 5z" /><path d="M3.5 7.5l8.5 5 8.5-5M12 12.5V22" /></svg>;
+    case "work":
+      return <svg {...p}><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></svg>;
     default:
       return null;
   }
 }
 
-type Sub = { id: string; label: string };
+type Sub = { id: string; label: string; hidden?: boolean };
 const ZONES: { id: string; label: string; tabs: Sub[] }[] = [
   // Досье + About объединены в одну зону «Компания» (обзор + структурный профиль)
   { id: "dossier", label: "Компания", tabs: [{ id: "dossier", label: "Досье" }, { id: "about", label: "Профиль" }] },
-  { id: "map", label: "Map", tabs: [{ id: "matrix", label: "Matrix" }] },
   {
-    id: "build", label: "Build", tabs: [
-      { id: "ingest", label: "LLM report" },
-      { id: "youtube", label: "YouTube" },
-      { id: "audio", label: "Audio" },
-      { id: "client-facts", label: "От клиента" },
-      { id: "research", label: "Research" },
+    id: "build", label: "Сбор данных", tabs: [
+      { id: "ingest", label: "Добавить" },
+      { id: "research", label: "Найти", hidden: true },
       { id: "monitoring", label: "Мониторинг" },
-      { id: "work", label: "Work" },
+      { id: "source-file", label: "Файл / текст", hidden: true },
+      { id: "youtube", label: "Видео", hidden: true },
+      { id: "audio", label: "Аудио", hidden: true },
+      { id: "client-facts", label: "От клиента", hidden: true },
+    ],
+  },
+  { id: "map", label: "Факты", tabs: [{ id: "matrix", label: "Матрица" }] },
+  {
+    id: "health", label: "Проверка", tabs: [
+      { id: "audit", label: "Проверка" },
     ],
   },
   {
-    id: "health", label: "Health", tabs: [
-      { id: "scorecard", label: "Scorecard" },
-      { id: "punch", label: "Punch-list" },
-      { id: "audit", label: "Проверка фактов" },
-      { id: "interview", label: "Interview Qs" },
-    ],
-  },
-  {
-    id: "deliver", label: "Deliver", tabs: [
-      { id: "brief", label: "Brief" },
+    id: "deliver", label: "Итоги", tabs: [
+      { id: "brief", label: "Бриф" },
       { id: "export", label: "Выгрузка" },
-      { id: "artifacts", label: "Artifacts" },
-      { id: "plan", label: "Plan" },
+      { id: "artifacts", label: "Артефакты" },
+      { id: "plan", label: "План" },
     ],
   },
+  { id: "work", label: "Работа", tabs: [{ id: "work", label: "Работа" }] },
 ];
+
+const ZONE_WIDTH: Record<string, string> = {
+  dossier: "w-[104px]",
+  map: "w-[96px]",
+  build: "w-[120px]",
+  health: "w-[104px]",
+  work: "w-[92px]",
+  deliver: "w-[104px]",
+};
+
+const ZONE_HINTS: Record<string, string> = {
+  dossier: "Бывший Dossier / About\nЗдесь вы смотрите общую картину по компании: досье, профиль, контекст и базовые сведения.",
+  map: "Бывший Map / Matrix\nЗдесь вы анализируете матрицу знаний: видите заполненность разделов и открываете ячейки с фактами.",
+  build: "Бывший Build / Ingest / Work\nЗдесь вы добавляете и обрабатываете источники: отчёты, видео, аудио, клиентские факты и исследования.",
+  health: "Бывший Health\nЗдесь вы проверяете качество базы: пробелы, спорные факты, задачи и вопросы для интервью.",
+  work: "Временная рабочая зона\nКанбан задач пока вынесен отдельно: посмотрим, стоит ли потом вернуть его в Проверку или спрятать глубже.",
+  deliver: "Бывший Deliver\nЗдесь лежат итоговые материалы: брифы, планы, артефакты и выгрузки для дальнейшей работы.",
+};
+
+const TAB_HINTS: Record<string, string> = {
+  dossier: "Консолидированное досье: общий синтез, карта знаний и ключевые блоки по компании.",
+  about: "Структурный профиль компании: описание, фаундеры, ссылки и базовые факты.",
+  ingest: "Единый вход для добавления данных: ссылка, файл, текст, аудио/видео; здесь выбирается и статус «от клиента».",
+  "source-file": "Загрузка и разбор файлов, LLM-отчётов или больших текстовых материалов.",
+  youtube: "Загрузка видео: транскрипт, извлечение фактов и запись в матрицу.",
+  audio: "Загрузка аудио: транскрипт, факты, таймкоды и проверка перед записью.",
+  "client-facts": "Факты от клиента: ручной ввод или документ, который нужно разложить по матрице.",
+  research: "Поиск источников: запросы, найденные материалы, кандидаты фактов и импорт.",
+  monitoring: "Мониторинг внешних сигналов и регулярная проверка изменений.",
+  work: "Рабочая доска задач по источникам, пробелам и углублению.",
+  brief: "Сборка брифа и нарратива из проверенной матрицы.",
+  export: "Выгрузка матрицы и карточек в JSON/формат для передачи дальше.",
+  artifacts: "Сохранённые материалы и документы, собранные из базы.",
+  plan: "План действий и треки работы по выбранному периоду.",
+};
 
 function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTogglePresent }: TabsProps) {
   const nav = useNavigate();
   const activeZone = ZONES.find(z => z.tabs.some(t => t.id === activeTab)) ?? ZONES[0];
+  const activeSub = activeZone.tabs.find(t => t.id === activeTab);
+  const activeVisibleTabId = activeSub?.hidden ? activeZone.tabs.find(t => !t.hidden)?.id : activeTab;
   const showSub = activeZone.tabs.length > 1 || activeZone.id === "deliver";
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.getClient(clientId) });
   const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
@@ -290,48 +332,57 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
     || (me.data?.tid != null && client.data?.owner_tid === me.data.tid);
 
   return (
-    <div className="border-b border-ink-line bg-white">
+    <div className="border-b border-ink-line bg-white/95 backdrop-blur">
       {/* одна строка: зоны · айдентика компании (приоритет) · глобальные действия */}
       <div className="flex items-center gap-2 px-4 py-2.5">
         {ZONES.map(z => {
           const active = z.id === activeZone.id;
+          const muted = z.id === "work";
           return (
-            <button
-              key={z.id}
-              onClick={() => nav(`/clients/${clientId}/${z.tabs[0].id}`)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition shrink-0
-                ${active ? "bg-ink text-white font-medium" : "text-ink-mute hover:text-ink hover:bg-ink/[0.04]"}`}
-            >
-              <ZoneIcon id={z.id} />
-              {z.label}
-            </button>
+            <HintTarget key={z.id} title={z.label} body={ZONE_HINTS[z.id]}>
+              <button
+                onClick={() => nav(`/clients/${clientId}/${z.tabs[0].id}`)}
+                className={`relative flex justify-center px-0.5 py-0 text-[12px] transition shrink-0 ${ZONE_WIDTH[z.id]}
+                  ${active ? (muted ? "text-[#8b8d85]" : "text-[#40551f]") : muted ? "text-[#bbbdb5] hover:text-[#8b8d85]" : "text-ink-mute hover:text-ink"}`}
+              >
+                <span
+                  className={`relative flex items-center justify-center gap-1.5 rounded-full border px-3 py-1.5 transition
+                    ${active
+                      ? (muted ? "bg-[#f7f7f4] border-[#e2e3dc]" : "bg-[#f0fadb] border-[#cbd8a2] shadow-sm")
+                      : muted ? "border-transparent hover:bg-[#f7f7f4]" : "border-transparent hover:bg-[#f6f6f1]"}`}
+                >
+                  <span className="w-3.5 h-3.5 shrink-0 grid place-items-center"><ZoneIcon id={z.id} /></span>
+                  <span className="relative whitespace-nowrap">
+                    <span className="invisible font-semibold">{z.label}</span>
+                    <span className={`absolute inset-0 ${active ? "font-semibold" : "font-normal"}`}>{z.label}</span>
+                  </span>
+                  <span className={`absolute left-3 right-3 -bottom-[10px] h-[2.5px] rounded-full transition-opacity ${active ? (muted ? "bg-[#d2d4cc] opacity-100" : "bg-[#98c61b] opacity-100") : "opacity-0"}`} />
+                </span>
+              </button>
+            </HintTarget>
           );
         })}
 
-        {client.data?.name ? (
-          <div className="ml-2 min-w-0 flex-1 flex items-center gap-2">
-            <span className="w-7 h-7 rounded-lg grid place-items-center text-[10px] font-semibold text-white select-none shrink-0"
-              style={{ background: monoColor(client.data.name) }}>{monogram(client.data.name)}</span>
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-ink truncate leading-tight" title={client.data.name}>{client.data.name}</div>
-              {client.data.sector && <div className="text-[11px] text-ink-mute truncate leading-tight">{client.data.sector}</div>}
-            </div>
-          </div>
-        ) : <div className="flex-1" />}
+        <div className="flex-1" />
 
         <div className="flex items-center gap-2 shrink-0">
           <SearchBox clientId={clientId} />
-          <button
-            onClick={() => nav(`/clients/${clientId}/methodology`)}
-            className={`text-xs transition ${activeTab === "methodology" ? "text-ink font-medium" : "text-ink-mute hover:text-ink"}`}
-            title="Methodology reference"
-          >Methodology</button>
-          <div className="flex items-center rounded-lg border border-ink-line overflow-hidden text-xs">
-            <button className="px-3 py-1.5 bg-ink text-white">Analyst</button>
+          <HintTarget title="Методология" body="Справочник структуры матрицы: описания ячеек, правила классификации и локальные заметки клиента.">
             <button
-              onClick={() => onTogglePresent(true)}
-              className="px-3 py-1.5 text-ink-mute hover:text-ink transition"
-            >Present</button>
+              onClick={() => nav(`/clients/${clientId}/methodology`)}
+              className={`text-[12px] px-2.5 py-1.5 rounded-xl transition ${activeTab === "methodology" ? "bg-[#f6f6f1] text-ink font-semibold" : "text-ink-mute hover:text-ink hover:bg-[#f6f6f1]"}`}
+            >Методология</button>
+          </HintTarget>
+          <div className="flex items-center rounded-xl border border-ink-line overflow-hidden text-xs bg-[#f6f6f1]">
+            <HintTarget title="Режим аналитика" body="Обычный рабочий режим: редактирование, проверка, загрузка данных и навигация по интерфейсу.">
+              <button className="px-3 py-1.5 bg-[#20221f] text-white font-semibold">Аналитик</button>
+            </HintTarget>
+            <HintTarget title="Презентация" body="Сфокусированный режим показа без лишней рабочей навигации.">
+              <button
+                onClick={() => onTogglePresent(true)}
+                className="px-3 py-1.5 text-ink-mute hover:text-ink hover:bg-white transition"
+              >Презентация</button>
+            </HintTarget>
           </div>
           <UserMenu clientId={clientId} canSeeUsers={canSeeUsers} />
         </div>
@@ -339,37 +390,47 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
 
       {/* sub-tab row (hidden in present mode) */}
       {showSub && (
-        <div className="flex items-center gap-1 px-4 border-t border-ink-line/60">
-          {activeZone.tabs.map(t => (
-            <NavLink
-              key={t.id}
-              to={`/clients/${clientId}/${t.id}`}
-              className={`px-2.5 py-2 text-[13px] border-b-2 transition whitespace-nowrap
-                ${activeTab === t.id
-                  ? "border-ink text-ink font-medium"
-                  : "border-transparent text-ink-mute hover:text-ink"}`}
-            >
-              {t.label}
-            </NavLink>
-          ))}
+        <div className="border-t border-ink-line/60 bg-[#fbfbf7]">
+          <div className="max-w-[820px] mx-auto flex items-center gap-1.5">
+            {activeZone.tabs.filter(t => !t.hidden).map(t => (
+              <HintTarget key={t.id} title={t.label} body={TAB_HINTS[t.id]}>
+                <NavLink
+                  to={`/clients/${clientId}/${t.id}`}
+                  className={`px-5 py-2.5 text-[13px] border-b-[3px] transition whitespace-nowrap
+                    ${activeVisibleTabId === t.id
+                      ? "border-[#98c61b] text-ink font-semibold"
+                      : "border-transparent text-ink-mute hover:text-ink hover:bg-white/70"}`}
+                >
+                  {t.label}
+                </NavLink>
+              </HintTarget>
+            ))}
 
-          {activeZone.id === "build" && <BuildActions clientId={clientId} />}
+            {activeZone.id === "build" && <BuildActions clientId={clientId} />}
 
-          {activeZone.id === "deliver" && (
-            <div className="ml-auto flex items-center gap-1.5 py-1.5">
-              <input
-                value={quarter}
-                onChange={e => onQuarterChange(e.target.value)}
-                placeholder="2026Q2"
-                className="w-20 text-xs border border-ink-line rounded-lg px-2 py-1 font-mono"
-                title="Quarter for cycles + plan"
-              />
-              <span className="text-[11px] text-ink-mute pl-1">Run cycle:</span>
-              <button onClick={() => onRunCycle("weekly")} className="text-xs px-2.5 py-1 rounded-lg border border-ink-line text-ink hover:bg-ink/[0.04]" title="Run weekly cycle">Weekly</button>
-              <button onClick={() => onRunCycle("event")} className="text-xs px-2.5 py-1 rounded-lg border border-ink-line text-ink hover:bg-ink/[0.04]" title="Run event-driven cycle">Event</button>
-              <button onClick={() => onRunCycle("quarterly")} className="text-xs px-2.5 py-1 rounded-lg border border-ink-line text-ink hover:bg-ink/[0.04]" title="Run quarterly cycle">Quarterly</button>
-            </div>
-          )}
+            {activeZone.id === "deliver" && (
+              <div className="ml-auto flex items-center gap-1.5 py-1.5">
+                <HintTarget title="Квартал" body="Период, к которому привязываются циклы, план и часть материалов. Например: 2026Q2.">
+                  <input
+                    value={quarter}
+                    onChange={e => onQuarterChange(e.target.value)}
+                    placeholder="2026Q2"
+                    className="w-20 text-xs border border-ink-line rounded-xl px-2 py-1.5 font-mono"
+                  />
+                </HintTarget>
+                <span className="text-[11px] text-ink-mute pl-1">Запустить цикл:</span>
+                <HintTarget title="Недельный цикл" body="Собрать регулярные задачи и обновления на ближайшую неделю.">
+                  <button onClick={() => onRunCycle("weekly")} className="text-xs px-3 py-1.5 rounded-xl border border-ink-line text-ink hover:bg-white">Недельный</button>
+                </HintTarget>
+                <HintTarget title="Событийный цикл" body="Запустить цикл от конкретного события: новости, встречи, изменения контекста.">
+                  <button onClick={() => onRunCycle("event")} className="text-xs px-3 py-1.5 rounded-xl border border-ink-line text-ink hover:bg-white">Событийный</button>
+                </HintTarget>
+                <HintTarget title="Квартальный цикл" body="Собрать план и работу на квартальный горизонт.">
+                  <button onClick={() => onRunCycle("quarterly")} className="text-xs px-3 py-1.5 rounded-xl border border-ink-line text-ink hover:bg-white">Квартальный</button>
+                </HintTarget>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -387,25 +448,32 @@ function BuildActions({ clientId }: { clientId: string }) {
   });
   return (
     <div className="ml-auto flex items-center gap-1.5 py-1.5">
-      <button
-        onClick={() => genTitles.mutate()}
-        disabled={genTitles.isPending}
-        title="Сгенерировать короткие заголовки (2-3 слова) для карточек без заголовка"
-        className="text-xs px-2.5 py-1 rounded-lg border border-ink-line text-ink hover:bg-ink/[0.04] disabled:opacity-50 whitespace-nowrap"
+      <HintTarget
+        title="Заголовки карточек"
+        body="Автоматически создаёт короткие названия для карточек фактов без заголовков. Удобно перед просмотром матрицы и выгрузкой материалов."
       >
-        {genTitles.isPending ? "Генерирую заголовки…"
-          : genTitles.isSuccess ? `Готово: ${genTitles.data?.titled ?? 0} заголовков`
-          : "Заголовки карточек"}
-      </button>
-      {totalMust > 0 && (
         <button
-          onClick={() => api.downloadMustHaveFacts(clientId, clientId).catch(() => {})}
-          title="Скачать must-have факты нумерованным списком для согласования с заказчиком"
-          className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-flag-blue/40 text-flag-blue hover:bg-flag-blue/5 whitespace-nowrap"
+          onClick={() => genTitles.mutate()}
+          disabled={genTitles.isPending}
+          className={`${BUTTON_SECONDARY} whitespace-nowrap`}
         >
-          <span className="inline-block w-2 h-2 rounded-full bg-flag-blue" />
-          Выгрузить must-have (★{totalMust})
+          {genTitles.isPending ? "Генерирую заголовки…"
+            : genTitles.isSuccess ? `Готово: ${genTitles.data?.titled ?? 0} заголовков`
+            : "Заголовки карточек"}
         </button>
+      </HintTarget>
+      {totalMust > 0 && (
+        <HintTarget
+          title="Выгрузить обязательные"
+          body="Скачивает must-have факты со звёздочкой нумерованным списком. Это удобно для согласования обязательных тезисов с клиентом."
+        >
+          <button
+            onClick={() => api.downloadMustHaveFacts(clientId, clientId).catch(() => {})}
+            className={`${BUTTON_BLUE} whitespace-nowrap`}
+          >
+            Выгрузить обязательные (★{totalMust})
+          </button>
+        </HintTarget>
       )}
     </div>
   );
@@ -418,10 +486,10 @@ function PresentFooter({ clientId }: { clientId: string }) {
   const analyst = me.data?.auth ? me.data.name : null;
   return (
     <div className="flex items-center justify-between border-t border-ink-line bg-white px-6 py-2.5 text-[11px] text-ink-mute">
-      <span>Конфиденциально · {name} Investor Relations</span>
+      <span>Конфиденциально · {name} · отношения с инвесторами</span>
       <span className="flex items-center gap-2.5">
         {analyst && <span>Аналитик: {analyst}</span>}
-        <span className="px-2 py-0.5 rounded-md bg-ink text-white text-[10px] tracking-wide">LIVE</span>
+        <span className="px-2 py-0.5 rounded-md bg-ink text-white text-[10px] tracking-wide">ЭФИР</span>
       </span>
     </div>
   );
@@ -455,12 +523,12 @@ function PresentBar({ clientId, quarter, onExit }: { clientId: string; quarter: 
 
       <div className="flex items-center gap-6">
         <div className="text-right">
-          <div className="text-lg font-semibold text-ink tabular-nums">{pct}% <span className="text-ink-mute font-normal">mapped</span></div>
-          <div className="text-xs text-ink-mute tabular-nums">{gaps} gaps · {quarter}</div>
+          <div className="text-lg font-semibold text-ink tabular-nums">{pct}% <span className="text-ink-mute font-normal">заполнено</span></div>
+          <div className="text-xs text-ink-mute tabular-nums">{gaps} пробелов · {quarter}</div>
         </div>
         <div className="flex items-center rounded-lg border border-ink-line overflow-hidden text-xs">
-          <button onClick={onExit} className="px-3 py-1.5 text-ink-mute hover:text-ink transition">Analyst</button>
-          <button className="px-3 py-1.5 bg-ink text-white">Present</button>
+          <button onClick={onExit} className="px-3 py-1.5 text-ink-mute hover:text-ink transition">Аналитик</button>
+          <button className="px-3 py-1.5 bg-ink text-white">Презентация</button>
         </div>
       </div>
     </div>

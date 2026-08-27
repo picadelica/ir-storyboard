@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import type { PunchList } from "../types";
 
 interface Props {
@@ -13,7 +14,7 @@ export default function PunchListView({ clientId, onJumpToCell }: Props) {
     queryFn: () => api.punchList(clientId),
   });
 
-  if (punch.isLoading) return <div className="p-6 text-sm text-ink-mute">Loading…</div>;
+  if (punch.isLoading) return <div className="p-6 text-sm text-ink-mute">Загрузка…</div>;
   if (!punch.data) return null;
   const p = punch.data;
   const total = p.empty_cells.length + p.cells_with_known_gaps.length + p.thinly_covered.length;
@@ -21,21 +22,21 @@ export default function PunchListView({ clientId, onJumpToCell }: Props) {
   return (
     <div className="p-5 space-y-6 max-w-5xl">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold">Punch-list</h2>
+        <h2 className="text-lg font-semibold">Список задач</h2>
         <div className="text-xs text-ink-mute">
           {total === 0 ? "✓ matrix is fully covered" : `${total} item${total === 1 ? "" : "s"}`}
         </div>
       </div>
 
       <Section
-        title="1. Untouched cells (no facts at all)"
+        title="1. Нетронутые ячейки (фактов нет совсем)"
         empty="None — every cell has at least one fact."
         count={p.empty_cells.length}
       >
         <table className="w-full text-sm">
           <thead className="text-[10px] font-mono uppercase text-ink-mute">
-            <tr><th className="text-left py-1.5 pr-3">Cell</th>
-                <th className="text-left py-1.5 pr-3">Layer → Subsection</th>
+            <tr><th className="text-left py-1.5 pr-3">Ячейка</th>
+                <th className="text-left py-1.5 pr-3">Слой → позиция</th>
                 <th className="text-right py-1.5"></th></tr>
           </thead>
           <tbody>
@@ -43,11 +44,11 @@ export default function PunchListView({ clientId, onJumpToCell }: Props) {
               <tr key={c.subsection_id} className="border-t border-ink-line">
                 <td className="py-2 pr-3 font-mono text-xs">{c.subsection_id}</td>
                 <td className="py-2 pr-3">
-                  <div className="text-sm">{c.layer_name} → {c.subsection_name}</div>
+                  <div className="text-sm">{layerNameRu(c.layer_id, c.layer_name)} → {subsectionNameRu(c.subsection_id, c.subsection_name)}</div>
                 </td>
                 <td className="py-2 text-right">
                   <button onClick={() => onJumpToCell(c.subsection_id)}
-                    className="text-xs px-2 py-1 hover:bg-slate-100 rounded text-blue-600">→ open</button>
+                    className="text-xs px-2 py-1 hover:bg-slate-100 rounded text-blue-600">→ открыть</button>
                 </td>
               </tr>
             ))}
@@ -56,7 +57,7 @@ export default function PunchListView({ clientId, onJumpToCell }: Props) {
       </Section>
 
       <Section
-        title="2. Explicit gaps (we know we don't know)"
+        title="2. Явные пробелы (мы знаем, чего не знаем)"
         empty="No explicit gap markers — strong sign or sign of optimism, depending on viewpoint."
         count={p.cells_with_known_gaps.length}
       >
@@ -65,10 +66,10 @@ export default function PunchListView({ clientId, onJumpToCell }: Props) {
             <li key={c.subsection_id} className="bg-flag-grey-bg border border-flag-grey/40 rounded p-3">
               <div className="flex items-center justify-between mb-1">
                 <div className="text-xs font-medium">
-                  <span className="font-mono">{c.subsection_id}</span> · {c.layer_name} → {c.subsection_name}
+                  <span className="font-mono">{c.subsection_id}</span> · {layerNameRu(c.layer_id, c.layer_name)} → {subsectionNameRu(c.subsection_id, c.subsection_name)}
                 </div>
                 <button onClick={() => onJumpToCell(c.subsection_id)}
-                  className="text-xs px-2 py-1 hover:bg-white rounded text-blue-600">→ open</button>
+                  className="text-xs px-2 py-1 hover:bg-white rounded text-blue-600">→ открыть</button>
               </div>
               <ul className="text-sm space-y-1 mt-2 list-disc pl-4">
                 {c.grey_facts.map(g => <li key={g.id}>{g.text}</li>)}
@@ -79,26 +80,26 @@ export default function PunchListView({ clientId, onJumpToCell }: Props) {
       </Section>
 
       <Section
-        title="3. Thin coverage (< 2 green facts)"
+        title="3. Слабое покрытие (меньше 2 фактов)"
         empty="All cells have at least 2 green facts."
         count={p.thinly_covered.length}
       >
         <table className="w-full text-sm">
           <thead className="text-[10px] font-mono uppercase text-ink-mute">
-            <tr><th className="text-left py-1.5 pr-3">Cell</th>
-                <th className="text-left py-1.5 pr-3">Layer → Subsection</th>
-                <th className="text-right py-1.5 pr-3">green</th>
+            <tr><th className="text-left py-1.5 pr-3">Ячейка</th>
+                <th className="text-left py-1.5 pr-3">Слой → позиция</th>
+                <th className="text-right py-1.5 pr-3">факты</th>
                 <th></th></tr>
           </thead>
           <tbody>
             {p.thinly_covered.map(c => (
               <tr key={c.subsection_id} className="border-t border-ink-line">
                 <td className="py-2 pr-3 font-mono text-xs">{c.subsection_id}</td>
-                <td className="py-2 pr-3 text-sm">{c.layer_name} → {c.subsection_name}</td>
+                <td className="py-2 pr-3 text-sm">{layerNameRu(c.layer_id, c.layer_name)} → {subsectionNameRu(c.subsection_id, c.subsection_name)}</td>
                 <td className="py-2 pr-3 text-right font-mono text-sm">{c.n_green}</td>
                 <td className="py-2 text-right">
                   <button onClick={() => onJumpToCell(c.subsection_id)}
-                    className="text-xs px-2 py-1 hover:bg-slate-100 rounded text-blue-600">→ open</button>
+                    className="text-xs px-2 py-1 hover:bg-slate-100 rounded text-blue-600">→ открыть</button>
                 </td>
               </tr>
             ))}

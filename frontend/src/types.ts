@@ -398,6 +398,7 @@ export interface CellSummary {
   n_must?: number;
   n_must_client?: number;   // синяя звезда (клиент / без пометки)
   n_must_expert?: number;   // фиолетовая звезда (эксперт)
+  corroborated?: boolean;
   last_update?: string | null;
   channels?: Channel[];
 }
@@ -449,6 +450,7 @@ export interface Fact {
   must_have_by?: string;        // '' | 'client' (blue) | 'expert' (purple)
   merged_into?: number | null;  // set → hidden, folded into fact #merged_into
   n_sources?: number;           // corroboration count
+  sort_order?: number | null;
   created_by_tid?: number | null;
   approved_by?: string;         // кто одобрил черновик (владелец)
   approved_at?: string | null;
@@ -701,6 +703,8 @@ export interface DossierCell {
   n_grey: number;
   facts: number;
   must_have: boolean;
+  n_must_client?: number;
+  n_must_expert?: number;
   corroborated: boolean;
   last_update?: string | null;
 }

@@ -97,7 +97,7 @@ export default function SourceLine(props: SourceLineProps) {
           ▶ {fmtTime(timestamp_sec as number)}
         </button>
       ) : (timestamp_sec as number) > 0 ? (
-        <span className="text-violet-600 font-mono" title="Timestamp anchor">
+        <span className="text-violet-600 font-mono" title="Таймкод">
           ▶ {fmtTime(timestamp_sec as number)}
         </span>
       ) : null
@@ -129,11 +129,11 @@ export default function SourceLine(props: SourceLineProps) {
               target="_blank"
               rel="noreferrer"
               className="text-emerald-600"
-              title="Wayback snapshot"
+              title="Снимок Wayback"
             >📦</a>
           )}
           {archiving && (
-            <span className="text-amber-500" title="Archiving in background…">⏳</span>
+            <span className="text-amber-500" title="Архивируется в фоне…">⏳</span>
           )}
           <Timecode />
         </>
@@ -160,7 +160,7 @@ export default function SourceLine(props: SourceLineProps) {
                 : ""}
             </button>
           ) : (
-            <span className="text-ink-mute" title="Audio source">
+          <span className="text-ink-mute" title="Аудиоисточник">
               🎧 audio{hasTimecode && (timestamp_sec as number) > 0
                 ? ` · ${fmtTime(timestamp_sec as number)}` : ""}
             </span>
@@ -171,13 +171,13 @@ export default function SourceLine(props: SourceLineProps) {
       {kind === "llm_report" && ingest_audit_id && (
         <>
           <ChannelBadge channel={channel} />
-          <span>LLM Report #{ingest_audit_id.slice(0, 8)}</span>
+          <span>LLM-отчёт #{ingest_audit_id.slice(0, 8)}</span>
           <a
             href={`/api/clients/${client_id}/ingest/llm-report/${ingest_audit_id}/file`}
             target="_blank"
             rel="noreferrer"
             className="text-violet-600 underline"
-            title="Download original LLM report"
+            title="Скачать исходный LLM-отчёт"
           >↓ скачать отчёт</a>
         </>
       )}
@@ -199,7 +199,7 @@ export default function SourceLine(props: SourceLineProps) {
             <Timecode />
           </>
         ) : (
-          <span className="text-amber-600">⚠ no source</span>
+          <span className="text-amber-600">⚠ нет источника</span>
         )
       )}
 

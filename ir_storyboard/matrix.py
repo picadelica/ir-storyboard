@@ -552,7 +552,7 @@ def facts_for_cell(conn: sqlite3.Connection, client_id: str,
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
                   f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.must_have_by, f.merged_into,
-                  f.about_company,
+                  f.about_company, f.sort_order,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -615,7 +615,7 @@ def get_fact(conn: sqlite3.Connection, fact_id: int) -> Optional[sqlite3.Row]:
                   f.snippet_start_sec,
                   f.verification, f.verification_note, f.entity, f.state,
                   f.speaker_entity_id, se.name AS speaker_name, f.must_have, f.must_have_by, f.merged_into,
-                  f.about_company,
+                  f.about_company, f.sort_order,
                   (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) AS extra_sources,
                   s.channel AS source_channel, s.title AS source_title,
                   COALESCE(NULLIF(f.source_url, ''), s.url) AS source_url,
@@ -1228,6 +1228,8 @@ def cell_summary(conn: sqlite3.Connection, client_id: str) -> List[Dict[str, Any
                SUM(CASE WHEN f.must_have=1  THEN 1 ELSE 0 END) AS n_must,
                SUM(CASE WHEN f.must_have=1 AND f.must_have_by='expert' THEN 1 ELSE 0 END) AS n_must_expert,
                SUM(CASE WHEN f.must_have=1 AND f.must_have_by<>'expert' THEN 1 ELSE 0 END) AS n_must_client,
+               SUM(CASE WHEN (SELECT COUNT(*) FROM fact_sources fs WHERE fs.fact_id=f.id) > 0
+                        THEN 1 ELSE 0 END) > 0 AS corroborated,
                MAX(f.captured_at) AS last_update,
                GROUP_CONCAT(DISTINCT src.channel) AS channels
         FROM subsections s
