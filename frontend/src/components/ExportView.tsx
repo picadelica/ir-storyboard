@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import { subsectionNameRu } from "../lib/matrixLabels";
 import type { MatrixExport } from "../types";
 import FlagDot from "./FlagDot";
 
@@ -136,7 +137,7 @@ export default function ExportView({ clientId }: { clientId: string }) {
           {cellNos.map(no => (
             <div key={no} className="px-3.5 py-2.5">
               <div className="text-[11px] text-ink-mute font-mono mb-1.5">
-                {no} · {byCell[no][0].subsection_name}
+                {no} · {subsectionNameRu(no, byCell[no][0].subsection_name)}
               </div>
               <div className="space-y-1.5">
                 {byCell[no].map(c => (

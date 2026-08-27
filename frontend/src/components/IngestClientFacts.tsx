@@ -1,6 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import type { Layer } from "../types";
 
 interface Props {
@@ -16,6 +18,7 @@ interface DraftRow {
 }
 
 const EMPTY_ROW: DraftRow = { text: "", subsection_id: "", flag: "green" };
+const TEXT_DRAFT_KEY = (clientId: string) => `add-data-text:${clientId}`;
 
 /**
  * "Инфа от клиента" — факты, присланные клиентом лично. Помечаются must-have
@@ -26,11 +29,13 @@ const EMPTY_ROW: DraftRow = { text: "", subsection_id: "", flag: "green" };
  */
 export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Props) {
   const qc = useQueryClient();
+  const [params] = useSearchParams();
   const subsectionOptions = (layers ?? []).flatMap(L =>
-    L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${s.name} (${L.name})` }))
+    L.subsections.map(s => ({ id: s.id, label: `${s.id} — ${subsectionNameRu(s.id, s.name)} (${layerNameRu(L.id, L.name)})` }))
   );
 
-  const [mode, setMode] = useState<"manual" | "file">("manual");
+  const initialMode = params.get("mode") === "file" ? "file" : "manual";
+  const [mode, setMode] = useState<"manual" | "file">(initialMode);
   const [sourceTitle, setSourceTitle] = useState("От клиента");
   const [done, setDone] = useState<{ written: number; firstSid?: string } | null>(null);
 
@@ -43,6 +48,14 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
 
   // ── manual mode ──────────────────────────────────────────────────────────
   const [rows, setRows] = useState<DraftRow[]>([{ ...EMPTY_ROW }]);
+  useEffect(() => {
+    if (params.get("prefill") !== "add-data") return;
+    const draft = localStorage.getItem(TEXT_DRAFT_KEY(clientId));
+    if (!draft) return;
+    setMode("manual");
+    setRows([{ ...EMPTY_ROW, text: draft }]);
+    localStorage.removeItem(TEXT_DRAFT_KEY(clientId));
+  }, [clientId, params]);
   const manualCommit = useMutation({
     mutationFn: (facts: DraftRow[]) => api.ingestClientFacts(clientId, sourceTitle.trim() || "От клиента", facts),
     onSuccess: (res) => {
@@ -88,40 +101,42 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
   const acceptedValid = (cands ?? []).filter((c, i) => accepted.has(i) && c.text.trim() && c.subsection_id).length;
 
   return (
-    <div className="max-w-3xl space-y-4">
-      <div>
+    <div className="p-5 max-w-[820px] mx-auto space-y-4">
+      <div className="space-y-1">
         <h2 className="text-lg font-semibold text-ink flex items-center gap-2">
           <span className="inline-block w-2.5 h-2.5 rounded-full bg-flag-blue" /> Инфа от клиента
         </h2>
         <p className="text-sm text-ink-mute mt-1">
-          Факты, присланные клиентом лично. Помечаются как <span className="text-flag-blue font-medium">★ must-have</span> (синий)
+          Факты, присланные клиентом лично. Помечаются как <span className="text-flag-blue font-medium">★ обязательные</span> (синий)
           и получают большой вес в Deliver. Канал — offline_interview, провенанс — название источника.
         </p>
       </div>
 
-      {/* mode toggle */}
-      <div className="inline-flex text-xs border border-ink-line rounded-lg overflow-hidden">
-        <button onClick={() => { setMode("manual"); setDone(null); }}
-          className={`px-3.5 py-1.5 ${mode === "manual" ? "bg-ink text-white" : "text-ink-mute hover:bg-ink/[0.04]"}`}>Вписать вручную</button>
-        <button onClick={() => { setMode("file"); setDone(null); }}
-          className={`px-3.5 py-1.5 ${mode === "file" ? "bg-ink text-white" : "text-ink-mute hover:bg-ink/[0.04]"}`}>Загрузить файл</button>
-      </div>
+      <div className="bg-white rounded-lg border border-ink-line p-5 space-y-4">
+        {/* mode toggle */}
+        <div className="inline-flex text-xs border border-ink-line rounded-xl overflow-hidden bg-[#f6f6f1]">
+          <button onClick={() => { setMode("manual"); setDone(null); }}
+            className={`px-3.5 py-1.5 transition ${mode === "manual" ? "bg-ink text-white" : "text-ink-mute hover:bg-white"}`}>Вписать вручную</button>
+          <button onClick={() => { setMode("file"); setDone(null); }}
+            className={`px-3.5 py-1.5 transition ${mode === "file" ? "bg-ink text-white" : "text-ink-mute hover:bg-white"}`}>Загрузить файл</button>
+        </div>
 
-      <label className="block">
-        <span className="text-xs text-ink-mute">Источник</span>
-        <input
-          value={sourceTitle}
-          onChange={e => setSourceTitle(e.target.value)}
-          placeholder="От клиента"
-          className="mt-1 w-full text-sm border border-ink-line rounded px-2 py-1.5 bg-white"
-        />
-      </label>
+        <label className="block space-y-2">
+          <span className="text-xs font-medium text-ink-mute">Источник</span>
+          <input
+            value={sourceTitle}
+            onChange={e => setSourceTitle(e.target.value)}
+            placeholder="От клиента"
+            className="w-full text-sm border border-ink-line rounded-xl px-3 py-2 bg-white"
+          />
+        </label>
+      </div>
 
       {mode === "manual" && (
         <>
           <div className="space-y-3">
             {rows.map((r, i) => (
-              <div key={i} className="border border-ink-line rounded-lg p-3 bg-white space-y-2">
+              <div key={i} className="bg-white rounded-lg border border-ink-line p-5 space-y-3">
                 <div className="flex items-start gap-2">
                   <span className="inline-block w-2 h-2 rounded-full bg-flag-blue mt-2 shrink-0" />
                   <textarea
@@ -129,7 +144,7 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
                     onChange={e => setRow(i, { text: e.target.value })}
                     placeholder="Текст факта от клиента…"
                     rows={2}
-                    className="flex-1 text-sm border border-ink-line rounded px-2 py-1.5 resize-y"
+                    className="flex-1 text-sm border border-ink-line rounded-xl px-3 py-2 resize-y"
                   />
                   {rows.length > 1 && (
                     <button
@@ -142,7 +157,7 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
                   <select
                     value={r.subsection_id}
                     onChange={e => setRow(i, { subsection_id: e.target.value })}
-                    className={`text-xs border border-ink-line rounded px-1.5 py-1 bg-white max-w-[22rem]
+                    className={`text-xs border border-ink-line rounded-xl px-2 py-1.5 bg-white max-w-[22rem]
                       ${r.subsection_id ? "text-ink" : "text-ink-mute"}`}
                   >
                     <option value="">— ячейка матрицы —</option>
@@ -151,11 +166,11 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
                   <select
                     value={r.flag}
                     onChange={e => setRow(i, { flag: e.target.value })}
-                    className="text-xs border border-ink-line rounded px-1.5 py-1 bg-white"
+                    className="text-xs border border-ink-line rounded-xl px-2 py-1.5 bg-white"
                   >
-                    <option value="green">green</option>
-                    <option value="red">red</option>
-                    <option value="grey">grey</option>
+                    <option value="green">факт</option>
+                    <option value="red">риск</option>
+                    <option value="grey">пробел</option>
                   </select>
                 </div>
               </div>
@@ -165,12 +180,12 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
           <div className="flex items-center gap-3">
             <button
               onClick={() => setRows(rs => [...rs, { ...EMPTY_ROW }])}
-              className="text-xs text-ink-mute hover:text-ink border border-ink-line rounded px-2.5 py-1.5"
+              className="text-xs text-ink-mute hover:text-ink border border-ink-line rounded-xl px-2.5 py-1.5"
             >+ ещё факт</button>
             <button
               onClick={() => manualCommit.mutate(manualValid)}
               disabled={manualValid.length === 0 || manualCommit.isPending}
-              className="text-sm bg-flag-blue text-white rounded px-4 py-1.5 disabled:opacity-40"
+              className="text-sm bg-flag-blue text-white rounded-xl px-4 py-2 disabled:opacity-40"
             >{manualCommit.isPending ? "Сохраняю…" : `Сохранить ${manualValid.length || ""} факт(ов)`}</button>
           </div>
           {manualCommit.isError && (
@@ -182,7 +197,7 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
       {mode === "file" && (
         <>
           {!cands && (
-            <div className="border border-dashed border-ink-line rounded-lg p-6 bg-white text-center space-y-3">
+            <div className="bg-white rounded-lg border border-ink-line p-5 text-center space-y-3">
               <p className="text-sm text-ink-mute">
                 Загрузите файл, который прислал клиент (PDF, в т.ч. скан). Распознаем автоматически
                 и разложим факты по матрице — вы проверите перед записью.
@@ -190,7 +205,7 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
               <input ref={fileRef} type="file" accept="application/pdf" className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; if (f) previewMut.mutate(f); e.target.value = ""; }} />
               <button onClick={() => fileRef.current?.click()} disabled={previewMut.isPending}
-                className="text-sm bg-ink text-white rounded px-4 py-2 disabled:opacity-40">
+                className="text-sm bg-ink text-white rounded-xl px-4 py-2 disabled:opacity-40">
                 {previewMut.isPending ? "Распознаю документ…" : "Выбрать PDF"}
               </button>
               {previewMut.isError && (
@@ -209,7 +224,7 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
                   className="text-xs text-ink-mute hover:text-ink">← другой файл</button>
               </div>
               {cands.length === 0 && (
-                <div className="text-sm text-ink-mute border border-ink-line rounded-lg p-4 bg-white">
+                <div className="text-sm text-ink-mute bg-white rounded-lg border border-ink-line p-5">
                   Из документа не извлеклось фактов. Попробуйте другой файл или впишите вручную.
                 </div>
               )}
@@ -222,14 +237,14 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
                       value={c.text}
                       onChange={e => setCand(i, { text: e.target.value })}
                       rows={2}
-                      className="flex-1 text-sm border border-ink-line rounded px-2 py-1.5 resize-y"
+                      className="flex-1 text-sm border border-ink-line rounded-xl px-3 py-2 resize-y"
                     />
                   </div>
                   <div className="flex items-center gap-2 pl-6">
                     <select
                       value={c.subsection_id}
                       onChange={e => setCand(i, { subsection_id: e.target.value })}
-                      className={`text-xs border border-ink-line rounded px-1.5 py-1 bg-white max-w-[22rem]
+                      className={`text-xs border border-ink-line rounded-xl px-2 py-1.5 bg-white max-w-[22rem]
                         ${c.subsection_id ? "text-ink" : "text-ink-mute"}`}
                     >
                       <option value="">— ячейка матрицы —</option>
@@ -238,11 +253,11 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
                     <select
                       value={c.flag}
                       onChange={e => setCand(i, { flag: e.target.value })}
-                      className="text-xs border border-ink-line rounded px-1.5 py-1 bg-white"
+                      className="text-xs border border-ink-line rounded-xl px-2 py-1.5 bg-white"
                     >
-                      <option value="green">green</option>
-                      <option value="red">red</option>
-                      <option value="grey">grey</option>
+                      <option value="green">факт</option>
+                      <option value="red">риск</option>
+                      <option value="grey">пробел</option>
                     </select>
                   </div>
                 </div>
@@ -251,7 +266,7 @@ export default function IngestClientFacts({ clientId, onJumpToCell, layers }: Pr
                 <button
                   onClick={() => fileCommit.mutate()}
                   disabled={acceptedValid === 0 || fileCommit.isPending}
-                  className="text-sm bg-flag-blue text-white rounded px-4 py-1.5 disabled:opacity-40"
+                  className="text-sm bg-flag-blue text-white rounded-xl px-4 py-2 disabled:opacity-40"
                 >{fileCommit.isPending ? "Вношу…" : `Внести ${acceptedValid || ""} синими в матрицу`}</button>
               )}
               {fileCommit.isError && (

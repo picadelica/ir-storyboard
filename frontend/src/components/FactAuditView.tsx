@@ -1,10 +1,30 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
+import { isFirstMaterialWorkTitle } from "../lib/workItemDisplay";
 import { readLS, patchLS } from "../persist";
 import { RunProgress, useElapsed } from "./RunProgress";
+import { HintTarget } from "./Hint";
 import FlagDot from "./FlagDot";
-import type { AuditResult, Entity, EntityFact, ReviewFact, DuplicateGroup, DupFact, AttribItem } from "../types";
+import {
+  MATRIX_BODY,
+  MATRIX_CELL,
+  MATRIX_CELL_ID,
+  MATRIX_CELL_IDLE,
+  MATRIX_CELL_SELECTED,
+  MATRIX_CELL_TITLE,
+  MATRIX_CELL_VALUE,
+  MATRIX_GRID,
+  MATRIX_HEADER,
+  MATRIX_LAYER_BADGE,
+  MATRIX_LAYER_COL,
+  MATRIX_LAYER_COLUMN_WIDTH,
+  MATRIX_PAGE,
+  MATRIX_PAGE_PADDING,
+  MATRIX_ROW,
+} from "./matrixFrame";
+import type { AuditResult, Entity, EntityFact, ReviewFact, DuplicateGroup, DupFact, AttribItem, Layer, PunchList, WorkItem } from "../types";
 
 // A merge the analyst formed on the left, staged on the right awaiting batch transfer.
 interface StagedCard {
@@ -35,12 +55,159 @@ function sourcePictogram(f: DupFact): { icon: string; suffix: string } {
   return { icon: "•", suffix: "" };
 }
 
+const EMPTY_ATTENTION = { bg: "#ffffff", fg: "#8B877C" } as const;
+
+const ATTENTION_PALETTE = [
+  { bg: "#ffffff", fg: "#8B877C" },
+  { bg: "#fff4dc", fg: "#7a520f" },
+  { bg: "#ffe6ae", fg: "#6e4408" },
+  { bg: "#ffd27a", fg: "#5d3304" },
+  { bg: "#f5b84e", fg: "#20221f" },
+  { bg: "#e59a2f", fg: "#20221f" },
+  { bg: "#cf7624", fg: "#ffffff" },
+  { bg: "#ad5522", fg: "#ffffff" },
+] as const;
+
+function steppedFill(count: number, maxCount: number, palette: typeof ATTENTION_PALETTE) {
+  if (count <= 0) return EMPTY_ATTENTION;
+  const scaleMax = maxCount > 0 ? maxCount * 0.8 : 0;
+  const ratio = scaleMax > 0 ? Math.max(0, Math.min(1, count / scaleMax)) : 0;
+  const step = 1 + Math.max(0, Math.min(palette.length - 2, Math.ceil(ratio * (palette.length - 1)) - 1));
+  return palette[step];
+}
+
+const ACTIVE_WORK_STATUSES = new Set(["queued", "in_progress", "needs_review"]);
+
+function ReviewMatrix({
+  layers,
+  reviewFacts,
+  punch,
+  workItems,
+  selectedSid,
+  onSelectCell,
+}: {
+  layers: Layer[];
+  reviewFacts: ReviewFact[];
+  punch?: PunchList;
+  workItems: WorkItem[];
+  selectedSid?: string;
+  onSelectCell: (sid: string) => void;
+}) {
+  if (!layers.length) return null;
+  const reviewBySid = new Map<string, ReviewFact[]>();
+  for (const fact of reviewFacts) {
+    const bucket = reviewBySid.get(fact.subsection_id) ?? [];
+    bucket.push(fact);
+    reviewBySid.set(fact.subsection_id, bucket);
+  }
+  const taskBySid = new Map<string, number>();
+  const emptyCellSids = new Set<string>();
+  const deepenWorkSids = new Set<string>();
+  const addTask = (sid?: string | null, n = 1) => {
+    if (!sid) return;
+    taskBySid.set(sid, (taskBySid.get(sid) ?? 0) + n);
+  };
+  for (const item of workItems) {
+    if (!ACTIVE_WORK_STATUSES.has(item.status) || !item.subsection_id) continue;
+    if (item.type === "deepen" || item.title.startsWith("Deepen:")) {
+      deepenWorkSids.add(item.subsection_id);
+    }
+  }
+  for (const c of punch?.empty_cells ?? []) {
+    emptyCellSids.add(c.subsection_id);
+    addTask(c.subsection_id);
+  }
+  for (const c of punch?.thinly_covered ?? []) {
+    if (!deepenWorkSids.has(c.subsection_id)) addTask(c.subsection_id);
+  }
+  for (const c of punch?.cells_with_known_gaps ?? []) addTask(c.subsection_id, Math.max(1, c.grey_facts.length));
+  for (const item of workItems) {
+    if (!ACTIVE_WORK_STATUSES.has(item.status)) continue;
+    if (item.subsection_id && emptyCellSids.has(item.subsection_id) && isFirstMaterialWorkTitle(item.title)) {
+      continue;
+    }
+    addTask(item.subsection_id);
+  }
+
+  const countFor = (sid: string) => (reviewBySid.get(sid)?.length ?? 0) + (taskBySid.get(sid) ?? 0);
+  const emptyOnlyFor = (sid: string) =>
+    emptyCellSids.has(sid) && (reviewBySid.get(sid)?.length ?? 0) === 0 && (taskBySid.get(sid) ?? 0) === 1;
+  const maxCount = Math.max(0, ...layers.flatMap(l => l.subsections.map(s => countFor(s.id))));
+  const palette = ATTENTION_PALETTE;
+  return (
+    <section className="h-full min-h-0 overflow-hidden">
+      <div
+        className={MATRIX_GRID}
+        style={{ gridTemplateRows: `repeat(${layers.length}, minmax(0, 1fr))` }}
+      >
+        {layers.map(layer => {
+          const layerName = layerNameRu(layer.id, layer.name);
+          return (
+            <div
+              key={layer.id}
+              className={MATRIX_ROW}
+              style={{ gridTemplateColumns: `${MATRIX_LAYER_COLUMN_WIDTH} repeat(${layer.subsections.length}, minmax(0, 1fr))` }}
+            >
+              <HintTarget
+                title={`${layer.id}. ${layerName}`}
+                body={`Крупный тематический уровень матрицы. В этой строке собраны позиции раздела «${layerName}».`}
+              >
+                <div className={MATRIX_LAYER_COL}>
+                  <span className={MATRIX_LAYER_BADGE}>{layer.id}</span>
+                </div>
+              </HintTarget>
+
+              {layer.subsections.map(subsection => {
+                const subsectionName = subsectionNameRu(subsection.id, subsection.name);
+                const count = countFor(subsection.id);
+                const fill = emptyOnlyFor(subsection.id) ? EMPTY_ATTENTION : steppedFill(count, maxCount, palette);
+                return (
+                  <button
+                    key={subsection.id}
+                    onClick={() => onSelectCell(subsection.id)}
+                    style={{ background: fill.bg }}
+                    className={`${MATRIX_CELL}
+                      ${selectedSid === subsection.id
+                        ? MATRIX_CELL_SELECTED
+                        : MATRIX_CELL_IDLE}`}
+                  >
+                    <div className="flex items-start justify-between gap-2 min-w-0">
+                      <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                        <span className={MATRIX_CELL_ID} style={{ color: fill.fg }}>{subsection.id}</span>
+                        <span className={MATRIX_CELL_TITLE} style={{ color: fill.fg }}>
+                          {subsectionName}
+                        </span>
+                      </div>
+                      <HintTarget
+                        title={`${subsection.id}. ${subsectionName}`}
+                        body={count > 0
+                          ? `${count} элементов требуют внимания: карточки на ревью, пробелы или открытые задачи.`
+                          : "В этой ячейке нет открытых вопросов проверки."}
+                      >
+                        <span className={MATRIX_CELL_VALUE} style={{ color: fill.fg }}>
+                          {count}
+                        </span>
+                      </HintTarget>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 interface Props {
   clientId: string;
   onJumpToCell: (sid: string) => void;
+  selectedSubsectionId?: string;
+  onSelectCell?: (sid: string) => void;
 }
 
-export default function FactAuditView({ clientId, onJumpToCell }: Props) {
+export default function FactAuditView({ clientId, onJumpToCell, selectedSubsectionId, onSelectCell }: Props) {
   const qc = useQueryClient();
 
   // LLM results persist in localStorage (keyed by client), not just component
@@ -55,6 +222,8 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   }>(lsKey);
   const [audit, setAudit] = useState<AuditResult | null>(saved.audit ?? null);
   const [dups, setDups] = useState<DuplicateGroup[] | null>(saved.dups ?? null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsRef = useRef<HTMLDivElement | null>(null);
   const dropFromAudit = (id: number) =>
     setAudit(prev => {
       const nx = prev ? { ...prev, facts: prev.facts.filter(f => f.id !== id) } : prev;
@@ -72,9 +241,21 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
     queryKey: ["entities", clientId],
     queryFn: () => api.entities(clientId),
   });
+  const layers = useQuery<Layer[]>({
+    queryKey: ["layers"],
+    queryFn: api.layers,
+  });
   const review = useQuery<ReviewFact[]>({
     queryKey: ["review-queue", clientId],
     queryFn: () => api.reviewQueue(clientId),
+  });
+  const punch = useQuery<PunchList>({
+    queryKey: ["punch", clientId],
+    queryFn: () => api.punchList(clientId),
+  });
+  const workItems = useQuery<WorkItem[]>({
+    queryKey: ["work-items", clientId],
+    queryFn: () => api.listWorkItems(clientId),
   });
 
   const invalidate = () => {
@@ -196,43 +377,99 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
   const auditElapsed = useElapsed(run.isPending);
   const dupsElapsed = useElapsed(findDups.isPending);
   const attribElapsed = useElapsed(findAttrib.isPending);
+  const scrollToDetails = () => {
+    const el = detailsRef.current;
+    if (!el) return;
+    const scroller = el.closest<HTMLElement>(".ir-workspace-scroll");
+    const keepMatrixPeek = 160;
+    if (scroller) {
+      const top = el.getBoundingClientRect().top
+        - scroller.getBoundingClientRect().top
+        + scroller.scrollTop
+        - keepMatrixPeek;
+      scroller.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      return;
+    }
+    window.scrollTo({
+      top: Math.max(0, window.scrollY + el.getBoundingClientRect().top - keepMatrixPeek),
+      behavior: "smooth",
+    });
+  };
+  const toggleDetails = () => {
+    if (detailsOpen) {
+      setDetailsOpen(false);
+      return;
+    }
+    setDetailsOpen(true);
+    window.setTimeout(scrollToDetails, 60);
+  };
 
   return (
-    <div className="p-5 space-y-5">
-      <div className="flex items-baseline justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Проверка фактов</h2>
-          <p className="text-xs text-ink-mute mt-0.5">
-            Скептический аудит research-фактов: склейка сущностей, мис-атрибуция, выдумка.
-          </p>
+    <div className={MATRIX_PAGE}>
+      <div className={`${MATRIX_PAGE_PADDING} h-full min-h-0 shrink-0 flex flex-col`}>
+        <div className={MATRIX_HEADER}>
+          <div className="flex items-center gap-2">
+            <HintTarget
+              title="Матрица проверки"
+              body={"Единая карта всего, что требует внимания.\nСуммирует карточки на ревью, пустые/тонкие ячейки, известные пробелы и открытые рабочие задачи."}
+            >
+              <span className="text-[12px] text-ink-mute">что требует внимания</span>
+            </HintTarget>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <HintTarget title="Найти дубли" body="Ищет похожие факты, которые можно объединить в одну более чистую карточку.">
+              <button
+                onClick={() => findDups.mutate()}
+                disabled={findDups.isPending}
+                className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50"
+              >
+                {findDups.isPending ? "Ищу дубли…" : "Найти дубли"}
+              </button>
+            </HintTarget>
+            <HintTarget title="Проверить спикеров" body="Ищет обезличенные формулировки вроде «фаундер считает…» и помогает заменить их конкретным именем.">
+              <button
+                onClick={() => findAttrib.mutate()}
+                disabled={findAttrib.isPending}
+                className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50"
+              >
+                {findAttrib.isPending ? "Ищу…" : "Проверить спикеров"}
+              </button>
+            </HintTarget>
+            <HintTarget title="Аудит сущностей" body="Скептическая проверка: склейка сущностей, неверная атрибуция, спорные утверждения и возможная выдумка.">
+              <button
+                onClick={() => run.mutate()}
+                disabled={run.isPending}
+                className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50"
+              >
+                {run.isPending ? "Проверяю…" : "Аудит сущностей"}
+              </button>
+            </HintTarget>
+            <HintTarget title="Подробные списки" body="Временная страховочная зона со старыми списками проверки. Матрица выше остаётся главным рабочим объектом.">
+              <button
+                onClick={toggleDetails}
+                className="text-xs px-3 py-1.5 border border-ink-line rounded bg-white hover:bg-slate-50"
+              >
+                Подробные списки {detailsOpen ? "▴" : "▾"}
+              </button>
+            </HintTarget>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => findDups.mutate()}
-            disabled={findDups.isPending}
-            className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50"
-          >
-            {findDups.isPending ? "Ищу дубли…" : "Найти дубли"}
-          </button>
-          <button
-            onClick={() => findAttrib.mutate()}
-            disabled={findAttrib.isPending}
-            title="Найти факты с обезличенным субъектом («фаундер считает…») и проставить имя"
-            className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50"
-          >
-            {findAttrib.isPending ? "Ищу…" : "Проверить спикеров"}
-          </button>
-          <button
-            onClick={() => run.mutate()}
-            disabled={run.isPending}
-            title="Скептический аудит: склейка сущностей, мис-атрибуция, выдумка"
-            className="text-xs px-3 py-1.5 border border-ink-line rounded hover:bg-slate-50 disabled:opacity-50"
-          >
-            {run.isPending ? "Проверяю…" : "Аудит сущностей"}
-          </button>
+
+        <div className={MATRIX_BODY}>
+          <ReviewMatrix
+            layers={layers.data ?? []}
+            reviewFacts={review.data ?? []}
+            punch={punch.data}
+            workItems={workItems.data ?? []}
+            selectedSid={selectedSubsectionId}
+            onSelectCell={onSelectCell ?? (() => {})}
+          />
         </div>
       </div>
 
+      {detailsOpen && (
+        <div ref={detailsRef} className="max-w-[820px] mx-auto px-5 pb-5 space-y-5">
       <RunProgress active={run.isPending} elapsed={auditElapsed} label="Проверяю факты на склейку сущностей…" />
       <RunProgress active={findDups.isPending} elapsed={dupsElapsed} label="Ищу дубли фактов…" />
       <RunProgress active={findAttrib.isPending} elapsed={attribElapsed} label="Ищу обезличенные формулировки…" />
@@ -543,6 +780,8 @@ export default function FactAuditView({ clientId, onJumpToCell }: Props) {
             </ul>
           )}
         </section>
+      )}
+        </div>
       )}
     </div>
   );

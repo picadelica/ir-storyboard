@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
+import { subsectionNameRu } from "../lib/matrixLabels";
 import type { SearchHit } from "../types";
 import FlagDot from "./FlagDot";
+import { HintTarget } from "./Hint";
 
 /** Поиск по фактам: в шапке — только иконка-лупа; по клику (или Cmd/Ctrl+K)
  *  открывается модалка с полем, переключателем охвата и результатами. */
@@ -22,13 +24,15 @@ export default function SearchBox({ clientId }: { clientId: string }) {
 
   return (
     <>
-      <button onClick={() => setOpen(true)} title="Поиск фактов (⌘K)" aria-label="Поиск"
-        className="w-8 h-8 grid place-items-center rounded-lg text-ink-mute hover:text-ink hover:bg-ink/[0.04] transition">
-        <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
-          <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" />
-          <path d="M14 14l3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-        </svg>
-      </button>
+      <HintTarget title="Поиск" body="Быстрый поиск по фактам. Горячая клавиша: ⌘K / Ctrl+K.">
+        <button onClick={() => setOpen(true)} aria-label="Поиск"
+          className="w-10 h-10 grid place-items-center rounded-xl border border-transparent text-ink-mute hover:text-ink hover:bg-[#f6f6f1] hover:border-ink-line transition">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+            <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M14 14l3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </button>
+      </HintTarget>
       {open && <SearchModal clientId={clientId} onClose={() => setOpen(false)} />}
     </>
   );
@@ -61,23 +65,25 @@ function SearchModal({ clientId, onClose }: { clientId: string; onClose: () => v
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/30 flex items-start justify-center pt-24 px-4" onClick={onClose}>
-      <div className="w-full max-w-xl bg-white rounded-xl border border-ink-line shadow-xl overflow-hidden"
+      <div className="w-full max-w-xl bg-white rounded-2xl border border-ink-line shadow-xl overflow-hidden"
         onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-2 px-3 border-b border-ink-line">
+        <div className="flex items-center gap-2 px-4 border-b border-ink-line">
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" className="text-ink-mute shrink-0">
             <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" />
             <path d="M14 14l3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
           </svg>
           <input ref={inputRef} value={raw} onChange={e => setRaw(e.target.value)}
             placeholder="Поиск фактов…"
-            className="flex-1 py-3 text-sm outline-none placeholder:text-ink-mute/70" />
-          <div className="flex items-center rounded-lg border border-ink-line overflow-hidden text-[11px] shrink-0">
-            <button onClick={() => setScope("client")}
-              className={`px-2 py-1 transition ${scope === "client" ? "bg-ink text-white" : "text-ink-mute hover:text-ink"}`}
-              title="искать в текущей компании">эта</button>
-            <button onClick={() => setScope("all")}
-              className={`px-2 py-1 transition ${scope === "all" ? "bg-ink text-white" : "text-ink-mute hover:text-ink"}`}
-              title="искать по всем компаниям">все</button>
+            className="flex-1 py-4 text-sm outline-none placeholder:text-ink-mute/70" />
+          <div className="flex items-center rounded-xl border border-ink-line overflow-hidden text-[11px] shrink-0 bg-[#f6f6f1]">
+            <HintTarget title="Искать здесь" body="Искать только внутри текущей компании.">
+              <button onClick={() => setScope("client")}
+                className={`px-2.5 py-1.5 transition ${scope === "client" ? "bg-ink text-white font-semibold" : "text-ink-mute hover:text-ink hover:bg-white"}`}>эта</button>
+            </HintTarget>
+            <HintTarget title="Искать везде" body="Искать по всем компаниям в базе.">
+              <button onClick={() => setScope("all")}
+                className={`px-2.5 py-1.5 transition ${scope === "all" ? "bg-ink text-white font-semibold" : "text-ink-mute hover:text-ink hover:bg-white"}`}>все</button>
+            </HintTarget>
           </div>
         </div>
 
@@ -95,13 +101,13 @@ function SearchModal({ clientId, onClose }: { clientId: string; onClose: () => v
             <ul className="divide-y divide-ink-line/60">
               {hits.map(h => (
                 <li key={`${h.client_id}-${h.fact_id}`}>
-                  <button onClick={() => pick(h)} className="w-full text-left px-3 py-2 hover:bg-slate-50 transition">
+                  <button onClick={() => pick(h)} className="w-full text-left px-4 py-2.5 hover:bg-[#f6f6f1] transition">
                     <div className="flex items-center gap-1.5 text-[10px] text-ink-mute mb-0.5">
                       <FlagDot flag={h.flag} size={8} />
                       {scope === "all" && <span className="font-medium text-ink">{h.client_name}</span>}
                       {scope === "all" && <span>·</span>}
                       <span className="font-mono">{h.subsection_id}</span>
-                      <span className="truncate">{h.subsection_name}</span>
+                      <span className="truncate">{subsectionNameRu(h.subsection_id, h.subsection_name)}</span>
                       {h.state === "review" && <span className="text-amber-700">· черновик</span>}
                     </div>
                     {h.title && <div className="text-[13px] font-semibold text-ink leading-tight">{highlight(h.title, q)}</div>}

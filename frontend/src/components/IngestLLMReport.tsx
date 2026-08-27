@@ -1,6 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { subsectionNameRu } from "../lib/matrixLabels";
 import type { LLMIngestEdit, LLMIngestPreview, LLMResolvedFact } from "../types";
 import FlagDot from "./FlagDot";
 
@@ -31,8 +33,10 @@ const FLAG_COLORS: Record<string, string> = {
 };
 
 type PdfCand = { text: string; subsection_id: string; subsection_name: string; flag: string; rationale: string };
+const TEXT_DRAFT_KEY = (clientId: string) => `add-data-text:${clientId}`;
 
 export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
+  const [params] = useSearchParams();
   const [screen, setScreen] = useState<"upload" | "preview" | "done">("upload");
   const [preview, setPreview] = useState<LLMIngestPreview | null>(null);
   const [edits, setEdits] = useState<Record<number, LLMIngestEdit>>({});
@@ -58,11 +62,22 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
 
   // ── "Промпт + ответ" mode: generate a deep-research prompt, run it externally,
   // paste the answer back (parsed by the same pipeline as an uploaded file).
-  const [mode, setMode] = useState<"file" | "prompt" | "pdf">("file");
+  const rawMode = params.get("mode");
+  const initialMode = rawMode === "prompt" || rawMode === "pdf" ? rawMode : "file";
+  const [mode, setMode] = useState<"file" | "prompt" | "pdf">(initialMode);
   const [promptAgent, setPromptAgent] = useState("chatgpt");
   const [promptText, setPromptText] = useState("");
   const [answer, setAnswer] = useState("");
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (params.get("prefill") !== "add-data") return;
+    const draft = localStorage.getItem(TEXT_DRAFT_KEY(clientId));
+    if (!draft) return;
+    setMode("prompt");
+    setAnswer(draft);
+    localStorage.removeItem(TEXT_DRAFT_KEY(clientId));
+  }, [clientId, params]);
 
   const genPrompt = useMutation({
     mutationFn: () => api.llmReportPrompt(clientId, promptAgent),
@@ -152,12 +167,12 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
 
   if (screen === "upload") {
     return (
-      <div className="p-5 max-w-2xl space-y-6">
+      <div className="p-5 max-w-[820px] mx-auto space-y-4">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-lg font-semibold">Ingest LLM Report</h2>
+          <h2 className="text-lg font-semibold">Загрузка LLM-отчёта</h2>
           {history.data && history.data.length > 0 && (
             <span className="text-xs text-ink-mute">
-              {history.data.length} previous ingest{history.data.length !== 1 ? "s" : ""}
+              Предыдущих загрузок: {history.data.length}
             </span>
           )}
         </div>
@@ -176,7 +191,7 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
           <>
             {/* Agent selector */}
             <div>
-              <label className="block text-xs font-medium text-ink-mute mb-1.5">LLM Agent</label>
+              <label className="block text-xs font-medium text-ink-mute mb-1.5">LLM-агент</label>
               <div className="flex flex-wrap gap-2">
                 {AGENT_OPTIONS.map(opt => (
                   <button key={opt.value} onClick={() => setAgentHint(opt.value)}
@@ -201,10 +216,10 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
               <input ref={fileRef} type="file" accept=".docx,.md,.txt,.pdf" className="hidden"
                 onChange={e => handleFile(e.target.files?.[0])} />
               {analyzeMut.isPending ? (
-                <div className="text-sm text-ink-mute">Analysing document…</div>
+                <div className="text-sm text-ink-mute">Анализирую документ…</div>
               ) : (
                 <>
-                  <div className="text-sm font-medium text-ink mb-1">Drop file here or click to browse</div>
+                  <div className="text-sm font-medium text-ink mb-1">Перетащите файл сюда или кликните для выбора</div>
                   <div className="text-xs text-ink-mute">.docx · .md · .txt · .pdf</div>
                 </>
               )}
@@ -233,7 +248,7 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
               <div className="space-y-1.5">
                 <div className="flex items-baseline justify-between">
                   <span className="text-xs font-medium text-ink-mute">1. Скопируй промпт в {PROMPT_AGENTS.find(a => a.value === promptAgent)?.label}</span>
-                  <button onClick={copyPrompt} className="text-[11px] text-blue-600 hover:underline">{copied ? "Скопировано ✓" : "Copy"}</button>
+                  <button onClick={copyPrompt} className="text-[11px] text-blue-600 hover:underline">{copied ? "Скопировано ✓" : "Копировать"}</button>
                 </div>
                 <textarea readOnly value={promptText} rows={8}
                   className="w-full text-xs font-mono border border-ink-line rounded px-2.5 py-2 bg-slate-50 leading-relaxed" />
@@ -298,7 +313,7 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
                           <input type="checkbox" checked={pdfAccepted.has(i)} onChange={() => togglePdf(i)} className="mt-1" />
                           <span className="text-[10px] font-mono text-ink-mute border border-ink-line rounded px-1 shrink-0">{c.subsection_id}</span>
                           <FlagDot flag={c.flag as "green" | "red" | "grey"} className="mt-1.5 shrink-0" />
-                          <span className="flex-1">{c.text}<span className="text-[11px] text-ink-mute"> · {c.subsection_name}</span></span>
+                          <span className="flex-1">{c.text}<span className="text-[11px] text-ink-mute"> · {subsectionNameRu(c.subsection_id, c.subsection_name)}</span></span>
                         </li>
                       ))}
                     </ul>
@@ -321,15 +336,15 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
         {history.data && history.data.length > 0 && (
           <div>
             <div className="text-xs font-medium text-ink-mute mb-2 uppercase tracking-wide">
-              Previous ingests
+              История загрузок
             </div>
             <table className="w-full text-xs">
               <thead className="text-[10px] text-ink-mute uppercase">
                 <tr>
-                  <th className="text-left py-1 pr-3">Date</th>
-                  <th className="text-left py-1 pr-3">Agent</th>
-                  <th className="text-right py-1 pr-3">Facts</th>
-                  <th className="text-right py-1">Greys</th>
+                  <th className="text-left py-1 pr-3">Дата</th>
+                  <th className="text-left py-1 pr-3">Агент</th>
+                  <th className="text-right py-1 pr-3">Факты</th>
+                  <th className="text-right py-1">Пробелы</th>
                 </tr>
               </thead>
               <tbody>
@@ -356,19 +371,17 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
   if (screen === "done" && commitMut.data) {
     const r = commitMut.data;
     return (
-      <div className="p-5 max-w-2xl space-y-4">
+      <div className="p-5 max-w-[820px] mx-auto space-y-4">
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
           <div className="font-semibold text-emerald-800 mb-1">
-            Saved to matrix
+            Сохранено в матрицу
           </div>
           <div className="text-sm text-emerald-700">
-            {r.committed_facts} fact{r.committed_facts !== 1 ? "s" : ""} ·{" "}
-            {r.committed_sources} source{r.committed_sources !== 1 ? "s" : ""} ·{" "}
-            {r.skipped_facts} skipped (already existed)
+            Фактов: {r.committed_facts} · источников: {r.committed_sources} · пропущено: {r.skipped_facts} (уже существовали)
           </div>
           {(r.held_facts ?? 0) > 0 && (
             <div className="text-sm text-amber-700 mt-1">
-              {r.held_facts} придержано воротами — см. Health → «Проверка фактов»
+              {r.held_facts} придержано воротами — см. «Проверка» → «Проверка фактов»
             </div>
           )}
         </div>
@@ -377,13 +390,13 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
             onClick={() => onJumpToCell(preview?.facts[0]?.subsection_id ?? "6.1")}
             className="px-4 py-2 text-sm bg-ink text-white rounded hover:bg-ink/90"
           >
-            View in Matrix
+            Открыть в матрице
           </button>
           <button
             onClick={() => { setScreen("upload"); setPreview(null); analyzeMut.reset(); commitMut.reset(); }}
             className="px-4 py-2 text-sm border border-ink-line rounded hover:bg-slate-50"
           >
-            Ingest another
+            Загрузить ещё
           </button>
         </div>
       </div>
@@ -395,20 +408,20 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
   if (!preview) return null;
 
   return (
-    <div className="p-5 max-w-4xl space-y-6">
+    <div className="p-5 max-w-[820px] mx-auto space-y-4">
       <div className="flex items-baseline justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Preview</h2>
+          <h2 className="text-lg font-semibold">Предпросмотр</h2>
           <div className="text-xs text-ink-mute mt-0.5">
-            Agent: {preview.detected_agent ?? "unknown"} ·{" "}
-            {preview.facts.length} facts · {preview.sources.length} sources
+            Агент: {preview.detected_agent ?? "не определён"} ·{" "}
+            фактов: {preview.facts.length} · источников: {preview.sources.length}
           </div>
         </div>
         <button
           onClick={() => { setScreen("upload"); analyzeMut.reset(); }}
           className="text-xs text-ink-mute hover:text-ink"
         >
-          ← Back
+          ← Назад
         </button>
       </div>
 
@@ -416,7 +429,7 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
       {preview.notes.length > 0 && (
         <details className="text-xs text-ink-mute">
           <summary className="cursor-pointer hover:text-ink">
-            {preview.notes.length} parser note{preview.notes.length !== 1 ? "s" : ""}
+            Заметки парсера: {preview.notes.length}
           </summary>
           <ul className="mt-1 space-y-0.5 pl-3">
             {preview.notes.map((n, i) => <li key={i}>— {n}</li>)}
@@ -432,7 +445,7 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
           return (
             <>
               <div className="text-xs font-medium uppercase text-ink-mute tracking-wide mb-2">
-                Sources ({usable.length}{empty > 0 ? ` + ${empty} without URL` : ""})
+                Источники ({usable.length}{empty > 0 ? ` + ${empty} без URL` : ""})
               </div>
               <div className="space-y-1">
                 {usable.map(s => (
@@ -482,7 +495,7 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
         <div className="flex items-center gap-3">
           <input
             type="email"
-            placeholder="your@email.com"
+            placeholder="ваш@email.com"
             value={expertEmail}
             onChange={e => setExpertEmail(e.target.value)}
             className="flex-1 text-sm border border-ink-line rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-ink"
@@ -502,7 +515,7 @@ export default function IngestLLMReport({ clientId, onJumpToCell }: Props) {
           </button>
         </div>
         {keptCount === 0 && (
-          <div className="text-xs text-red-600">Drop all facts — nothing to commit</div>
+          <div className="text-xs text-red-600">Все факты сняты — нечего сохранять</div>
         )}
         {commitMut.isError && (
           <div className="text-xs text-red-600">{String(commitMut.error)}</div>
@@ -543,14 +556,14 @@ function FactCard({ idx, fact, action, onAction }: FactCardProps) {
           {fact.flag === "red" && (
             fact.rationale
               ? <div className="mt-1 text-xs border-l-2 border-flag-red/60 text-flag-red pl-2 leading-snug">
-                  <span className="font-medium uppercase tracking-wide text-[10px] mr-1">concern:</span>
+                  <span className="font-medium uppercase tracking-wide text-[10px] mr-1">риск:</span>
                   {fact.rationale}
                 </div>
               : <div className="mt-1 text-xs italic text-amber-600">⚠ Concern: (не указано)</div>
           )}
           {fact.flag === "grey" && fact.rationale && (
             <div className="mt-1 text-xs border-l-2 border-slate-300 text-ink-mute pl-2 leading-snug">
-              <span className="font-medium uppercase tracking-wide text-[10px] mr-1">gap:</span>
+              <span className="font-medium uppercase tracking-wide text-[10px] mr-1">пробел:</span>
               {fact.rationale}
             </div>
           )}

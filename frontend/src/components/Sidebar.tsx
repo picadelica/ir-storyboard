@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
+import { HintTarget } from "./Hint";
 import type { Client } from "../types";
 
 interface Props {
@@ -14,7 +15,112 @@ const SCOPE_KEY = "ir-client-scope";
 const SLUG_RE = /^[a-z0-9-]+$/;
 
 function monogram(name: string): string {
-  return name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  return name
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "—";
+}
+
+function clientHintBody(client: Client): string {
+  const sector = client.sector?.trim();
+  const description = client.one_liner?.trim() || client.notes?.trim();
+  if (sector && description) return `${sector} · ${description}`;
+  if (description) return description;
+  if (sector) return sector;
+  return "";
+}
+
+function SidebarScrollArea({
+  children,
+  className = "",
+  contentClassName = "",
+}: {
+  children: ReactNode;
+  className?: string;
+  contentClassName?: string;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [thumb, setThumb] = useState({ show: false, top: 0, height: 0 });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const update = () => {
+      const { scrollHeight, clientHeight, scrollTop } = el;
+      const show = scrollHeight > clientHeight + 1;
+      if (!show) {
+        setThumb({ show: false, top: 0, height: 0 });
+        return;
+      }
+
+      const height = Math.max(28, (clientHeight / scrollHeight) * clientHeight);
+      const maxTop = clientHeight - height;
+      const top = maxTop <= 0 ? 0 : (scrollTop / (scrollHeight - clientHeight)) * maxTop;
+      setThumb({ show: true, top, height });
+    };
+
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+
+    return () => {
+      el.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      ro.disconnect();
+    };
+  }, [children]);
+
+  return (
+    <div className={`relative min-h-0 ${className}`}>
+      <div ref={ref} className={`ir-native-scroll-hidden h-full overflow-y-auto ${contentClassName}`}>
+        {children}
+      </div>
+      {thumb.show && (
+        <div className="pointer-events-none absolute right-1 top-0 bottom-0 w-[3px]">
+          <div
+            className="ir-custom-scroll-thumb pointer-events-auto absolute right-0 w-[3px] rounded-full"
+            style={{ top: thumb.top, height: thumb.height }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClientMark({ client, active = false, compact = false }: { client: Client; active?: boolean; compact?: boolean }) {
+  const logo = (client as Client & { logo?: string | null }).logo;
+  const size = compact ? "w-10 h-10" : "w-9 h-9";
+
+  if (logo) {
+    return (
+      <span
+        className={`${size} shrink-0 rounded-full overflow-hidden bg-[#f0f1ea] ring-1 ring-white/10 flex items-center justify-center`}
+      >
+        <img src={logo} alt="" className="w-full h-full object-cover" />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={`${size} shrink-0 rounded-full flex items-center justify-center text-[12px] font-black select-none transition
+        ${active
+          ? "bg-[#c9ff55] text-[#20221f]"
+          : compact
+            ? "bg-[#20221f] text-[#c9ff55] border border-[#c9ff55]/70"
+            : "bg-[#f0f1ea] text-ink"}`}
+    >
+      {monogram(client.name)}
+    </span>
+  );
 }
 
 interface ClientDrawerProps {
@@ -174,14 +280,14 @@ function ClientDrawer({ mode, initial, onClose, onSaved }: ClientDrawerProps) {
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div className="relative ml-auto w-[420px] h-full bg-white shadow-xl flex flex-col">
         <div className="px-5 py-4 border-b border-ink-line flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{isEdit ? "Edit client" : "New client"}</h2>
+          <h2 className="text-sm font-semibold">{isEdit ? "Редактировать клиента" : "Новый клиент"}</h2>
           <button onClick={onClose} className="text-ink-mute hover:text-ink text-lg leading-none">×</button>
         </div>
 
         {isEdit && initial && (initial.created_at || initial.created_by) && (
           <div className="px-5 py-2 bg-slate-50 border-b border-ink-line text-xs text-ink-mute font-mono leading-snug">
-            <div>Created: {(initial.created_at ?? "—").slice(0, 19).replace("T", " ")}</div>
-            <div>Created by: {initial.created_by ?? "—"}</div>
+            <div>Создано: {(initial.created_at ?? "—").slice(0, 19).replace("T", " ")}</div>
+            <div>Создал: {initial.created_by ?? "—"}</div>
           </div>
         )}
 
@@ -469,12 +575,6 @@ export default function Sidebar({ clientId }: Props) {
     try { localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0"); } catch { /* noop */ }
   }, [collapsed]);
 
-  // Auto-hide the clients column when a company is selected — the name moves to
-  // the top bar, the workspace gets the room. Re-expand stays one click away.
-  useEffect(() => {
-    if (clientId) setCollapsed(true);
-  }, [clientId]);
-
   const [showHidden, setShowHidden] = useState(false);   // админ: показать скрытые компании
   const clients = useQuery({ queryKey: ["clients", showHidden], queryFn: () => api.listClients(showHidden) });
   const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: api.clientsPortfolio });
@@ -505,130 +605,191 @@ export default function Sidebar({ clientId }: Props) {
   });
 
   if (collapsed) {
+    const compactClients = (clients.data ?? []).filter(
+      c => scope === "all" || !me.data?.auth || covMap.get(c.id)?.mine);
     return (
-      <aside className="w-10 shrink-0 border-r border-ink-line bg-white flex flex-col items-center py-2">
-        <button
-          onClick={() => setCollapsed(false)}
-          className="w-8 h-8 flex items-center justify-center rounded hover:bg-slate-100 text-ink-mute hover:text-ink"
-          title="Expand client list"
-          aria-label="Expand client list"
-        >»</button>
-      </aside>
+      <>
+        <aside className="ir-sidebar-scroll-scope w-16 h-full min-h-0 shrink-0 overflow-hidden border-r border-[#1c1e1b] bg-[#292c28] flex flex-col items-center py-3 transition-[width] duration-300 ease-out">
+          <div className="w-16 min-h-0 flex-1 flex flex-col items-center animate-[ir-sidebar-content-in_160ms_ease-out]">
+            <button
+              onClick={() => setCollapsed(false)}
+              className="w-10 h-10 flex items-center justify-center rounded-[14px] overflow-hidden hover:brightness-110"
+              aria-label="Раскрыть список компаний"
+            >
+              <img src="/favicon.svg" alt="" className="w-10 h-10 block" />
+            </button>
+
+            <div className="my-3 h-px w-8 bg-white/10" />
+
+            <SidebarScrollArea className="flex-1 w-full" contentClassName="px-2 space-y-2">
+              {clients.isLoading && (
+                <div className="mx-auto w-10 h-10 rounded-full border border-white/15 animate-pulse" />
+              )}
+              {compactClients.map(c => {
+                const active = clientId === c.id;
+                return (
+                  <HintTarget
+                    key={c.id}
+                    title={c.name}
+                    body={clientHintBody(c)}
+                  >
+                    <Link
+                      to={`/clients/${c.id}/${tab ?? "matrix"}`}
+                      className={`relative flex items-center justify-center rounded-2xl py-1 transition
+                        ${active ? "" : "hover:bg-white/5"}`}
+                    >
+                      <ClientMark client={c} active={active} compact />
+                    </Link>
+                  </HintTarget>
+                );
+              })}
+            </SidebarScrollArea>
+
+            <button
+              onClick={() => setShowNewClient(true)}
+              className="mt-3 w-10 h-10 rounded-full border border-white/15 text-white/70 hover:text-[#c9ff55] hover:border-[#c9ff55]/50 font-bold"
+              aria-label="Добавить компанию"
+            >+</button>
+          </div>
+        </aside>
+
+        {showNewClient && (
+          <ClientDrawer
+            mode="create"
+            onClose={() => setShowNewClient(false)}
+            onSaved={(id) => {
+              setShowNewClient(false);
+              nav(`/clients/${id}/matrix`);
+            }}
+          />
+        )}
+        {editingClient && (
+          <ClientDrawer
+            mode="edit"
+            initial={editingClient}
+            onClose={() => setEditingClient(null)}
+            onSaved={() => setEditingClient(null)}
+          />
+        )}
+      </>
     );
   }
 
   return (
     <>
-      <aside className="w-60 shrink-0 border-r border-ink-line bg-white flex flex-col">
-        <div className="px-3 py-2 border-b border-ink-line flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase text-ink-mute tracking-wide">Clients</div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setShowNewClient(true)}
-              className="text-xs text-blue-600 hover:text-blue-800 font-medium px-1"
-              title="Add new client"
-            >+ New</button>
-            <button
-              onClick={() => setCollapsed(true)}
-              className="text-ink-mute hover:text-ink px-1 rounded hover:bg-slate-100"
-              title="Collapse sidebar"
-              aria-label="Collapse sidebar"
-            >«</button>
-          </div>
-        </div>
-
-        {me.data?.auth && (clients.data?.length ?? 0) > 0 && (
-          <div className="px-3 py-2 border-b border-ink-line">
-            <div className="flex items-center rounded-lg border border-ink-line overflow-hidden text-[11px]">
+      <aside className="ir-sidebar-scroll-scope w-72 h-full min-h-0 shrink-0 overflow-hidden border-r border-[#1c1e1b] bg-[#292c28] flex flex-col transition-[width] duration-300 ease-out">
+        <div className="w-72 min-h-0 flex-1 flex flex-col animate-[ir-sidebar-content-in_160ms_ease-out]">
+          <div className="px-4 py-4 border-b border-white/10 flex items-center justify-between bg-[#292c28]">
+            <div className="min-w-0 flex items-center gap-3">
+              <img src="/favicon.svg" alt="" className="w-10 h-10 rounded-[14px] shrink-0" />
+              <div className="min-w-0">
+                <div className="text-[17px] font-bold text-white leading-tight">IR Storyboard</div>
+                <div className="text-xs text-white/55 leading-tight">Клиенты и матрицы</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
               <button
-                onClick={() => setScope("mine")}
-                className={`flex-1 py-1 transition ${scope === "mine" ? "bg-ink text-white font-medium" : "text-ink-mute hover:text-ink"}`}
-              >Мои</button>
+                onClick={() => setShowNewClient(true)}
+                className="w-8 h-8 rounded-full border border-white/15 bg-white/5 text-white hover:text-[#c9ff55] hover:border-[#c9ff55]/50 font-bold"
+                aria-label="Добавить компанию"
+              >+</button>
               <button
-                onClick={() => setScope("all")}
-                className={`flex-1 py-1 transition ${scope === "all" ? "bg-ink text-white font-medium" : "text-ink-mute hover:text-ink"}`}
-              >Все</button>
+                onClick={() => setCollapsed(true)}
+                className="w-8 h-8 rounded-full text-white/50 hover:text-white hover:bg-white/5"
+                aria-label="Свернуть панель"
+              >«</button>
             </div>
           </div>
-        )}
 
-        <div className="flex-1 overflow-y-auto px-2 py-2">
-          {clients.isLoading && <div className="text-xs text-ink-mute px-1 py-1">Loading…</div>}
-          {clients.data && clients.data.length === 0 && (
-            <button
-              onClick={() => seedAcc.mutate()}
-              className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-slate-100 text-blue-600"
-            >+ Загрузить пилот (Accumulator)</button>
+          {me.data?.auth && (clients.data?.length ?? 0) > 0 && (
+            <div className="px-4 py-3 border-b border-white/10 bg-[#292c28]">
+              <div className="flex items-center rounded-xl border border-white/10 overflow-hidden text-[12px] bg-black/15">
+                <button
+                  onClick={() => setScope("mine")}
+                  className={`flex-1 py-2 transition ${scope === "mine" ? "bg-[#c9ff55] text-[#20221f] font-semibold" : "text-white/55 hover:text-white hover:bg-white/5"}`}
+                >Мои</button>
+                <button
+                  onClick={() => setScope("all")}
+                  className={`flex-1 py-2 transition ${scope === "all" ? "bg-[#c9ff55] text-[#20221f] font-semibold" : "text-white/55 hover:text-white hover:bg-white/5"}`}
+                >Все</button>
+              </div>
+            </div>
           )}
-          {(() => {
-            const list = (clients.data ?? []).filter(
-              c => scope === "all" || !me.data?.auth || covMap.get(c.id)?.mine);
-            if (me.data?.auth && scope === "mine" && list.length === 0 && (clients.data?.length ?? 0) > 0) {
-              return <div className="text-xs text-ink-mute px-2 py-2 leading-snug">
-                Пока нет «моих». Отметь компанию звёздочкой ★ (наведи на строку) или переключись на «Все».
-              </div>;
-            }
-            return (
-              <ul className="space-y-1">
-                {list.map(c => {
-                  const active = clientId === c.id;
-                  const p = covMap.get(c.id);
-                  const pct = p && p.total ? Math.round((p.covered / p.total) * 100) : 0;
-                  const mine = !!p?.mine;
-                  return (
-                    <li key={c.id} className="group relative">
-                      <Link
-                        to={`/clients/${c.id}/${tab ?? "matrix"}`}
-                        className={`flex items-center gap-2.5 px-2 py-2 pr-12 rounded-lg transition
-                          ${active ? "bg-ink/[0.06]" : "hover:bg-ink/[0.03]"}`}
-                        title={c.name}
-                      >
-                        <span className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-[11px] font-semibold select-none
-                          ${active ? "bg-ink text-white" : "bg-ink/[0.06] text-ink"}`}>
-                          {monogram(c.name)}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className={`text-[13px] truncate flex items-center gap-1 ${c.hidden ? "text-ink-mute line-through" : "text-ink"} ${active ? "font-medium" : ""}`}>
-                            <span className="truncate">{c.name}</span>
-                            {c.owner_tid != null && me.data?.tid === c.owner_tid && (
-                              <span title="вы — владелец данных" className="shrink-0 text-[10px]">👑</span>)}
-                            {c.hidden && <span className="shrink-0 text-[9px] uppercase tracking-wide text-ink-mute/70">скрыта</span>}
-                          </div>
-                          <div className="flex items-center gap-1.5 mt-1">
-                            <div className="h-1 flex-1 rounded-full bg-ink/[0.07] overflow-hidden">
-                              <div className="h-full rounded-full bg-flag-green" style={{ width: `${pct}%` }} />
+
+          <SidebarScrollArea className="flex-1 bg-[#fbfbf7]" contentClassName="px-3 py-3">
+            {clients.isLoading && <div className="text-xs text-ink-mute px-2 py-2">Загрузка…</div>}
+            {clients.data && clients.data.length === 0 && (
+              <button
+                onClick={() => seedAcc.mutate()}
+                className="w-full text-left text-xs px-3 py-2 rounded-xl border border-ink-line bg-white hover:bg-[#f6f6f1] text-[#40551f] font-semibold"
+              >+ Загрузить пилот (Accumulator)</button>
+            )}
+            {(() => {
+              const list = (clients.data ?? []).filter(
+                c => scope === "all" || !me.data?.auth || covMap.get(c.id)?.mine);
+              if (me.data?.auth && scope === "mine" && list.length === 0 && (clients.data?.length ?? 0) > 0) {
+                return <div className="text-xs text-ink-mute px-3 py-3 leading-snug bg-white border border-ink-line rounded-xl">
+                  Пока нет «моих». Отметь компанию звёздочкой ★ (наведи на строку) или переключись на «Все».
+                </div>;
+              }
+              return (
+                <ul className="space-y-1.5">
+                  {list.map(c => {
+                    const active = clientId === c.id;
+                    const p = covMap.get(c.id);
+                    const pct = p && p.total ? Math.round((p.covered / p.total) * 100) : 0;
+                    const mine = !!p?.mine;
+                    return (
+                      <li key={c.id} className="group relative">
+                        <Link
+                          to={`/clients/${c.id}/${tab ?? "matrix"}`}
+                          className={`flex items-center gap-3 px-3 py-2.5 pr-14 rounded-xl transition border
+                            ${active ? "bg-white border-[#cbd8a2] shadow-sm" : "border-transparent hover:bg-white hover:border-ink-line"}`}
+                        >
+                          <ClientMark client={c} active={active} />
+                          <div className="min-w-0 flex-1">
+                            <div className={`text-[14px] truncate flex items-center gap-1 ${c.hidden ? "text-ink-mute line-through" : "text-ink"} ${active ? "font-bold" : "font-semibold"}`}>
+                              <span className="truncate">{c.name}</span>
+                              {c.owner_tid != null && me.data?.tid === c.owner_tid && (
+                                <span title="вы — владелец данных" className="shrink-0 text-[10px]">👑</span>)}
+                              {c.hidden && <span className="shrink-0 text-[9px] uppercase tracking-wide text-ink-mute/70">скрыта</span>}
                             </div>
-                            <span className="text-[10px] text-ink-mute tabular-nums w-7 text-right">{pct}%</span>
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                              <div className="h-1.5 flex-1 rounded-full bg-ink/[0.07] overflow-hidden">
+                                <div className="h-full rounded-full bg-[#98c61b]" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="text-[10px] text-ink-mute tabular-nums w-7 text-right">{pct}%</span>
+                            </div>
                           </div>
-                        </div>
-                      </Link>
-                      {me.data?.auth && (
+                        </Link>
+                        {me.data?.auth && (
+                          <button
+                            onClick={(e) => { e.preventDefault(); mineMut.mutate({ id: c.id, on: !mine }); }}
+                            className={`absolute right-8 top-3 transition px-1 py-0.5 rounded-lg hover:bg-white
+                              ${mine ? "text-amber-500 opacity-100" : "text-ink-mute opacity-0 group-hover:opacity-100 hover:text-ink"}`}
+                            title={mine ? "Убрать из моих" : "В мои компании"}
+                            aria-label={mine ? "Unstar" : "Star"}
+                          >{mine ? "★" : "☆"}</button>
+                        )}
                         <button
-                          onClick={(e) => { e.preventDefault(); mineMut.mutate({ id: c.id, on: !mine }); }}
-                          className={`absolute right-7 top-2 transition px-1 py-0.5 rounded hover:bg-white
-                            ${mine ? "text-amber-500 opacity-100" : "text-ink-mute opacity-0 group-hover:opacity-100 hover:text-ink"}`}
-                          title={mine ? "Убрать из моих" : "В мои компании"}
-                          aria-label={mine ? "Unstar" : "Star"}
-                        >{mine ? "★" : "☆"}</button>
-                      )}
-                      <button
-                        onClick={(e) => { e.preventDefault(); setEditingClient(c); }}
-                        className="absolute right-1 top-2 opacity-0 group-hover:opacity-100 transition px-1.5 py-0.5 text-ink-mute hover:text-ink rounded hover:bg-white"
-                        title="Edit client"
-                        aria-label={`Edit ${c.name}`}
-                      >✎</button>
-                    </li>
-                  );
-                })}
-              </ul>
-            );
-          })()}
-          {isAdmin && (
-            <button onClick={() => setShowHidden(v => !v)}
-              className="mt-2 w-full text-left px-2 py-1 text-[11px] text-ink-mute hover:text-ink transition">
-              {showHidden ? "спрятать скрытые" : "показать скрытые"}
-            </button>
-          )}
+                          onClick={(e) => { e.preventDefault(); setEditingClient(c); }}
+                          className="absolute right-2 top-3 opacity-0 group-hover:opacity-100 transition px-1.5 py-0.5 text-ink-mute hover:text-ink rounded-lg hover:bg-white"
+                          title="Edit client"
+                          aria-label={`Edit ${c.name}`}
+                        >✎</button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+            {isAdmin && (
+              <button onClick={() => setShowHidden(v => !v)}
+                className="mt-3 w-full text-left px-3 py-2 text-[11px] text-ink-mute hover:text-ink hover:bg-white rounded-xl transition">
+                {showHidden ? "спрятать скрытые" : "показать скрытые"}
+              </button>
+            )}
+          </SidebarScrollArea>
         </div>
       </aside>
 

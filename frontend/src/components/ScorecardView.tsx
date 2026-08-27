@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { api } from "../api";
+import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import type { Scorecard, Fact, Flag } from "../types";
 import FlagDot from "./FlagDot";
 
@@ -15,7 +16,7 @@ export default function ScorecardView({ clientId, onSelectCell }: { clientId: st
     queryKey: ["scorecard", clientId],
     queryFn: () => api.scorecard(clientId),
   });
-  if (sc.isLoading) return <div className="p-6 text-sm text-ink-mute">Loading…</div>;
+  if (sc.isLoading) return <div className="p-6 text-sm text-ink-mute">Загрузка…</div>;
   if (!sc.data) return null;
 
   const { rows, totals } = sc.data;
@@ -40,7 +41,7 @@ export default function ScorecardView({ clientId, onSelectCell }: { clientId: st
 
   return (
     <div className="p-5 max-w-5xl space-y-5">
-      <h2 className="text-lg font-semibold">Green-flag scorecard</h2>
+      <h2 className="text-lg font-semibold">Оценка фактов</h2>
 
       <div className="grid grid-cols-4 gap-3">
         <Stat label="Green facts" value={totals.green} accent="text-flag-green"
@@ -56,24 +57,24 @@ export default function ScorecardView({ clientId, onSelectCell }: { clientId: st
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-[10px] font-mono uppercase text-ink-mute">
             <tr>
-              <th className="text-left px-3 py-2">Cell</th>
-              <th className="text-left px-3 py-2">Layer → Subsection</th>
+              <th className="text-left px-3 py-2">Ячейка</th>
+              <th className="text-left px-3 py-2">Слой → позиция</th>
               <th className="text-right px-3 py-2">🟢</th>
               <th className="text-right px-3 py-2">🔴</th>
-              <th className="text-right px-3 py-2">⚫ gap</th>
-              <th className="text-left px-3 py-2">Last update</th>
+              <th className="text-right px-3 py-2">⚫ пробелы</th>
+              <th className="text-left px-3 py-2">Обновлено</th>
             </tr>
           </thead>
           <tbody>
             {sortedLayers.map(([lid, group]) => (
               <Fragment key={lid}>
                 <tr className="bg-slate-100">
-                  <td colSpan={6} className="px-3 py-1.5 text-xs font-semibold">L{lid} {group.layer_name}</td>
+                  <td colSpan={6} className="px-3 py-1.5 text-xs font-semibold">L{lid} {layerNameRu(lid, group.layer_name)}</td>
                 </tr>
                 {group.rows.map(r => (
                   <tr key={r.subsection_id} className="border-t border-ink-line">
                     <td className="px-3 py-2 font-mono text-xs">{r.subsection_id}</td>
-                    <td className="px-3 py-2">{r.subsection_name}</td>
+                    <td className="px-3 py-2">{subsectionNameRu(r.subsection_id, r.subsection_name)}</td>
                     <td className="px-3 py-2 text-right"><Num r={r} flag="green" n={r.n_green} /></td>
                     <td className="px-3 py-2 text-right"><Num r={r} flag="red" n={r.n_red} /></td>
                     <td className="px-3 py-2 text-right"><Num r={r} flag="grey" n={r.n_grey} /></td>
@@ -129,7 +130,7 @@ function CardSet({ clientId, picked, onClose }: { clientId: string; picked: Pick
                 {f.must_have && <span className={`text-[12px] leading-none ${f.must_have_by === "expert" ? "text-purple-600" : "text-flag-blue"}`}>★</span>}
               </div>
               {f.title && <div className="text-sm font-semibold text-ink leading-tight mb-0.5">{f.title}</div>}
-              <div className="text-sm text-ink leading-snug" style={{ textAlign: "justify" }}>{f.text}</div>
+              <div className="text-sm text-ink leading-snug">{f.text}</div>
               {f.flag !== "green" && f.rationale && (
                 <div className={`mt-1.5 text-xs border-l-2 pl-2 leading-snug ${f.flag === "red" ? "border-flag-red/60 text-flag-red" : "border-flag-grey/60 text-ink-mute"}`}>
                   {f.rationale}

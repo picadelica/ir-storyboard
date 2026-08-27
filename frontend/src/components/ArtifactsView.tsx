@@ -47,7 +47,7 @@ export default function ArtifactsView({ clientId, pickedArtifactId }: Props) {
       {/* Sidebar list */}
       <div className="border-r border-ink-line pr-5 overflow-y-auto">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold">Artifacts</h2>
+          <h2 className="text-base font-semibold">Артефакты</h2>
           <a
             href={bundleIdsArray.length > 0 ? api.notebooklmBundleUrl(clientId, bundleIdsArray) : undefined}
             className={`text-[11px] px-2 py-1 rounded ${bundleIdsArray.length > 0
@@ -58,7 +58,7 @@ export default function ArtifactsView({ clientId, pickedArtifactId }: Props) {
           </a>
         </div>
 
-        {list.isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
+        {list.isLoading && <div className="text-sm text-ink-mute">Загрузка…</div>}
         {list.data?.length === 0 && (
           <div className="text-sm text-ink-mute italic">
             No artifacts yet. Run a cycle from the sidebar.
@@ -82,7 +82,7 @@ export default function ArtifactsView({ clientId, pickedArtifactId }: Props) {
                   onChange={(e) => { e.stopPropagation(); toggleBundle(a.id); }}
                   onClick={(e) => e.stopPropagation()}
                   className="w-4 h-4"
-                  title="Add to NotebookLM bundle"
+                  title="Добавить в пакет NotebookLM"
                 />
               </div>
               <div className="text-xs font-medium leading-tight mt-1">{a.title}</div>
@@ -96,8 +96,8 @@ export default function ArtifactsView({ clientId, pickedArtifactId }: Props) {
 
       {/* Body */}
       <div className="overflow-y-auto bg-white rounded-lg border border-ink-line p-6">
-        {!selected && <div className="text-sm text-ink-mute">Select an artifact on the left.</div>}
-        {artifact.isLoading && <div className="text-sm text-ink-mute">Loading…</div>}
+        {!selected && <div className="text-sm text-ink-mute">Выберите артефакт слева.</div>}
+        {artifact.isLoading && <div className="text-sm text-ink-mute">Загрузка…</div>}
         {artifact.data && (
           <article className="prose-md max-w-none">
             <ReactMarkdown>{artifact.data.body}</ReactMarkdown>
