@@ -17,6 +17,7 @@ import {
   MATRIX_CELL_VALUE,
   MATRIX_GRID,
   MATRIX_HEADER,
+  MATRIX_HEADER_TITLE_OFFSET,
   MATRIX_LAYER_BADGE,
   MATRIX_LAYER_COL,
   MATRIX_LAYER_COLUMN_WIDTH,
@@ -408,12 +409,12 @@ export default function FactAuditView({ clientId, onJumpToCell, selectedSubsecti
     <div className={MATRIX_PAGE}>
       <div className={`${MATRIX_PAGE_PADDING} h-full min-h-0 shrink-0 flex flex-col`}>
         <div className={MATRIX_HEADER}>
-          <div className="flex items-center gap-2">
+          <div className={`${MATRIX_HEADER_TITLE_OFFSET} flex items-center gap-2`}>
             <HintTarget
               title="Матрица проверки"
               body={"Единая карта всего, что требует внимания.\nСуммирует карточки на ревью, пустые/тонкие ячейки, известные пробелы и открытые рабочие задачи."}
             >
-              <span className="text-[12px] text-ink-mute">что требует внимания</span>
+              <span className="text-lg font-semibold tracking-tight text-ink">Что проверить</span>
             </HintTarget>
           </div>
 
