@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
-import { displayWorkBody, displayWorkTitle, isFirstMaterialWorkTitle, isInterviewWorkTitle } from "../lib/workItemDisplay";
+import { displayWorkBody, displayWorkTitle, isEmptyCellRedundantWorkTitle, isFirstMaterialWorkTitle, isInterviewWorkTitle } from "../lib/workItemDisplay";
 import type { Channel, Entity, Fact, Flag, Layer, PunchList, WorkItem } from "../types";
 import SourceLine from "./SourceLine";
 import AudioSourcePanel, { type AudioSourceHandle } from "./AudioSourcePanel";
@@ -627,10 +627,10 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   const focusedThinCell = punch.data?.thinly_covered.find(c => c.subsection_id === subsectionId);
   const focusedKnownGap = punch.data?.cells_with_known_gaps.find(c => c.subsection_id === subsectionId);
   const firstMaterialItems = focusedEmptyCell
-    ? focusedTaskItems.filter(item => isFirstMaterialWorkTitle(item.title))
+    ? focusedTaskItems.filter(item => isEmptyCellRedundantWorkTitle(item.title))
     : [];
   const visibleWorkItems = focusedEmptyCell
-    ? focusedTaskItems.filter(item => !isFirstMaterialWorkTitle(item.title))
+    ? focusedTaskItems.filter(item => !isEmptyCellRedundantWorkTitle(item.title))
     : focusedTaskItems;
   const hasDeepenWorkItem = visibleWorkItems.some(item =>
     item.type === "deepen" || item.title.startsWith("Deepen:")
@@ -658,7 +658,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
         tone: "green" as const,
       };
     }),
-    ...(focusedThinCell && !hasDeepenWorkItem
+    ...(focusedThinCell && !focusedEmptyCell && !hasDeepenWorkItem
       ? [{ key: "thin", title: "Добрать подтверждения", body: "Фактов недостаточно: стоит добрать источники или подтверждения.", tone: "amber" as const, createdAt: "" }]
       : []),
     ...(focusedEmptyCell ? [{
