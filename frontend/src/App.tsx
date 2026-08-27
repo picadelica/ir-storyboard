@@ -337,7 +337,7 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
       <div className="flex items-center gap-2 px-4 py-2.5">
         {ZONES.map(z => {
           const active = z.id === activeZone.id;
-          const muted = z.id === "work";
+          const muted = z.id === "work" || z.id === "deliver";
           return (
             <HintTarget key={z.id} title={z.label} body={ZONE_HINTS[z.id]}>
               <button

@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
-import { isFirstMaterialWorkTitle } from "../lib/workItemDisplay";
+import { isEmptyCellRedundantWorkTitle } from "../lib/workItemDisplay";
 import { readLS, patchLS } from "../persist";
 import { RunProgress, useElapsed } from "./RunProgress";
 import { HintTarget } from "./Hint";
@@ -118,12 +118,12 @@ function ReviewMatrix({
     addTask(c.subsection_id);
   }
   for (const c of punch?.thinly_covered ?? []) {
-    if (!deepenWorkSids.has(c.subsection_id)) addTask(c.subsection_id);
+    if (!emptyCellSids.has(c.subsection_id) && !deepenWorkSids.has(c.subsection_id)) addTask(c.subsection_id);
   }
   for (const c of punch?.cells_with_known_gaps ?? []) addTask(c.subsection_id, Math.max(1, c.grey_facts.length));
   for (const item of workItems) {
     if (!ACTIVE_WORK_STATUSES.has(item.status)) continue;
-    if (item.subsection_id && emptyCellSids.has(item.subsection_id) && isFirstMaterialWorkTitle(item.title)) {
+    if (item.subsection_id && emptyCellSids.has(item.subsection_id) && isEmptyCellRedundantWorkTitle(item.title)) {
       continue;
     }
     addTask(item.subsection_id);

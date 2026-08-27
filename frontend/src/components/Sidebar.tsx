@@ -570,9 +570,25 @@ export default function Sidebar({ clientId }: Props) {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
   });
+  const [renderCompact, setRenderCompact] = useState(collapsed);
+
+  const collapseSidebar = () => setCollapsed(true);
+  const expandSidebar = () => {
+    setRenderCompact(false);
+    setCollapsed(false);
+  };
 
   useEffect(() => {
     try { localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0"); } catch { /* noop */ }
+  }, [collapsed]);
+
+  useEffect(() => {
+    if (!collapsed) {
+      setRenderCompact(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setRenderCompact(true), 260);
+    return () => window.clearTimeout(timer);
   }, [collapsed]);
 
   const [showHidden, setShowHidden] = useState(false);   // админ: показать скрытые компании
@@ -604,7 +620,7 @@ export default function Sidebar({ clientId }: Props) {
     },
   });
 
-  if (collapsed) {
+  if (renderCompact) {
     const compactClients = (clients.data ?? []).filter(
       c => scope === "all" || !me.data?.auth || covMap.get(c.id)?.mine);
     return (
@@ -612,7 +628,7 @@ export default function Sidebar({ clientId }: Props) {
         <aside className="ir-sidebar-scroll-scope w-16 h-full min-h-0 shrink-0 overflow-hidden border-r border-[#1c1e1b] bg-[#292c28] flex flex-col items-center py-3 transition-[width] duration-300 ease-out">
           <div className="w-16 min-h-0 flex-1 flex flex-col items-center animate-[ir-sidebar-content-in_160ms_ease-out]">
             <button
-              onClick={() => setCollapsed(false)}
+              onClick={expandSidebar}
               className="w-10 h-10 flex items-center justify-center rounded-[14px] overflow-hidden hover:brightness-110"
               aria-label="Раскрыть список компаний"
             >
@@ -677,11 +693,17 @@ export default function Sidebar({ clientId }: Props) {
 
   return (
     <>
-      <aside className="ir-sidebar-scroll-scope w-72 h-full min-h-0 shrink-0 overflow-hidden border-r border-[#1c1e1b] bg-[#292c28] flex flex-col transition-[width] duration-300 ease-out">
+      <aside className={`ir-sidebar-scroll-scope ${collapsed ? "w-16" : "w-72"} h-full min-h-0 shrink-0 overflow-hidden border-r border-[#1c1e1b] bg-[#292c28] flex flex-col transition-[width] duration-300 ease-out`}>
         <div className="w-72 min-h-0 flex-1 flex flex-col animate-[ir-sidebar-content-in_160ms_ease-out]">
-          <div className="px-4 py-4 border-b border-white/10 flex items-center justify-between bg-[#292c28]">
+          <div className="px-3 py-3 border-b border-white/10 flex items-center justify-between bg-[#292c28]">
             <div className="min-w-0 flex items-center gap-3">
-              <img src="/favicon.svg" alt="" className="w-10 h-10 rounded-[14px] shrink-0" />
+              <button
+                onClick={collapseSidebar}
+                className="w-10 h-10 shrink-0 flex items-center justify-center rounded-[14px] overflow-hidden hover:brightness-110"
+                aria-label="Свернуть список компаний"
+              >
+                <img src="/favicon.svg" alt="" className="w-10 h-10 block" />
+              </button>
               <div className="min-w-0">
                 <div className="text-[17px] font-bold text-white leading-tight">IR Storyboard</div>
                 <div className="text-xs text-white/55 leading-tight">Клиенты и матрицы</div>
@@ -694,7 +716,7 @@ export default function Sidebar({ clientId }: Props) {
                 aria-label="Добавить компанию"
               >+</button>
               <button
-                onClick={() => setCollapsed(true)}
+                onClick={collapseSidebar}
                 className="w-8 h-8 rounded-full text-white/50 hover:text-white hover:bg-white/5"
                 aria-label="Свернуть панель"
               >«</button>

@@ -22,6 +22,10 @@ export function isFirstMaterialWorkTitle(title: string) {
   return title.startsWith("Interview:") || title.startsWith("Fill gap:");
 }
 
+export function isEmptyCellRedundantWorkTitle(title: string) {
+  return isFirstMaterialWorkTitle(title) || title.startsWith("Deepen:");
+}
+
 export function isInterviewWorkTitle(title: string) {
   return title.startsWith("Interview:");
 }
