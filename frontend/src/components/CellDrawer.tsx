@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
@@ -9,6 +9,39 @@ import type { Channel, Entity, Fact, Flag, Layer, PunchList, WorkItem } from "..
 import SourceLine from "./SourceLine";
 import AudioSourcePanel, { type AudioSourceHandle } from "./AudioSourcePanel";
 import FlagDot from "./FlagDot";
+
+function SmoothCollapse({ open, children }: { open: boolean; children: ReactNode }) {
+  const [mounted, setMounted] = useState(open);
+  const [visible, setVisible] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      setVisible(false);
+      const frame = window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => setVisible(true));
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+    setVisible(false);
+    const timer = window.setTimeout(() => setMounted(false), 320);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  if (!mounted) return null;
+
+  return (
+    <div
+      className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+        visible ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+      }`}
+      aria-hidden={!visible}
+    >
+      <div className="min-h-0 overflow-hidden">
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function monoColor(name: string): string {
   let h = 0;
@@ -718,21 +751,15 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
   return (
     <aside className="fixed top-0 right-0 bottom-0 w-[28rem] bg-white border-l border-ink-line shadow-xl
                       flex flex-col z-30">
-      <div className="px-4 py-3 border-b border-ink-line flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[10px] font-mono text-ink-mute">Ячейка {subsectionId}</div>
+      <div className="px-4 py-3 border-b border-ink-line flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <h3 className="text-base font-semibold leading-tight">
             {subsectionTitle}
           </h3>
-          {subsection && (
-            <div className="text-[11px] text-ink-mute mt-0.5">
-              L{subsection.layer.id} {layerNameRu(subsection.layer.id, subsection.layer.name)}
-            </div>
-          )}
         </div>
         <button
           onClick={onClose}
-          className="text-ink-mute hover:text-ink rounded p-1 -mr-1"
+          className="shrink-0 text-ink-mute hover:text-ink rounded p-1 -mr-1"
           aria-label="Закрыть"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -1022,7 +1049,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
 
                       {/* лаконичный general view: провенанс (кто/когда) + источник — всё за (i).
                           Сентинелы пайплайна (merge/attribute/…) — не пользователи, не показываем как автора. */}
-                      {infoIds.has(f.id) && (
+                      <SmoothCollapse open={infoIds.has(f.id)}>
                         <div className="mt-2 pt-2 border-t border-ink-line/60">
                           {(() => {
                             const SENT = new Set(["merge", "attribute", "dev", "stub", "import", "seed", ""]);
@@ -1077,7 +1104,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                                 </div>
                               )}
                               {/* исходники раскрываются тут же, без прыжка вниз */}
-                              {expandedAll.length > 0 && (
+                              <SmoothCollapse open={expandedAll.length > 0}>
                                 <div className="mt-1.5 space-y-1.5">
                                   {expandedAll.map(k => (
                                     <div key={k.id} className="rounded border border-ink-line bg-slate-50/70 p-2">
@@ -1100,7 +1127,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                                     </div>
                                   ))}
                                 </div>
-                              )}
+                              </SmoothCollapse>
                             </div>
                             );
                           })()}
@@ -1121,7 +1148,7 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                             )}
                           </>)}
                         </div>
-                      )}
+                      </SmoothCollapse>
                     </>
                   )}
                 </div>
@@ -1208,64 +1235,68 @@ export default function CellDrawer({ clientId, subsectionId, onClose, layers, fo
                               className="ml-auto shrink-0 cursor-grab select-none text-[13px] leading-none text-ink-mute/0 transition-colors hover:text-ink-mute/70 group-hover/task:text-ink-mute/30 active:cursor-grabbing">⠿</span>
                           </div>
                           <div className="mt-1 text-[13px] text-ink-mute leading-snug whitespace-pre-wrap">{task.body}</div>
-                          {isGapTask && expanded && (
-                            <div className="mt-3 space-y-2">
-                              {greyFacts.map((gap, index) => (
-                                <div key={gap.id} className="rounded-lg border border-ink-line/80 bg-[#fbfbf7] p-2.5">
-                                  <div className="mb-1 flex items-center gap-1.5 text-[10px] font-medium text-ink-mute">
-                                    <span className="tabular-nums">{index + 1}</span>
-                                    <span>открытый вопрос</span>
+                          {isGapTask && (
+                            <SmoothCollapse open={expanded}>
+                              <div className="mt-3 space-y-2">
+                                {greyFacts.map((gap, index) => (
+                                  <div key={gap.id} className="rounded-lg border border-ink-line/80 bg-[#fbfbf7] p-2.5">
+                                    <div className="mb-1 flex items-center gap-1.5 text-[10px] font-medium text-ink-mute">
+                                      <span className="tabular-nums">{index + 1}</span>
+                                      <span>открытый вопрос</span>
+                                    </div>
+                                    <div className="text-[12px] leading-snug text-ink">{gap.text}</div>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/ingest`); }}
+                                        className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink hover:bg-[#f6f6f1]"
+                                        title="Перейти в сбор данных и добавить источник, который закрывает этот пробел"
+                                      >
+                                        Добавить источник
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/interview`); }}
+                                        className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink-mute hover:bg-[#f6f6f1] hover:text-ink"
+                                        title="Перейти к вопросам интервью и использовать этот пробел как вопрос"
+                                      >
+                                        Вопрос для интервью
+                                      </button>
+                                    </div>
                                   </div>
-                                  <div className="text-[12px] leading-snug text-ink">{gap.text}</div>
-                                  <div className="mt-2 flex flex-wrap gap-1.5">
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/ingest`); }}
-                                      className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink hover:bg-[#f6f6f1]"
-                                      title="Перейти в сбор данных и добавить источник, который закрывает этот пробел"
-                                    >
-                                      Добавить источник
-                                    </button>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/interview`); }}
-                                      className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink-mute hover:bg-[#f6f6f1] hover:text-ink"
-                                      title="Перейти к вопросам интервью и использовать этот пробел как вопрос"
-                                    >
-                                      Вопрос для интервью
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                                ))}
+                              </div>
+                            </SmoothCollapse>
                           )}
-                          {canExpand && expanded && (
-                            <div className="mt-3 rounded-lg border border-ink-line/80 bg-[#fbfbf7] p-2.5">
-                              {relatedFact ? (
-                                <>
-                                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-mute">Факт на проверку</div>
-                                  <div className="text-[12px] leading-snug text-ink">{relatedFact.text}</div>
-                                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-ink-mute">
-                                    <span>уверенность {relatedFact.confidence.toFixed(2)}</span>
-                                    {relatedFact.source_title && <span>· {relatedFact.source_title}</span>}
-                                    {relatedFact.rationale && <span>· {relatedFact.rationale}</span>}
-                                  </div>
-                                </>
-                              ) : (
-                                <>
-                                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-mute">Связанный факт не найден</div>
-                                  <div className="text-[12px] leading-snug text-ink-mute">
-                                    Возможно, факт был удалён, слит с другой карточкой или перенесён после создания задачи.
-                                  </div>
-                                  <div className="mt-2 flex flex-wrap gap-1.5">
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/ingest`); }}
-                                      className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink hover:bg-[#f6f6f1]"
-                                    >
-                                      Добавить источник
-                                    </button>
-                                  </div>
-                                </>
-                              )}
-                            </div>
+                          {canExpand && (
+                            <SmoothCollapse open={expanded}>
+                              <div className="mt-3 rounded-lg border border-ink-line/80 bg-[#fbfbf7] p-2.5">
+                                {relatedFact ? (
+                                  <>
+                                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-mute">Факт на проверку</div>
+                                    <div className="text-[12px] leading-snug text-ink">{relatedFact.text}</div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-ink-mute">
+                                      <span>уверенность {relatedFact.confidence.toFixed(2)}</span>
+                                      {relatedFact.source_title && <span>· {relatedFact.source_title}</span>}
+                                      {relatedFact.rationale && <span>· {relatedFact.rationale}</span>}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-mute">Связанный факт не найден</div>
+                                    <div className="text-[12px] leading-snug text-ink-mute">
+                                      Возможно, факт был удалён, слит с другой карточкой или перенесён после создания задачи.
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); nav(`/clients/${clientId}/ingest`); }}
+                                        className="rounded-lg border border-ink-line bg-white px-2 py-1 text-[11px] font-medium text-ink hover:bg-[#f6f6f1]"
+                                      >
+                                        Добавить источник
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </SmoothCollapse>
                           )}
                           {"firstMaterialActions" in task && Array.isArray(task.firstMaterialActions) && (
                             <div className="mt-2 flex flex-wrap gap-1.5">

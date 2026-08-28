@@ -83,9 +83,9 @@ function KnowledgeMap({ layers, onPick }: { layers: DossierLayer[]; onPick: (sid
                   >
                     <button onClick={() => onPick(c.subsection_id, subsectionName)}
                       style={fill.empty ? undefined : { background: fill.background }}
-                      className={`relative h-11 rounded block transition-[filter,transform] duration-200 ease-out hover:-translate-y-px hover:brightness-[0.96]
+                      className={`group relative h-11 rounded block transition-[filter,transform] duration-200 ease-out hover:-translate-y-px hover:brightness-[0.96]
                         ${fill.empty ? "bg-[#f5f5f1]" : ""}`}>
-                      <span className="absolute inset-0 grid place-items-center text-[13px] font-semibold tabular-nums leading-none" style={{ color: fill.empty ? "#8B877C" : fill.fg }}>
+                      <span className="absolute inset-0 grid place-items-center text-[15px] font-bold tabular-nums leading-none opacity-0 transition-opacity duration-200 ease-out group-hover:opacity-100 group-focus-visible:opacity-100" style={{ color: fill.empty ? "#8B877C" : fill.fg }}>
                         <span>{c.facts}</span>
                       </span>
                     </button>
