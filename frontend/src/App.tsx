@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "./api";
@@ -298,6 +298,15 @@ const ZONE_WIDTH: Record<string, string> = {
   deliver: "w-[104px]",
 };
 
+const ZONE_WIDTH_PX: Record<string, number> = {
+  dossier: 104,
+  map: 96,
+  build: 120,
+  health: 104,
+  work: 92,
+  deliver: 104,
+};
+
 const ZONE_HINTS: Record<string, string> = {
   dossier: "Бывший Dossier / About\nЗдесь вы смотрите общую картину по компании: досье, профиль, контекст и базовые сведения.",
   map: "Бывший Map / Matrix\nЗдесь вы анализируете матрицу знаний: видите заполненность разделов и открываете ячейки с фактами.",
@@ -330,43 +339,87 @@ function Tabs({ clientId, activeTab, quarter, onQuarterChange, onRunCycle, onTog
   const activeSub = activeZone.tabs.find(t => t.id === activeTab);
   const activeVisibleTabId = activeSub?.hidden ? activeZone.tabs.find(t => !t.hidden)?.id : activeTab;
   const showSub = activeZone.tabs.length > 1 || activeZone.id === "deliver";
+  const zoneGapPx = 8;
+  const activeZoneIndex = Math.max(0, ZONES.findIndex(z => z.id === activeZone.id));
+  const activeZoneOffset = ZONES
+    .slice(0, activeZoneIndex)
+    .reduce((sum, z) => sum + ZONE_WIDTH_PX[z.id] + zoneGapPx, 0);
+  const activeZoneMuted = activeZone.id === "work" || activeZone.id === "deliver";
+  const zoneNavRef = useRef<HTMLDivElement | null>(null);
+  const zonePillRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const fallbackCapsule = {
+    left: activeZoneOffset,
+    top: 0,
+    width: ZONE_WIDTH_PX[activeZone.id],
+    height: 30,
+  };
+  const [zoneCapsule, setZoneCapsule] = useState<typeof fallbackCapsule | null>(null);
   const client = useQuery({ queryKey: ["client", clientId], queryFn: () => api.getClient(clientId) });
   const me = useQuery({ queryKey: ["me"], queryFn: api.authMe, retry: false });
   // «Пользователи» видят супер-админ и владелец данных этой компании
   const canSeeUsers = !!me.data?.is_admin
     || (me.data?.tid != null && client.data?.owner_tid === me.data.tid);
 
+  useLayoutEffect(() => {
+    const measure = () => {
+      const wrap = zoneNavRef.current;
+      const pill = zonePillRefs.current[activeZone.id];
+      if (!wrap || !pill) return;
+      const wrapRect = wrap.getBoundingClientRect();
+      const pillRect = pill.getBoundingClientRect();
+      setZoneCapsule({
+        left: pillRect.left - wrapRect.left,
+        top: pillRect.top - wrapRect.top,
+        width: pillRect.width,
+        height: pillRect.height,
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [activeZone.id]);
+
   return (
     <div className="border-b border-ink-line bg-white/95 backdrop-blur">
       {/* одна строка: зоны · айдентика компании (приоритет) · глобальные действия */}
       <div className="flex items-center gap-2 px-4 py-2.5">
-        {ZONES.map(z => {
-          const active = z.id === activeZone.id;
-          const muted = z.id === "work" || z.id === "deliver";
-          return (
-            <HintTarget key={z.id} title={z.label} body={ZONE_HINTS[z.id]}>
-              <button
-                onClick={() => nav(`/clients/${clientId}/${z.tabs[0].id}`)}
-                className={`relative flex justify-center px-0.5 py-0 text-[12px] transition shrink-0 ${ZONE_WIDTH[z.id]}
-                  ${active ? (muted ? "text-[#8b8d85]" : "text-[#40551f]") : muted ? "text-[#bbbdb5] hover:text-[#8b8d85]" : "text-ink-mute hover:text-ink"}`}
-              >
-                <span
-                  className={`relative flex items-center justify-center gap-1.5 rounded-full border px-3 py-1.5 transition
-                    ${active
-                      ? (muted ? "bg-[#f7f7f4] border-[#e2e3dc]" : "bg-[#f0fadb] border-[#cbd8a2] shadow-sm")
-                      : muted ? "border-transparent hover:bg-[#f7f7f4]" : "border-transparent hover:bg-[#f6f6f1]"}`}
+        <div ref={zoneNavRef} className="relative flex items-center gap-2">
+          <span
+            className={`pointer-events-none absolute left-0 top-0 rounded-full border shadow-sm transition-[transform,width,height,background-color,border-color] duration-300 ease-out
+              ${activeZoneMuted ? "bg-[#f7f7f4] border-[#e2e3dc]" : "bg-[#f0fadb] border-[#cbd8a2]"}`}
+            style={{
+              width: zoneCapsule?.width ?? fallbackCapsule.width,
+              height: zoneCapsule?.height ?? fallbackCapsule.height,
+              transform: `translate3d(${zoneCapsule?.left ?? fallbackCapsule.left}px, ${zoneCapsule?.top ?? fallbackCapsule.top}px, 0)`,
+            }}
+          />
+          {ZONES.map(z => {
+            const active = z.id === activeZone.id;
+            const muted = z.id === "work" || z.id === "deliver";
+            return (
+              <HintTarget key={z.id} title={z.label} body={ZONE_HINTS[z.id]}>
+                <button
+                  onClick={() => nav(`/clients/${clientId}/${z.tabs[0].id}`)}
+                  className={`relative z-10 flex justify-center px-0.5 py-0 text-[12px] transition shrink-0 ${ZONE_WIDTH[z.id]}
+                    ${active ? (muted ? "text-[#8b8d85]" : "text-[#40551f]") : muted ? "text-[#bbbdb5] hover:text-[#8b8d85]" : "text-ink-mute hover:text-ink"}`}
                 >
-                  <span className="w-3.5 h-3.5 shrink-0 grid place-items-center"><ZoneIcon id={z.id} /></span>
-                  <span className="relative whitespace-nowrap">
-                    <span className="invisible font-semibold">{z.label}</span>
-                    <span className={`absolute inset-0 ${active ? "font-semibold" : "font-normal"}`}>{z.label}</span>
+                  <span
+                    ref={(node) => { zonePillRefs.current[z.id] = node; }}
+                    className={`relative flex items-center justify-center gap-1.5 rounded-full border border-transparent px-3 py-1.5 transition-colors
+                      ${active ? "" : muted ? "hover:bg-[#f7f7f4]" : "hover:bg-[#f6f6f1]"}`}
+                  >
+                    <span className="w-3.5 h-3.5 shrink-0 grid place-items-center"><ZoneIcon id={z.id} /></span>
+                    <span className="relative whitespace-nowrap">
+                      <span className="invisible font-semibold">{z.label}</span>
+                      <span className={`absolute inset-0 ${active ? "font-semibold" : "font-normal"}`}>{z.label}</span>
+                    </span>
+                    <span className={`absolute left-3 right-3 -bottom-[10px] h-[2.5px] rounded-full transition-opacity ${active ? (muted ? "bg-[#d2d4cc] opacity-100" : "bg-[#98c61b] opacity-100") : "opacity-0"}`} />
                   </span>
-                  <span className={`absolute left-3 right-3 -bottom-[10px] h-[2.5px] rounded-full transition-opacity ${active ? (muted ? "bg-[#d2d4cc] opacity-100" : "bg-[#98c61b] opacity-100") : "opacity-0"}`} />
-                </span>
-              </button>
-            </HintTarget>
-          );
-        })}
+                </button>
+              </HintTarget>
+            );
+          })}
+        </div>
 
         <div className="flex-1" />
 
