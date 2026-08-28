@@ -2,13 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api";
 import { HintTarget } from "./Hint";
-import EvidenceBadges from "./EvidenceBadges";
 import { cellFill, recordMax } from "../lib/cellFill";
-import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
+import { keepShortRuWords, layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import {
   MATRIX_BODY,
   MATRIX_CELL,
-  MATRIX_CELL_ID,
   MATRIX_CELL_IDLE,
   MATRIX_CELL_SELECTED,
   MATRIX_CELL_TITLE,
@@ -79,7 +77,8 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
   const queue = review.data ?? [];
 
   return (
-    <div className={`${MATRIX_PAGE} ${present ? MATRIX_PRESENT_PADDING : MATRIX_PAGE_PADDING}`}>
+    <div className={MATRIX_PAGE}>
+      <div className={`${present ? MATRIX_PRESENT_PADDING : MATRIX_PAGE_PADDING} relative mx-auto flex h-full min-h-0 w-full max-w-[820px] flex-col`}>
       <div className={MATRIX_HEADER}>
         <div className={`${MATRIX_HEADER_TITLE_OFFSET} text-lg font-semibold tracking-tight text-ink`}>
           {queue.length > 0 ? `${queue.length} черновиков ждут одобрения` : "Что известно"}
@@ -149,7 +148,6 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
                 // красный свёрнут в серый: считаем серые = grey + (legacy) red
                 const fill = cellFill(cell.n_green || 0, (cell.n_grey || 0) + (cell.n_red || 0), maxRecords);
                 const selected = selectedSubsectionId === s.id;
-                const hasEvidence = !!(cell.n_must_client || cell.n_must_expert || cell.corroborated);
                 return (
                   <button
                     key={s.id}
@@ -161,26 +159,12 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
                         ? MATRIX_CELL_SELECTED
                         : MATRIX_CELL_IDLE}`}
                   >
-                    {/* evidence badges — must-have + 2+ sources, same system as knowledge map */}
-                    {hasEvidence ? (
-                      <EvidenceBadges
-                        mustClient={cell.n_must_client ?? 0}
-                        mustExpert={cell.n_must_expert ?? 0}
-                        corroborated={!!cell.corroborated}
-                        className="absolute right-[10px] bottom-3"
-                      />
-                    ) : null}
-
-                    <div className="flex items-start justify-between gap-2 min-w-0">
-                      <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-                        <span
-                          className={MATRIX_CELL_ID}
-                          style={{ color: fill.empty ? "#8B877C" : fill.fg }}
-                        >{s.id}</span>
+                    <div className="flex h-full min-w-0 flex-1 items-center pr-[64px]">
+                      <div className="min-w-0 flex-1">
                         <span
                           className={MATRIX_CELL_TITLE}
                           style={{ color: fill.empty ? "#8B877C" : fill.fg }}
-                        >{subsectionName}</span>
+                        >{keepShortRuWords(subsectionName)}</span>
                       </div>
 
                       {total > 0
@@ -190,7 +174,7 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
                             body={`Здесь собрано ${total} фактов. Нажмите, чтобы открыть правую панель с фактами этой позиции.`}
                           >
                             <span
-                              className={MATRIX_CELL_VALUE}
+                              className={`${MATRIX_CELL_VALUE} ${selected ? "!opacity-100" : ""}`}
                               style={{ color: fill.fg }}
                             >{total}</span>
                           </HintTarget>
@@ -200,7 +184,7 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
                             title={`${s.id}. ${subsectionName}`}
                             body="Здесь пока нет фактов. Нажмите, чтобы открыть позицию и посмотреть, что можно добавить."
                           >
-                            <span className={`${MATRIX_CELL_VALUE} text-ink/25`}>0</span>
+                            <span className={`${MATRIX_CELL_VALUE} text-ink/25 ${selected ? "!opacity-100" : ""}`}>0</span>
                           </HintTarget>
                         )}
                     </div>
@@ -212,6 +196,7 @@ export default function MatrixGrid({ clientId, selectedSubsectionId, onSelectCel
             );
           })()
         ))}
+      </div>
       </div>
     </div>
   );

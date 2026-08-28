@@ -84,3 +84,7 @@ export function subsectionNameRu(id?: string | null, fallback = ""): string {
   if (id && SUBSECTION_NAMES_RU[id]) return SUBSECTION_NAMES_RU[id];
   return fallback ? SUBSECTION_NAMES_BY_SOURCE[fallback] || fallback : "";
 }
+
+export function keepShortRuWords(text: string): string {
+  return text.replace(/(^|\s)([АаВвИиКкОоСсУу])\s+/g, "$1$2\u00A0");
+}

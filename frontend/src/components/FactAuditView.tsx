@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
+import { keepShortRuWords, layerNameRu, subsectionNameRu } from "../lib/matrixLabels";
 import { isEmptyCellRedundantWorkTitle } from "../lib/workItemDisplay";
 import { readLS, patchLS } from "../persist";
 import { RunProgress, useElapsed } from "./RunProgress";
@@ -10,7 +10,6 @@ import FlagDot from "./FlagDot";
 import {
   MATRIX_BODY,
   MATRIX_CELL,
-  MATRIX_CELL_ID,
   MATRIX_CELL_IDLE,
   MATRIX_CELL_SELECTED,
   MATRIX_CELL_TITLE,
@@ -60,13 +59,13 @@ const EMPTY_ATTENTION = { bg: "#ffffff", fg: "#8B877C" } as const;
 
 const ATTENTION_PALETTE = [
   { bg: "#ffffff", fg: "#8B877C" },
-  { bg: "#fff4dc", fg: "#7a520f" },
-  { bg: "#ffe6ae", fg: "#6e4408" },
-  { bg: "#ffd27a", fg: "#5d3304" },
-  { bg: "#f5b84e", fg: "#20221f" },
-  { bg: "#e59a2f", fg: "#20221f" },
-  { bg: "#cf7624", fg: "#ffffff" },
-  { bg: "#ad5522", fg: "#ffffff" },
+  { bg: "#fff8e7", fg: "#765615" },
+  { bg: "#fff0c9", fg: "#765615" },
+  { bg: "#ffe39f", fg: "#68480d" },
+  { bg: "#ffd676", fg: "#5b3b08" },
+  { bg: "#f7c653", fg: "#332816" },
+  { bg: "#ecb43d", fg: "#2b2417" },
+  { bg: "#dda02d", fg: "#20221f" },
 ] as const;
 
 function steppedFill(count: number, maxCount: number, palette: typeof ATTENTION_PALETTE) {
@@ -161,7 +160,7 @@ function ReviewMatrix({
               {layer.subsections.map(subsection => {
                 const subsectionName = subsectionNameRu(subsection.id, subsection.name);
                 const count = countFor(subsection.id);
-                const fill = emptyOnlyFor(subsection.id) ? EMPTY_ATTENTION : steppedFill(count, maxCount, palette);
+                const fill = emptyOnlyFor(subsection.id) ? palette[1] : steppedFill(count, maxCount, palette);
                 return (
                   <button
                     key={subsection.id}
@@ -172,11 +171,10 @@ function ReviewMatrix({
                         ? MATRIX_CELL_SELECTED
                         : MATRIX_CELL_IDLE}`}
                   >
-                    <div className="flex items-start justify-between gap-2 min-w-0">
-                      <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-                        <span className={MATRIX_CELL_ID} style={{ color: fill.fg }}>{subsection.id}</span>
+                    <div className="flex h-full min-w-0 flex-1 items-center pr-[64px]">
+                      <div className="min-w-0 flex-1">
                         <span className={MATRIX_CELL_TITLE} style={{ color: fill.fg }}>
-                          {subsectionName}
+                          {keepShortRuWords(subsectionName)}
                         </span>
                       </div>
                       <HintTarget
@@ -185,7 +183,7 @@ function ReviewMatrix({
                           ? `${count} элементов требуют внимания: карточки на ревью, пробелы или открытые задачи.`
                           : "В этой ячейке нет открытых вопросов проверки."}
                       >
-                        <span className={MATRIX_CELL_VALUE} style={{ color: fill.fg }}>
+                        <span className={`${MATRIX_CELL_VALUE} !opacity-100`} style={{ color: fill.fg }}>
                           {count}
                         </span>
                       </HintTarget>
@@ -407,7 +405,7 @@ export default function FactAuditView({ clientId, onJumpToCell, selectedSubsecti
 
   return (
     <div className={MATRIX_PAGE}>
-      <div className={`${MATRIX_PAGE_PADDING} h-full min-h-0 shrink-0 flex flex-col`}>
+      <div className={`${MATRIX_PAGE_PADDING} mx-auto h-full min-h-0 w-full max-w-[820px] shrink-0 flex flex-col`}>
         <div className={MATRIX_HEADER}>
           <div className={`${MATRIX_HEADER_TITLE_OFFSET} flex items-center gap-2`}>
             <HintTarget
