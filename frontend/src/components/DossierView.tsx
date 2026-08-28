@@ -180,13 +180,17 @@ export default function DossierView({ clientId }: { clientId: string }) {
               {gen.isPending ? "Собираю тексты…" : d.exec_summary ? "Пересобрать досье" : "Сгенерировать досье"}
             </button>
           </HintTarget>
-          {d.generated_at && (
-            d.staleness.new_facts > 0
-              ? <span className="text-[11px] text-amber-700" title={`собрано ${relTime(d.generated_at)}`}>
-                  устарело · +{d.staleness.new_facts} {plural(d.staleness.new_facts)} с тех пор
-                </span>
-              : <span className="text-[11px] text-ink-mute">актуально · собрано {relTime(d.generated_at)}</span>
-          )}
+          <div className="min-h-[16px] text-[11px] leading-4">
+            {d.generated_at ? (
+              d.staleness.new_facts > 0
+                ? <span className="text-amber-700" title={`собрано ${relTime(d.generated_at)}`}>
+                    устарело · +{d.staleness.new_facts} {plural(d.staleness.new_facts)} с тех пор
+                  </span>
+                : <span className="text-ink-mute">актуально · собрано {relTime(d.generated_at)}</span>
+            ) : (
+              <span className="invisible">статус досье</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -194,9 +198,9 @@ export default function DossierView({ clientId }: { clientId: string }) {
       <section className={PANEL}>
         <div className="text-base font-semibold">{d.client.name}</div>
         {(d.client.sector || d.client.one_liner) && (
-          <div className="text-[13px] text-ink-mute mb-3">{[d.client.sector, d.client.one_liner].filter(Boolean).join(" · ")}</div>
+          <div className="text-[13px] text-ink-mute">{[d.client.sector, d.client.one_liner].filter(Boolean).join(" · ")}</div>
         )}
-        <div className="grid grid-cols-4 gap-2.5">
+        <div className="mt-3 grid grid-cols-4 gap-2.5">
           <Metric
             label="Фактов"
             value={String(o.facts)}
