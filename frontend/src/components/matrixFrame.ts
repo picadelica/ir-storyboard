@@ -13,5 +13,5 @@ export const MATRIX_CELL = "group relative h-full min-h-0 overflow-hidden rounde
 export const MATRIX_CELL_SELECTED = "z-10 brightness-[0.94] hover:-translate-y-px";
 export const MATRIX_CELL_IDLE = "hover:z-10 hover:-translate-y-px hover:brightness-[0.96]";
 export const MATRIX_CELL_ID = "text-[9px] font-extrabold leading-none tabular-nums";
-export const MATRIX_CELL_TITLE = "block max-w-[210px] font-bold leading-tight text-[12.5px] [text-wrap:pretty] line-clamp-2";
+export const MATRIX_CELL_TITLE = "block max-w-[210px] font-bold leading-tight text-[12.5px] [text-wrap:pretty]";
 export const MATRIX_CELL_VALUE = "absolute right-4 top-1/2 -translate-y-1/2 block min-w-[58px] text-right text-[25px] font-extrabold leading-none tabular-nums select-none opacity-0 transition-opacity duration-[840ms] ease-out group-hover:duration-200 group-focus-visible:duration-200 group-hover:opacity-100 group-focus-visible:opacity-100";
