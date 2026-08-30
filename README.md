@@ -24,6 +24,7 @@
 | `NEXT.md` | оперативное состояние: что сделано только что, что открыто |
 | `DEPLOY.md` | деплой в production, доступы, бэкапы |
 | `docs/restore.md` | авария: восстановление из бэкапа (три сценария, где лежат копии) |
+| `docs/onboarding-dev.md` | подключение нового разработчика: доступы, ключи, деплой, правила |
 | `LLM_REPORT_INGEST_SPEC.md`, `YOUTUBE_INGEST_SPEC.md`, `POLISH_SPEC.md`, `CLAUDE_TASKS*.md` | заархивированные task-spec'ы (исторический контекст) |
 | `LLM_REPORT_PROMPT_TEMPLATES.md` | промпты для эксперта (ChatGPT / Claude / Perplexity / Gemini) |
 
