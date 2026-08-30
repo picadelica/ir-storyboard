@@ -51,8 +51,19 @@
 Проверено 2026-08-30 по репозиторию оркестратора: **проект заведён и покрыт.**
 
 - Строка в `deploy/backup/sqlite-targets.txt`:
-  `ir-storyboard-backend-1  matrix.db  ir-storyboard` — берётся и БД, и файлы
-  volume (`llm_reports`, `audio_uploads`, …) отдельным `tar czf`.
+  `ir-storyboard-backend-1  matrix.db  ir-storyboard`. Снимается два файла:
+  - `ir-storyboard-<ДАТА>-db.sqlite.gz` — online-снимок `matrix.db`
+    (`sqlite3.backup()` во временный `.snap.db`, затем `gzip`). Разжимается в
+    обычный, уже чекпойнченный файл БД: WAL/SHM рядом не нужны.
+  - `ir-storyboard-<ДАТА>-files.tar.gz` — `tar czf - -C /app/data .` по тому же
+    volume. **Исключены `matrix.db` (+`-wal`/`-shm`), `.snap.db` и `./backups`.**
+    Записи в архиве лежат относительно `/app/data`, поэтому распаковка —
+    `tar xzf … -C /app/data`.
+- **Что из этого следует и о чём легко забыть в аварии:** `./backups` исключён,
+  значит в ночной копии НЕТ ни `_full/`, ни пер-клиентских JSON. Восстановив
+  систему из ночной копии, вы получите данные, но не историю снапшотов — сценарий
+  B («откатить одного клиента») после такого восстановления работать не будет,
+  пока не накопятся новые.
 - В манифесте покрытия `deploy/backup/expected-projects.txt` проект помечен
   `active`. Это не декорация: `verify_coverage` в конце каждого прогона роняет
   бэкап, если копии за сегодня нет. То есть «бэкап тихо перестал сниматься»
@@ -63,13 +74,18 @@
   - **на тот же сервер** (bind-mount, переживает пересоздание контейнеров):
     `/opt/conductor-orchestrator/backups/ir-storyboard/ir-storyboard-<ДАТА>-{db.sqlite.gz,files.tar.gz}`,
     ротация 14 дней + воскресные копии в `weekly/` (8 недель);
-  - **офсайт — Яндекс.Диск** через `rclone`, `yandex:prod-backups/ir-storyboard`.
+  - **офсайт — Яндекс.Диск** через `rclone`, `yandex:prod-backups/ir-storyboard`
+    (оба файла, с той же структурой имён и подпапкой `weekly/`).
     **Включается наличием `secrets/rclone.conf` на сервере** — если его не
     заливали, в логе прогона будет `CLOUD: WARN … ПРОПУЩЕН`, и тогда ВСЕ копии
     системы живут на одной машине. Проверять глазами в логе последнего прогона
     (детали и инструкция по заливке — `docs/backup.md` оркестратора).
+    **Глубина облака — 14 дней**, `rclone` чистит по `--min-age 14d` и выносит
+    в том числе воскресные копии. То есть «локально 8 недель» на облако не
+    распространяется: старше двух недель наружу ничего нет.
   - вторичный ssh-офсайт на `72.56.107.117` — по умолчанию выключен
-    (`BACKUP_OFFSITE_FRA=1`), держится как резерв.
+    (`BACKUP_OFFSITE_FRA=1`), держится как резерв. Забирает **только БД**,
+    `-files.tar.gz` туда не едет.
 
 ### Чего в бэкапе НЕТ
 
@@ -90,7 +106,9 @@
 **Шаг 0. Снять текущее состояние — до всего остального.**
 
 ```bash
-ssh root@216.57.108.107
+# ключ именно этот: блока для 216.57.108.107 в ~/.ssh/config нет,
+# дефолтный id_ed25519 сервер НЕ принимает
+ssh -i ~/.ssh/kabanchik_assist root@216.57.108.107
 cd /opt/ir-storyboard
 docker exec ir-storyboard-backend-1 python3 -c "
 import sqlite3
@@ -103,11 +121,14 @@ with dst: src.backup(dst)
 **Шаг 1. Выбрать снапшот.**
 
 ```bash
-docker exec ir-storyboard-backend-1 ls -lt /app/data/backups/_full/   # автоматические
-ls -lt /opt/ir-storyboard/backups/                                    # снятые скриптом
+ls -lt /opt/conductor-orchestrator/backups/ir-storyboard/            # ночные, оркестратора
+docker exec ir-storyboard-backend-1 ls -lt /app/data/backups/_full/  # автоматические
+ls -lt /opt/ir-storyboard/backups/                                   # снятые скриптом
 ```
 
-Смотрите на дату: нужен последний снапшот, сделанный **до** порчи.
+Смотрите на дату: нужен последний снапшот, сделанный **до** порчи. Ночные —
+раз в сутки (04:00 UTC), автоматические `_full/` — перед каждой очисткой данных,
+поэтому при «неудачной массовой операции» ближайший к порче обычно именно там.
 
 **Шаг 2. Проверить, что в снапшоте то, что вы ждёте** — прежде чем им затирать
 рабочую базу:
@@ -127,23 +148,46 @@ for r in c.execute('SELECT c.client_id, COUNT(*) FROM facts f JOIN cells c ON c.
 
 **Шаг 3. Перезалить.**
 
+**Обычный путь — скрипт.** Он делает всё нижеперечисленное сам, включая
+домиграцию схемы шага 4:
+
+```bash
+cd /opt/ir-storyboard
+./scripts/restore.sh                 # без аргумента — покажет доступные копии
+./scripts/restore.sh /opt/conductor-orchestrator/backups/ir-storyboard/ir-storyboard-<ДАТА>-db.sqlite.gz
+```
+
+Дальше — то же самое руками, если скрипт почему-то неприменим.
+
+> **Не подставляйте volume руками через `-v storyboard-data:/data`.** Настоящее
+> имя тома — `ir-storyboard_storyboard-data` (compose добавляет префикс проекта),
+> и такая команда молча создаст НОВЫЙ пустой том: она отработает «успешно»,
+> напечатает «restored», а рабочая база останется прежней. Именно на этом
+> `scripts/restore.sh` был сломан до 2026-08-30. Ниже используется
+> `docker compose run backend`, которому нужный том подставляет сама конфигурация
+> сервиса (`storyboard-data:/app/data`).
+
+Снапшот лежит **внутри** volume (`/app/data/backups/_full/`) — тогда перекачка
+наружу не нужна:
+
 ```bash
 cd /opt/ir-storyboard
 docker compose stop backend                       # чтобы файл не был открыт
-docker exec ir-storyboard-backend-1 true 2>/dev/null || \
-  docker compose run --rm -T -v storyboard-data:/data backend \
-    sh -c "gunzip -c /dev/stdin > /data/matrix.db && chmod 644 /data/matrix.db" \
-    < /opt/ir-storyboard/backups/<файл>.db.gz
+docker compose run --rm backend \
+  sh -c "gunzip -c /app/data/backups/_full/<файл>.db.gz > /app/data/matrix.db && \
+         chmod 644 /app/data/matrix.db"
 docker compose start backend
 ```
 
-Если снапшот лежит **внутри** volume (`/app/data/backups/_full/`), проще без
-перекачки наружу:
+Снапшот лежит **снаружи** (копия оркестратора, облако, `./backups/` от скрипта) —
+подаём его на stdin, `-T` обязателен:
 
 ```bash
+cd /opt/ir-storyboard
 docker compose stop backend
-docker compose run --rm -T -v storyboard-data:/data backend \
-  sh -c "gunzip -c /data/backups/_full/<файл>.db.gz > /data/matrix.db && chmod 644 /data/matrix.db"
+docker compose run --rm -T backend \
+  sh -c "gunzip -c > /app/data/matrix.db && chmod 644 /app/data/matrix.db" \
+  < /opt/conductor-orchestrator/backups/ir-storyboard/ir-storyboard-<ДАТА>-db.sqlite.gz
 docker compose start backend
 ```
 
@@ -184,34 +228,38 @@ curl -fsS http://172.17.0.1:80/            # health, должен быть 200
 Для этого есть пер-клиентское восстановление — оно затрагивает только своего
 клиента и не откатывает работу коллег по другим компаниям.
 
+**Что при этом происходит — прочитать до нажатия.** `restore_client` сначала
+**вычищает текущие данные клиента** и только потом проигрывает снапшот, причём
+дополнительного бэкапа перед этим НЕ делает. Всё, что аналитики собрали по этому
+клиенту после снятия снапшота, будет потеряно. Если такая работа была — сначала
+снимите полный снапшот (шаг 0 сценария A). Само восстановление идёт в одной
+транзакции: ошибка посередине = полный откат, полупустого клиента не будет.
+
 **Обычный путь — в интерфейсе.** Компания → карандаш (редактирование) → блок
 `Danger zone` → список «Бэкапы» → «Восстановить» → «Точно?». Список показывается,
 только если бэкапы у клиента есть (их создаёт автоматика перед очисткой данных);
 рядом с каждым — дата и сколько в нём фактов и строк.
 
 **Если интерфейс недоступен** — то же самое изнутри контейнера. Ходить в `/api`
-curl'ом не выйдет: гейт требует сессионную куку (см. врезку ниже), логина/пароля
-у API нет.
+curl'ом не выйдет: гейт требует сессионную куку (см. врезку в сценарии A),
+логина/пароля у API нет.
 
 ```bash
-docker exec ir-storyboard-backend-1 python3 - <<'PY'
-from pathlib import Path
-from ir_storyboard import db, backup
-
-CLIENT = '<client_id>'
-BACKUPS = Path('/app/data/backups')
-
 # 1) что есть — сначала посмотреть, потом восстанавливать
-for b in backup.list_backups(CLIENT, BACKUPS):
+#    (docker exec -i обязателен: без него heredoc не доедет до python)
+docker exec -i ir-storyboard-backend-1 python3 - <<'PY'
+from pathlib import Path
+from ir_storyboard import backup
+
+for b in backup.list_backups('<client_id>', Path('/app/data/backups')):
     print(b['id'], b['created_at'], b['counts'])
 PY
 ```
 
-Выбрали `id` — восстанавливаем (`restore_client` работает в одной транзакции и
-сам коммитит; ошибка = полный откат):
+Выбрали `id` — восстанавливаем:
 
 ```bash
-docker exec ir-storyboard-backend-1 python3 - <<'PY'
+docker exec -i ir-storyboard-backend-1 python3 - <<'PY'
 from pathlib import Path
 from ir_storyboard import db, backup
 
@@ -219,15 +267,9 @@ CLIENT, BACKUP_ID = '<client_id>', '<id из списка выше>'
 conn = db.connect('/app/data/matrix.db'); db.init_schema(conn)
 snap = backup.read_backup(CLIENT, BACKUP_ID, Path('/app/data/backups'))
 assert snap, 'бэкап не найден'
-print(backup.restore_client(conn, CLIENT, snap))
+print(backup.restore_client(conn, CLIENT, snap))   # коммитит сам
 PY
 ```
-
-**Что при этом происходит — важно понимать до нажатия.** `restore_client` сначала
-**вычищает текущие данные клиента** и только потом проигрывает снапшот, причём
-дополнительного бэкапа перед этим НЕ делает. Всё, что аналитики собрали по этому
-клиенту после снятия снапшота, будет потеряно. Если такая работа была — сначала
-снимите полный снапшот (шаг 0 сценария A).
 
 Автоинкрементные id при восстановлении **не сохраняются**: строки вставляются
 заново, а внешние ключи (`cells.id` → `facts.cell_id`, `sources.id` →
@@ -291,13 +333,15 @@ cd /opt/ir-storyboard
 docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d --build
 docker compose stop backend
 
-# база
-gunzip -c ir-storyboard-<ДАТА>-db.sqlite.gz | docker compose run --rm -T \
-  -v storyboard-data:/data backend sh -c "cat > /data/matrix.db && chmod 644 /data/matrix.db"
+# база (том подставляет сам сервис backend — руками -v не задавать, см. врезку
+# в сценарии A: имя тома с префиксом проекта, а не голое storyboard-data)
+docker compose run --rm -T backend \
+  sh -c "gunzip -c > /app/data/matrix.db && chmod 644 /app/data/matrix.db" \
+  < ir-storyboard-<ДАТА>-db.sqlite.gz
 
 # файлы volume (аудио, загруженные отчёты) — распаковать поверх
-docker run --rm -v ir-storyboard_storyboard-data:/data -v "$PWD":/bk alpine \
-  sh -c 'cd /data && tar xzf /bk/ir-storyboard-<ДАТА>-files.tar.gz'
+docker compose run --rm -T backend \
+  sh -c "tar xzf - -C /app/data" < ir-storyboard-<ДАТА>-files.tar.gz
 
 docker compose start backend
 ```
@@ -349,10 +393,10 @@ Volume переживает `docker compose down` — уносит его тол
    или из облака) и развернуть её **локально**, не на проде:
    ```bash
    gunzip -c ir-storyboard-<ДАТА>-db.sqlite.gz > /tmp/restore-drill.db
-   .venv/bin/python -c "from ir_storyboard import db; db.init_schema(db.connect('/tmp/restore-drill.db'))"
    ./scripts/check_migration.sh /tmp/restore-drill.db
    ```
-   `check_migration.sh` прогоняет миграцию на копии и проверяет, что факты на месте.
+   `check_migration.sh` копирует базу ещё раз, прогоняет на копии `init_schema` и
+   проверяет, что факты Accumulator на месте, а `work_items` не потерялись.
    Учение именно с внешней копии, а не с `_full/` внутри volume: проверяем ту,
    которая переживёт потерю сервера.
 2. Посмотреть лог последнего ночного `backup_prod`: строка про облако должна быть
@@ -380,6 +424,13 @@ Volume переживает `docker compose down` — уносит его тол
   `Caddyfile` монтируется в контейнер прямо из рабочей копии
   (`./Caddyfile:/etc/caddy/Caddyfile:ro`), а деплой делает `reset --hard`, так что
   ручная правка на сервере не пережила бы ближайший деплой в любом случае.
+
+- **`scripts/restore.sh` был сломан** и починен тем же числом: он монтировал
+  `-v storyboard-data:/data`, то есть НЕ проектный том (`ir-storyboard_…`), а
+  новый пустой — заливал базу в пустоту, печатал «restored» и «Restore complete».
+  Молчаливый отказ в скрипте восстановления опаснее его отсутствия: в аварии на
+  него бы положились. Теперь пишет в `/app/data` через сам сервис, домигрирует
+  схему и подсказывает проверку. **На живой копии не прогонялся** — см. ниже.
 
 **Не проверено — нужен доступ на сервер:**
 
