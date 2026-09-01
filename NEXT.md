@@ -4,18 +4,43 @@
 
 ---
 
-**Последнее обновление:** 2026-08-30
-**Ветка:** `feat/v2` (всё запушено). **`main` подтянут к `feat/v2`** fast-forward'ом
-(`da55119..f560ced`): до этого на `main` висел единственный июньский коммит v1, из-за
-чего GitHub на главной странице репозитория рендерил README годичной давности. Теперь
-`main` = `feat/v2`; рабочей веткой остаётся `feat/v2`, деплой тянет её же.
-**Прод:** 216.57.108.107, развёрнут `863e425`, health 200 (проверено 2026-08-30).
-С 2026-08-04 прод не передеплоивали — правились только доки и `scripts/restore.sh`.
-Тесты (прогон 2026-08-30): `pytest -m "not network"` → **365 passed**, сетевой
-`test_youtube_e2e` deselected.
-**Паспорт в оркестраторе обновлён 2026-08-30**: docPercent 96 → 98, 8 вех закрыто /
-4 открыто, `stale` снят. Стадию (`staging`) не двигал — ship'а не было.
-Фронт: `rm -f frontend/*.tsbuildinfo && npm --prefix frontend run build` — чисто.
+**Последнее обновление:** 2026-09-01
+**Текущая рабочая ветка для дизайн-интеграции:** `codex/design-upstream-trial` в fork
+`github.com/picadelica/ir-storyboard`.
+**Назначение ветки:** подключить UX/design-fork как второй вариант интерфейса рядом с
+upstream-версией: `/studio/` — новый дизайн, `/classic/` — классический upstream UI.
+Оба фронта ходят в тот же `/api`; backend/data model не разводить без отдельного решения.
+
+**Что сделано по интеграции:**
+- На базе `upstream/main`/`upstream/feat/v2` cherry-pick'нуты UI/UX-коммиты дизайн-форка.
+- Добавлены два frontend entrypoint'а: `frontend/studio/index.html` и
+  `frontend/classic/index.html`.
+- Классический UI скопирован из upstream в `frontend/src-classic/`; новый UI остаётся в
+  `frontend/src/`.
+- `BrowserRouter` получил `basename` для `/studio` и `/classic`.
+- `frontend/nginx.conf` отдаёт `/studio/*` и `/classic/*` отдельными SPA fallback'ами;
+  `/` и старые `/clients/*` редиректятся в `/studio`.
+- Коммит `72c7c87 Add classic and studio frontend entrypoints` запушен в
+  `origin/codex/design-upstream-trial`.
+
+**Проверки 2026-09-01:**
+- `.venv/bin/python -m pytest tests/ -m "not network" -q` → **391 passed, 1 deselected**.
+- `npm --prefix frontend run build` → чисто; собираются `dist/studio/index.html` и
+  `dist/classic/index.html`.
+- Локально подняты frontend `http://127.0.0.1:5173/studio/` и backend `:8080`;
+  `/studio/`, `/classic/`, `/api/health` отвечают 200.
+- Вместо маленькой dev-БД подключена старая локальная копия:
+  `/Users/asdf/Documents/ir-storyboard/data/matrix.db` → скопирована в
+  `/private/tmp/ir-storyboard-upstream-trial/data/matrix.db`. Резерв прежней dev-БД:
+  `data/matrix.dev-before-real-copy.db`.
+
+**Что НЕ сделано / требует человека или доступов:**
+- SSH-ключи GitHub/оркестратора не генерировались и не записывались в аккаунты.
+- Глобальный `pre-push` hook и alias `git divergence` не ставились автоматически, чтобы не
+  менять глобальную git-конфигурацию пользователя без отдельного подтверждения.
+- `.env` с реальными `ANTHROPIC_API_KEY`/`TAVILY_API_KEY` не собран: секретов нет.
+- Туннель к оркестратору и паспорт проекта не проверялись: нет реквизитов.
+- В прод через Telegram не входили, deploy не запускали, production не трогали.
 
 ⚠️ **Доступ на прод:** ключ — `~/.ssh/kabanchik_assist` (в `~/.ssh/config` блока для
 216.57.108.107 нет, дефолтный `id_ed25519` сервер НЕ принимает). Гейт оркестратора
