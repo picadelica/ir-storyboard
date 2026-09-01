@@ -40,11 +40,11 @@ docker compose stop backend
 
 # Push the decompressed DB into the volume via a one-shot helper container.
 #
-# NB: НЕ добавлять сюда `-v storyboard-data:/data`. Настоящее имя тома —
-# <проект>_storyboard-data (compose добавляет префикс каталога), поэтому голое
-# `storyboard-data` создаёт НОВЫЙ пустой том: команда отрабатывает «успешно»,
-# печатает restored, а рабочая база остаётся нетронутой. Том сервису подставляет
-# сама конфигурация compose (storyboard-data:/app/data) — пишем прямо туда.
+# Пишем прямо в /app/data — том сервису подставляет сама конфигурация compose
+# (storyboard-data:/app/data). Раньше здесь было `-v storyboard-data:/data`; это
+# работало (Compose v2 разрешает короткое имя в том проекта, проверено 2026-09-01),
+# но монтировало один и тот же том дважды по двум путям и держалось на неочевидном
+# правиле разрешения имён. Явный путь надёжнее и читается однозначно.
 gunzip -c "$BACKUP" | docker compose run --rm -T backend \
   sh -c "cat > /app/data/matrix.db && chmod 644 /app/data/matrix.db && echo restored"
 
