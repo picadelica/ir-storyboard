@@ -6,7 +6,7 @@ import App from "./App";
 import AuthGuard from "./components/AuthGuard";
 import "./index.css";
 
-const basename = window.location.pathname.startsWith("/studio") ? "/studio" : undefined;
+const basename = window.location.pathname.startsWith("/classic") ? "/classic" : undefined;
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },

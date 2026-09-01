@@ -15,5 +15,8 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    rollupOptions: {
+      input: ["index.html", "studio/index.html", "classic/index.html"],
+    },
   },
 });

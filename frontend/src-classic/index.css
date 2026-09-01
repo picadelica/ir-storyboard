@@ -1,0 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fraunces:opsz,wght@9..144,450;9..144,550&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Indeterminate progress bar (YouTube/audio ingest status) — a segment that
+   sweeps left→right while a background job runs. */
+@keyframes ytslide {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(420%); }
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply text-ink antialiased;
+  background: #fdf8f8;
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Markdown rendering */
+.prose-md h1 { @apply text-2xl font-semibold mt-2 mb-3 text-ink; }
+.prose-md h2 { @apply text-lg font-semibold mt-5 mb-2 text-ink; }
+.prose-md h3 { @apply text-base font-semibold mt-4 mb-1 text-ink; }
+.prose-md h4 { @apply text-sm font-semibold mt-3 mb-1 text-ink; }
+.prose-md p  { @apply text-sm leading-6 mb-2; }
+.prose-md ul { @apply list-disc pl-5 text-sm leading-6 mb-2; }
+.prose-md ol { @apply list-decimal pl-5 text-sm leading-6 mb-2; }
+.prose-md li { @apply mb-1; }
+.prose-md table { @apply text-xs border-collapse mb-3; }
+.prose-md th { @apply border border-ink-line px-2 py-1 text-left bg-slate-100 font-medium; }
+.prose-md td { @apply border border-ink-line px-2 py-1 align-top; }
+.prose-md blockquote { @apply border-l-2 border-slate-300 pl-3 italic text-ink-mute my-2; }
+.prose-md code { @apply font-mono text-xs bg-slate-100 px-1 py-0.5 rounded; }
+.prose-md a { @apply text-blue-600 underline; }
