@@ -108,16 +108,38 @@ export interface SeedImportResult {
   track_count: number;
 }
 
-export interface SearchHit {
+/** Находка веб-поиска или разобранная ссылка аналитика.
+ *  NB: НЕ путать с `SearchHit` ниже — тот про поиск по уже сохранённым фактам.
+ *  Раньше оба назывались SearchHit и молча сливались декларативным слиянием
+ *  TypeScript: тип требовал поля обоих, и любой литерал перестал бы собираться. */
+export interface ResearchHit {
   title: string;
   url: string;
   snippet: string;
   suggested_channel: string;
+  /** Текст страницы, если его удалось достать (у находок поиска пусто). */
+  text?: string;
+  /** Чем достали текст: "tavily" | "http" | "" — показываем аналитику честно. */
+  via?: string;
+  known_source?: boolean;
+  known_facts?: number;
 }
 
 export interface ResearchResult {
-  hits: SearchHit[];
+  hits: ResearchHit[];
   queries_used: string[];
+}
+
+export interface ResearchUrlOut {
+  title: string;
+  url: string;
+  snippet: string;
+  suggested_channel: string;
+  text: string;
+  via: string;
+  is_youtube: boolean;
+  known_source: boolean;
+  known_facts: number;
 }
 
 export interface FactCandidateOut {

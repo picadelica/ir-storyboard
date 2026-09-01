@@ -156,6 +156,11 @@ def stub_generate(system: str, user: str, max_tokens: int = 1024,
     return ""
 
 
+def stub_extract_page(url: str) -> str:
+    """Stub — пусто; загрузчик страницы уходит в прямой HTTP-фоллбек."""
+    return ""
+
+
 def get_fallback_model() -> Optional[str]:
     """Return the configured fallback model name, or None if same as primary."""
     primary = os.environ.get("LLM_GENERATE_MODEL", "claude-haiku-4-5")
@@ -167,6 +172,7 @@ def get_fallback_model() -> Optional[str]:
 
 classify_fact: Callable[[str], FactCandidate] = stub_classify
 web_search: Callable[[str, int], List[SearchHit]] = stub_web_search
+extract_page: Callable[[str], str] = stub_extract_page
 summarize: Callable[[str, int], str] = stub_summarize
 generate: Callable[..., str] = stub_generate
 _client = None  # real anthropic.Anthropic set by _try_init_anthropic; read by PDF vision
@@ -338,7 +344,7 @@ def _try_init_anthropic() -> None:
 # ─────────────────── real Tavily implementation ─────────────────────────────
 
 def _try_init_tavily() -> None:
-    global web_search
+    global web_search, extract_page
 
     api_key = os.environ.get("TAVILY_API_KEY", "")
     if not api_key:
@@ -376,7 +382,21 @@ def _try_init_tavily() -> None:
             for item in result.get("results", [])
         ]
 
+    def _extract_real(url: str) -> str:
+        """Полный текст страницы через Tavily extract — чище прямого HTTP:
+        отбрасывает навигацию и обвязку, вытягивает основной материал."""
+        try:
+            result = _tavily.extract(urls=[url])
+        except Exception:
+            return ""
+        for item in (result or {}).get("results", []):
+            text = (item.get("raw_content") or "").strip()
+            if text:
+                return text
+        return ""
+
     web_search = _search_real
+    extract_page = _extract_real
 
 
 # ─────────────────── auto-init on import ────────────────────────────────────

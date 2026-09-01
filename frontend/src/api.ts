@@ -8,7 +8,7 @@ import type {
   ClientMethodologyCell, Layer, MethodologyCell, PortfolioRow, TonePreset,
   ReclassifyResult, UserOverview, SearchResult, FounderMatch, MentionedCompany, AdminActivityEntry,
   LLMIngestAuditRow, LLMIngestCommitOut, LLMIngestEdit, LLMIngestPreview,
-  PunchList, ResearchResult, Scorecard,
+  PunchList, ResearchResult, ResearchUrlOut, Scorecard,
   SeedImportResult, SynthesizeResult, Track, WorkItem, MatrixExport, Dossier,
   YouTubeCommitOut, YouTubeHistoryRow, YouTubeJobOut, YouTubePreviewResult,
   WatchlistItem, WatchlistKind, WatchlistSuggestion, MonitorCandidate, CheckResult,
@@ -215,6 +215,12 @@ export const api = {
     }),
   patchWorkItem: (wid: number, body: Partial<WorkItem>) =>
     call<WorkItem>(`/work-items/${wid}`, { method: "PATCH", body: JSON.stringify(body) }),
+  /** Разобрать ссылку, которую аналитик принёс сам (не из поиска). */
+  researchUrl: (clientId: string, url: string) =>
+    call<ResearchUrlOut>(`/clients/${clientId}/research/url`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
   researchQueries: (clientId: string) =>
     call<{ queries: string[] }>(`/clients/${clientId}/research/queries`, { method: "POST" }),
   research: (clientId: string, queries?: string[]) =>

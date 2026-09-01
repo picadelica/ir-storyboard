@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
-import type { FactCandidateOut, Flag, IngestPreviewOut, SearchHit } from "../types";
+import type { FactCandidateOut, Flag, IngestPreviewOut, ResearchHit } from "../types";
 
 interface Props { clientId: string }
 
@@ -113,7 +113,7 @@ function CandidateRow({ cand, checked, onToggle, flag, onFlag, subsectionId, onS
 // ── Source card + preview ────────────────────────────────────────────────────
 
 interface SourceCardProps {
-  hit: SearchHit;
+  hit: ResearchHit;
   clientId: string;
   onImported: () => void;
 }
@@ -122,8 +122,10 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
   const qc = useQueryClient();
   const nav = useNavigate();
   const [preview, setPreview] = useState<IngestPreviewOut | null>(null);
-  const [customText, setCustomText] = useState("");
-  const [showPaste, setShowPaste] = useState(false);
+  // Текст, доставшийся при разборе ссылки, — стартовое содержимое: аналитик
+  // видит, что именно уйдёт в классификацию, и может поправить до вызова модели.
+  const [customText, setCustomText] = useState(hit.text || "");
+  const [showPaste, setShowPaste] = useState(Boolean(hit.text));
   const [channel, setChannel] = useState<Channel>(hit.suggested_channel as Channel || "online_research");
 
   const directYouTubeUrl = isYouTubeUrl(hit.url) ? hit.url : null;
@@ -233,6 +235,27 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
           <ChannelBadge ch={channel} />
         </div>
         <p className="text-xs text-ink-mute leading-snug line-clamp-3">{hit.snippet}</p>
+
+        {hit.known_source && (
+          <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            Эту ссылку уже разбирали: в матрице {hit.known_facts ?? 0} факт(ов) из неё.
+            Повторный разбор не создаст дублей — одинаковые факты отсеются, — но,
+            возможно, вы искали другой материал.
+          </div>
+        )}
+        {hit.via === "" && hit.text === "" && !isYouTubeUrl(hit.url) && (
+          <div className="text-[11px] text-ink-mute bg-slate-50 border border-ink-line rounded px-2 py-1">
+            Текст страницы забрать не удалось (защита от ботов, JS-рендер или платный
+            доступ). Открой ссылку, скопируй материал и вставь его ниже.
+          </div>
+        )}
+        {hit.via && (
+          <div className="text-[11px] text-ink-mute">
+            Текст со страницы получен{hit.via === "tavily" ? " через Tavily" : " прямым запросом"}
+            {customText ? ` — ${customText.length.toLocaleString("ru")} символов` : ""}.
+            Проверь перед классификацией.
+          </div>
+        )}
       </div>
 
       {/* YouTube redirect banner */}
@@ -350,10 +373,29 @@ function SourceCard({ hit, clientId, onImported }: SourceCardProps) {
 // ── Main view ────────────────────────────────────────────────────────────────
 
 export default function ResearchView({ clientId }: Props) {
-  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [hits, setHits] = useState<ResearchHit[]>([]);
   const [draft, setDraft] = useState("");          // editable queries, one per line
   const [generated, setGenerated] = useState(false);
   const [, setImportedCount] = useState(0);
+
+  const [urlDraft, setUrlDraft] = useState("");
+
+  // Разбор своей ссылки: тот же путь, что и у находки поиска, — карточка
+  // добавляется в тот же список, дальше всё как обычно.
+  const urlMut = useMutation({
+    mutationFn: () => api.researchUrl(clientId, urlDraft.trim()),
+    onSuccess: (res) => {
+      setHits(prev => [
+        {
+          title: res.title, url: res.url, snippet: res.snippet,
+          suggested_channel: res.suggested_channel, text: res.text, via: res.via,
+          known_source: res.known_source, known_facts: res.known_facts,
+        },
+        ...prev.filter(h => h.url !== res.url),
+      ]);
+      setUrlDraft("");
+    },
+  });
 
   const genMut = useMutation({
     mutationFn: () => api.researchQueries(clientId),
@@ -373,7 +415,8 @@ export default function ResearchView({ clientId }: Props) {
         <div>
           <h2 className="text-lg font-semibold">Research</h2>
           <p className="text-xs text-ink-mute mt-0.5">
-            Подобрать запросы → проверить и поправить → искать → выбрать факты → импортировать в матрицу
+            Два входа: своя ссылка — сразу в разбор; или подобрать запросы → поправить →
+            искать. Дальше одинаково: выбрать факты → импортировать в матрицу.
           </p>
         </div>
         {!generated && (
@@ -384,6 +427,37 @@ export default function ResearchView({ clientId }: Props) {
           >
             {genMut.isPending ? "Подбираю…" : "Подобрать запросы"}
           </button>
+        )}
+      </div>
+
+      {/* Своя ссылка — вход, не требующий поиска: аналитик уже знает материал */}
+      <div className="bg-white rounded-lg border border-ink-line p-4 space-y-2">
+        <h3 className="text-sm font-semibold">Разобрать свою ссылку</h3>
+        <p className="text-[11px] text-ink-mute">
+          Материал уже нашли сами — статья, интервью, пост. Вставь ссылку: заберём
+          текст страницы и разберём его так же, как находку поиска.
+          YouTube уводим в свой ингест — там расшифровка и таймкоды.
+        </p>
+        <div className="flex gap-2">
+          <input
+            value={urlDraft}
+            onChange={e => setUrlDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && urlDraft.trim()) urlMut.mutate(); }}
+            placeholder="https://…"
+            className="flex-1 text-sm font-mono border border-ink-line rounded px-2.5 py-2"
+          />
+          <button
+            onClick={() => urlMut.mutate()}
+            disabled={urlMut.isPending || !urlDraft.trim()}
+            className="px-4 py-2 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap"
+          >
+            {urlMut.isPending ? "Забираем…" : "Разобрать →"}
+          </button>
+        </div>
+        {urlMut.isError && (
+          <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+            {urlMut.error instanceof Error ? urlMut.error.message : "Не удалось разобрать ссылку."}
+          </div>
         )}
       </div>
 

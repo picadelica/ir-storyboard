@@ -2300,6 +2300,96 @@ def research_client(client_id: str, body: Optional[ResearchRunIn] = None, conn=D
     return ResearchResult(hits=hits, queries_used=[q for q, _ in queries])
 
 
+class ResearchUrlIn(BaseModel):
+    url: str
+
+
+class ResearchUrlOut(BaseModel):
+    title: str
+    url: str
+    snippet: str
+    suggested_channel: str
+    text: str
+    via: str                 # "tavily" | "http" | "" — чем достали текст
+    is_youtube: bool = False
+    known_source: bool = False
+    known_facts: int = 0
+
+
+@app.post("/api/clients/{client_id}/research/url", response_model=ResearchUrlOut)
+def research_url(client_id: str, body: ResearchUrlIn, conn=Depends(get_conn)):
+    """Разобрать ссылку, которую аналитик принёс сам, а не нашёл поиском.
+
+    Возвращает то же, что и находка поиска, плюс текст страницы — дальше идёт
+    обычный путь `/ingest/preview` → `/ingest/confirm` тем же каналом. Новых
+    каналов и новой ветки записи здесь нет (инвариант 3).
+
+    Три случая, которые надо различать до вызова LLM:
+      • YouTube — у него свой пайплайн с расшифровкой и таймкодами; сюда не тянем,
+        отдаём флаг, фронт уводит на YouTube-ингест;
+      • ссылку уже разбирали — говорим об этом до траты вызова модели;
+      • текст не достался — не ошибка: аналитик вставит его руками.
+    """
+    from ir_storyboard.ingest.loaders.web_page import UnsafeUrl, fetch_page
+    from ir_storyboard.ingest.loaders.youtube_url import normalize_url as yt_normalize
+    from ir_storyboard.watchlist import norm_candidate_url
+
+    _check_client(client_id, conn)
+
+    raw = (body.url or "").strip()
+    if not raw:
+        raise HTTPException(422, "Пустая ссылка")
+    norm = norm_candidate_url(raw)
+    if not norm:
+        raise HTTPException(422, "Не похоже на ссылку")
+
+    # ── уже разбирали? sources хранит URL как дали, поэтому сверяем нормализованные
+    known_source, known_facts = False, 0
+    src_ids = [
+        r["id"] for r in conn.execute("SELECT id, url FROM sources WHERE url IS NOT NULL AND url <> ''")
+        if norm_candidate_url(r["url"]) == norm
+    ]
+    if src_ids:
+        known_source = True
+        placeholders = ",".join("?" for _ in src_ids)
+        known_facts = conn.execute(
+            f"""SELECT COUNT(*) FROM facts f
+                 JOIN cells c ON c.id = f.cell_id
+                WHERE c.client_id = ? AND f.source_id IN ({placeholders})""",
+            (client_id, *src_ids),
+        ).fetchone()[0]
+
+    # ── YouTube уходит своим пайплайном (расшифровка + таймкоды), страницу не тянем
+    try:
+        yt_normalize(raw)
+        is_youtube = True
+    except Exception:
+        is_youtube = False
+    if is_youtube:
+        return ResearchUrlOut(
+            title=raw, url=norm, snippet="", suggested_channel="online_interview",
+            text="", via="", is_youtube=True,
+            known_source=known_source, known_facts=known_facts,
+        )
+
+    try:
+        page = fetch_page(raw)
+    except UnsafeUrl as e:
+        raise HTTPException(422, str(e))
+
+    return ResearchUrlOut(
+        title=page.title,
+        url=page.url,
+        snippet=page.text[:400],
+        suggested_channel=_guess_channel(page.url),
+        text=page.text,
+        via=page.via,
+        is_youtube=False,
+        known_source=known_source,
+        known_facts=known_facts,
+    )
+
+
 @app.post("/api/clients/{client_id}/ingest/preview", response_model=ResearchPreviewOut)
 def research_ingest_preview(client_id: str, body: IngestPreviewIn, conn=Depends(get_conn)):
     """Atomic-fact extraction from a single Research source (article, transcript, etc).
